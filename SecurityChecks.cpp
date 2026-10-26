@@ -2,6 +2,7 @@
 #include "SecurityChecks.h"
 
 #include "AppPaths.h"
+#include "AuditRules.h"
 #include "CheckCatalog.h"
 #include "RegUtil.h"
 #include "ServiceUtil.h"
@@ -228,9 +229,23 @@ SecurityCheckResult CheckCredentialGuard()
         CloseHandle(snap);
     }
 
-    if (running || lsaIso) {
+    // When Device Guard answers, it decides: LsaIso.exe also runs for other
+    // virtualization-based features (seen on Windows 11 Home with memory integrity
+    // on), so on its own it is only a fallback for PCs where WMI cannot be asked.
+    std::wstring edition = RegReadString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", L"EditionID");
+    EditionSupport support = CredentialGuardEditionSupport(edition);
+    DebugLog(L"Credential Guard: WMI " + std::wstring(wmiKnows ? L"answered" : L"unavailable") + L", running " +
+             (running ? L"yes" : L"no") + L", LsaIso " + (lsaIso ? L"yes" : L"no") + L", edition " + edition);
+
+    if (running || (!wmiKnows && lsaIso)) {
         result.status = CHECK_PASS;
-        result.detail = L"Credential Guard is running" + std::wstring(lsaIso ? L" (LsaIso.exe present)." : L".");
+        result.detail = L"Credential Guard is running" +
+            std::wstring(running ? L" (Device Guard reports it)." : L" (LsaIso.exe present).");
+    }
+    else if (support == EditionSupport::NotSupported) {
+        result.status = CHECK_NA;
+        result.detail = L"This Windows edition (" + edition + L") cannot run Credential Guard; it needs Enterprise, Education "
+            L"or Pro Education. Nothing to change here.";
     }
     else {
         result.status = CHECK_WARNING;
@@ -239,6 +254,7 @@ SecurityCheckResult CheckCredentialGuard()
             const wchar_t* vbs = vbsStatus == L"2" ? L"running" : vbsStatus == L"1" ? L"enabled but not running" : L"off";
             result.detail += std::wstring(L" Virtualization-based security is ") + vbs + L".";
         }
+        if (!edition.empty()) result.detail += L" Windows edition: " + edition + L".";
     }
     return result;
 }
@@ -374,20 +390,20 @@ SecurityCheckResult CheckProxyAutoDetect()
     bool servicePolicy = RegReadDword(HKEY_LOCAL_MACHINE,
         L"SYSTEM\\CurrentControlSet\\Services\\WinHttpAutoProxySvc", L"Start", policyOff) && policyOff == 4;
 
-    if (!known) {
-        result.status = CHECK_PASS;
-        result.detail = L"No saved connection settings; automatic proxy detection has never been configured for this user.";
+    bool saved = known && settings.size() > 8;
+    result.status = WpadStatus(saved, autoDetect, servicePolicy);
+    if (!saved) {
+        result.detail = L"This user has no saved connection settings, so Windows uses its default: automatically detect "
+            L"settings is on.";
+        if (servicePolicy) result.detail += L" The WinHTTP auto-proxy service is disabled.";
     }
     else if (autoDetect && !servicePolicy) {
-        result.status = CHECK_FAIL;
         result.detail = L"Automatically detect settings is on for this user.";
     }
-    else if (autoDetect && servicePolicy) {
-        result.status = CHECK_WARNING;
+    else if (autoDetect) {
         result.detail = L"Automatically detect settings is on, but the WinHTTP auto-proxy service is disabled.";
     }
     else {
-        result.status = CHECK_PASS;
         result.detail = L"Automatic proxy detection is off.";
     }
     DebugLog(L"WPAD: " + result.status);

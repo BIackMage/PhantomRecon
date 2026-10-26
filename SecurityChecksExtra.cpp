@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "SecurityCheckModules.h"
 
+#include "AuditRules.h"
 #include "RegUtil.h"
 #include "ServiceUtil.h"
 #include "TextUtils.h"
@@ -8,10 +9,12 @@
 
 #include <windows.h>
 #include <netfw.h>
+#include <winevt.h>
 #include <sstream>
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "oleaut32.lib")
+#pragma comment(lib, "wevtapi.lib")
 
 static void DebugLog(const std::wstring& msg)
 {
@@ -201,16 +204,42 @@ SecurityCheckResult CheckWindowsFirewall()
     if (viaCom) details << L"Total rules: " << totalRules << L"\n";
     else details << L"(" << error << L"; read from the registry, rule counts not available)\n";
 
-    if (anyOff) {
-        result.status = CHECK_FAIL;
+    // A third-party firewall registers with Security Center and Windows then turns
+    // its own profiles off on purpose. That is not a missing firewall.
+    std::vector<std::wstring> others;
+    bool thirdPartyOn = false;
+    if (anyOff || anyAllowInbound) {
+        WmiResult fw = WmiQuery(L"ROOT\\SecurityCenter2", L"SELECT displayName, productState FROM FirewallProduct",
+            { L"displayName", L"productState" });
+        for (const WmiRow& row : fw.rows) {
+            auto name = row.find(L"displayName");
+            if (name == row.end() || name->second.empty()) continue;
+            if (ContainsI(name->second, L"Windows Firewall") || ContainsI(name->second, L"Windows Defender Firewall") ||
+                ContainsI(name->second, L"Microsoft Defender Firewall")) {
+                continue;
+            }
+            auto st = row.find(L"productState");
+            unsigned long state = st != row.end() ? std::wcstoul(st->second.c_str(), nullptr, 10) : 0;
+            bool on = SecurityCenterProductOn(state);
+            if (on) thirdPartyOn = true;
+            others.push_back(name->second + (on ? L" (on)" : L" (off)"));
+        }
+        if (!others.empty()) details << L"Firewall products registered with Security Center: " << JoinW(others, L", ") << L"\n";
+        else if (!fw.ok) details << L"Security Center could not be asked about other firewalls (" << fw.error << L")\n";
+    }
+
+    result.status = FirewallStatus(anyOff, anyAllowInbound, thirdPartyOn);
+    if (result.status == CHECK_NA) {
+        result.detail = L"Another firewall product is in charge, so Windows Firewall is not judged. Check that product's "
+            L"settings: it should be on and block unsolicited inbound connections.\n" + details.str();
+    }
+    else if (anyOff) {
         result.detail = L"At least one firewall profile is off.\n" + details.str();
     }
     else if (anyAllowInbound) {
-        result.status = CHECK_FAIL;
         result.detail = L"A firewall profile allows inbound connections by default.\n" + details.str();
     }
     else {
-        result.status = CHECK_PASS;
         result.detail = L"All three firewall profiles are on and block inbound by default.\n" + details.str();
     }
     DebugLog(L"Firewall: " + result.status);
@@ -220,6 +249,26 @@ SecurityCheckResult CheckWindowsFirewall()
 // ---------------------------------------------------------------------------
 // Event log size and channels
 // ---------------------------------------------------------------------------
+
+// The channel's configured maximum size in bytes, as wevtutil gl shows it. Works
+// without administrator rights, unlike the Services\EventLog\Security key.
+static bool ReadChannelMaxSize(const wchar_t* channel, unsigned long long& bytes)
+{
+    EVT_HANDLE config = EvtOpenChannelConfig(NULL, channel, 0);
+    if (!config) {
+        DebugLog(std::wstring(L"EvtOpenChannelConfig(") + channel + L") failed: " + std::to_wstring(GetLastError()));
+        return false;
+    }
+    EVT_VARIANT value = {};
+    DWORD used = 0;
+    bool ok = EvtGetChannelConfigProperty(config, EvtChannelLoggingConfigMaxSize, 0, sizeof(value), &value, &used) &&
+              value.Type == EvtVarTypeUInt64;
+    if (ok) bytes = value.UInt64Val;
+    else DebugLog(std::wstring(L"EvtGetChannelConfigProperty(") + channel + L", MaxSize) failed: " + std::to_wstring(GetLastError()));
+    EvtClose(config);
+    return ok;
+}
+
 SecurityCheckResult CheckEventLogSettings()
 {
     SecurityCheckResult result = MakeCheckResult(L"audit.policy");
@@ -231,10 +280,18 @@ SecurityCheckResult CheckEventLogSettings()
         L"SCENoApplyLegacyAuditPolicy", noLegacy) && noLegacy == 1;
     details << L"Advanced audit policy forced: " << (advanced ? L"Yes" : L"No (legacy categories can override it)") << L"\n";
 
-    DWORD maxSize = 0;
-    if (RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\EventLog\\Security", L"MaxSize", maxSize)) {
-        DWORD mb = maxSize / (1024 * 1024);
-        details << L"Security log maximum size: " << mb << L" MB";
+    // Group Policy wins; then the log's own setting, which the event log API gives to
+    // every user; the legacy registry key (administrators only) is the last resort.
+    LogSizeFacts sizeFacts;
+    sizeFacts.policyKb.set = RegReadDword(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\EventLog\\Security",
+        L"MaxSize", sizeFacts.policyKb.value);
+    sizeFacts.channelKnown = ReadChannelMaxSize(L"Security", sizeFacts.channelBytes);
+    sizeFacts.legacyBytes.set = RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\EventLog\\Security",
+        L"MaxSize", sizeFacts.legacyBytes.value);
+    LogSize logSize = EffectiveSecurityLogSize(sizeFacts);
+    if (logSize.known) {
+        unsigned long long mb = logSize.bytes / (1024ull * 1024ull);
+        details << L"Security log maximum size: " << mb << L" MB (from " << logSize.source << L")";
         if (mb < 192) {
             gap = true;
             details << L" (recommended 192 MB or more)";
@@ -242,8 +299,7 @@ SecurityCheckResult CheckEventLogSettings()
         details << L"\n";
     }
     else {
-        details << L"Security log maximum size: default (20 MB)\n";
-        gap = true;
+        details << L"Security log maximum size: could not be read (run as administrator to check it)\n";
     }
 
     DWORD crash = 0;

@@ -43,9 +43,6 @@ int CommandLineSuspicion(const std::wstring& commandLine, std::wstring* reason)
 
     struct Rule { const wchar_t* needle; const wchar_t* why; int strength; };
     static const Rule rules[] = {
-        { L" -encodedcommand ", L"encoded PowerShell command", 2 },
-        { L" -enc ",            L"encoded PowerShell command", 2 },
-        { L" -ec ",             L"encoded PowerShell command", 2 },
         { L"frombase64string",  L"decodes base64 at run time", 2 },
         { L"downloadstring(",   L"downloads and runs code", 2 },
         { L"downloadfile(",     L"downloads a file", 2 },
@@ -77,6 +74,64 @@ int CommandLineSuspicion(const std::wstring& commandLine, std::wstring* reason)
         if (r.strength > best && flat.find(r.needle) != std::wstring::npos) {
             best = r.strength;
             if (reason) *reason = r.why;
+        }
+    }
+
+    // Encoded PowerShell. PowerShell accepts any unambiguous start of a parameter
+    // name, with "-", "/" or a typographic dash in front: -e, -en, -enc, -enco ...
+    // -encodedcommand, plus the alias -ec. The long forms always count. The short
+    // ones (-e, -en, -ec) also mean other things in other programs (node -e,
+    // xcopy /e), so they count only on a PowerShell command line or when the next
+    // word is base64 text.
+    if (best < 2) {
+        const bool powershell = flat.find(L"powershell") != std::wstring::npos || flat.find(L"pwsh") != std::wstring::npos;
+        auto isDash = [](wchar_t ch) {
+            return ch == L'-' || ch == L'/' || ch == L'\x2013' || ch == L'\x2014' || ch == L'\x2015';
+        };
+        auto looksBase64 = [](const std::wstring& s) {
+            if (s.size() < 8) return false;
+            for (wchar_t ch : s) {
+                bool ok = (ch >= L'a' && ch <= L'z') || (ch >= L'0' && ch <= L'9') || ch == L'+' || ch == L'/' || ch == L'=';
+                if (!ok) return false;
+            }
+            return true;
+        };
+        static const std::wstring encoded = L"encodedcommand";
+        std::vector<std::wstring> words = SplitAnyW(flat, L" \t\r\n");
+        // On a PowerShell command line only PowerShell's own options count: start after
+        // the powershell / pwsh word and stop at -Command or -File, where the script
+        // text (with its own -e style options) begins.
+        size_t from = 0;
+        if (powershell) {
+            for (size_t i = 0; i < words.size(); ++i) {
+                if (words[i].find(L"powershell") != std::wstring::npos || words[i].find(L"pwsh") != std::wstring::npos) {
+                    from = i + 1;
+                    break;
+                }
+            }
+        }
+        auto startsName = [](const std::wstring& full, const std::wstring& part) {
+            return !part.empty() && part.size() <= full.size() && full.compare(0, part.size(), part) == 0;
+        };
+        for (size_t i = from; i < words.size(); ++i) {
+            const std::wstring& word = words[i];
+            size_t start = 0;
+            while (start < word.size() && start < 2 && isDash(word[start])) ++start;
+            if (start == 0 || start >= word.size()) continue;
+            std::wstring name = word.substr(start);
+            size_t colon = name.find(L':');
+            if (colon != std::wstring::npos) name = name.substr(0, colon);
+            if (name.empty()) continue;
+            if (powershell && (startsName(L"command", name) || startsName(L"file", name))) break;
+            bool isEncodedFlag = name == L"ec" || startsName(encoded, name);
+            if (!isEncodedFlag) continue;
+            bool longForm = name == L"enc" || name == encoded;
+            bool nextIsBase64 = i + 1 < words.size() && looksBase64(words[i + 1]);
+            if (longForm || powershell || nextIsBase64) {
+                best = 2;
+                if (reason) *reason = L"encoded PowerShell command";
+                break;
+            }
         }
     }
     return best;
@@ -236,12 +291,18 @@ const std::vector<SoftwareRule>& GetBuiltInSoftwareRules()
 {
     // Reviewed October 2026. Each minimum version fixes a widely publicised,
     // actively exploited or easily exploitable flaw. Empty minimum = end of life.
-    static const std::vector<SoftwareRule> rules = {
+    // A name with '*' is a whole-name pattern (see FindOutdatedSoftware).
+    static const std::vector<SoftwareRule> rules = [] {
+        std::vector<SoftwareRule> r = {
         { L"7-Zip",                     L"24.09",  L"CVE-2025-0411: Mark of the Web is not passed to extracted files" },
         { L"WinRAR",                    L"7.13",   L"CVE-2025-8088: path traversal exploited in the wild" },
         { L"PuTTY",                     L"0.81",   L"CVE-2024-31497: NIST P-521 private keys can be recovered" },
         { L"WinSCP",                    L"6.3.3",  L"Bundles PuTTY code affected by CVE-2024-31497" },
-        { L"FileZilla",                 L"3.67.0", L"Bundles PuTTY code affected by CVE-2024-31497" },
+        // The FileZilla client and Pro bundle PuTTY code; FileZilla Server is a different
+        // product with its own 1.x versions and must not match.
+        { L"FileZilla Client",          L"3.67.0", L"Bundles PuTTY code affected by CVE-2024-31497" },
+        { L"FileZilla Pro",             L"3.67.0", L"Bundles PuTTY code affected by CVE-2024-31497" },
+        { L"FileZilla 3*",              L"3.67.0", L"Bundles PuTTY code affected by CVE-2024-31497" },
         { L"Notepad++",                 L"8.8.2",  L"CVE-2025-49144: installer privilege escalation" },
         { L"VLC media player",          L"3.0.21", L"Memory-safety fixes for crafted media files" },
         { L"Adobe Flash Player",        L"",       L"End of life since December 2020; no fixes at all" },
@@ -256,11 +317,28 @@ const std::vector<SoftwareRule>& GetBuiltInSoftwareRules()
         { L"Java 7",                    L"",       L"Java 7 is end of life" },
         { L"Java(TM) 6",                L"",       L"Java 6 is end of life" },
         { L"Java(TM) 7",                L"",       L"Java 7 is end of life" },
-        { L"Microsoft Office 2010",     L"",       L"Office 2010 is end of life since October 2020" },
-        { L"Microsoft Office 2013",     L"",       L"Office 2013 is end of life since April 2023" },
-        { L"Microsoft Office 2016",     L"",       L"Office 2016 support ended October 2025" },
-        { L"Microsoft Office 2019",     L"",       L"Office 2019 support ended October 2025" },
-    };
+        };
+        // Office suites register as "Microsoft Office <edition> <year>" ("Microsoft Office
+        // Professional Plus 2016", "Microsoft Office Home and Student 2019 - en-us").
+        // Matching the edition keeps out the many parts each suite also registers
+        // ("Microsoft Office Proofing Tools 2016 - English", "... MUI (English) 2016").
+        struct OfficeYear { const wchar_t* year; const wchar_t* reason; };
+        static const OfficeYear years[] = {
+            { L"2010", L"Office 2010 is end of life since October 2020" },
+            { L"2013", L"Office 2013 is end of life since April 2023" },
+            { L"2016", L"Office 2016 support ended October 2025" },
+            { L"2019", L"Office 2019 support ended October 2025" },
+        };
+        static const wchar_t* const editions[] = {
+            L"Professional*", L"Standard", L"Home and *", L"Small Business*", L"Starter", L"Enterprise", L"Ultimate",
+        };
+        for (const OfficeYear& y : years) {
+            for (const wchar_t* edition : editions) {
+                r.push_back({ std::wstring(L"Microsoft Office ") + edition + L" " + y.year + L"*", L"", y.reason });
+            }
+        }
+        return r;
+    }();
     return rules;
 }
 
@@ -286,10 +364,40 @@ std::vector<SoftwareRule> ParseSoftwareRules(const std::wstring& text)
 std::vector<SoftwareFinding> FindOutdatedSoftware(const std::vector<InstalledProgram>& programs,
                                                   const std::vector<SoftwareRule>& rules)
 {
+    // A rule name with '*' must match the whole display name, '*' standing for any
+    // run of characters ("Microsoft Office Professional* 2016*"). Without '*' it is
+    // a prefix, as before. Both ignore case.
+    auto wildcardMatch = [](const std::wstring& textIn, const std::wstring& patternIn) {
+        std::wstring text = ToLowerW(textIn);
+        std::wstring pattern = ToLowerW(patternIn);
+        size_t t = 0, p = 0;
+        size_t starP = std::wstring::npos, starT = 0;
+        while (t < text.size()) {
+            if (p < pattern.size() && pattern[p] == L'*') {
+                starP = p++;
+                starT = t;
+            }
+            else if (p < pattern.size() && pattern[p] == text[t]) {
+                ++p;
+                ++t;
+            }
+            else if (starP != std::wstring::npos) {
+                p = starP + 1;
+                t = ++starT;
+            }
+            else {
+                return false;
+            }
+        }
+        while (p < pattern.size() && pattern[p] == L'*') ++p;
+        return p == pattern.size();
+    };
+
     std::vector<SoftwareFinding> findings;
     for (const InstalledProgram& p : programs) {
         for (const SoftwareRule& r : rules) {
-            if (!StartsWithI(p.displayName, r.namePrefix)) continue;
+            bool pattern = r.namePrefix.find(L'*') != std::wstring::npos;
+            if (pattern ? !wildcardMatch(p.displayName, r.namePrefix) : !StartsWithI(p.displayName, r.namePrefix)) continue;
             bool flagged = false;
             if (r.minimumVersion.empty()) {
                 flagged = true;
@@ -298,8 +406,11 @@ std::vector<SoftwareFinding> FindOutdatedSoftware(const std::vector<InstalledPro
                 flagged = CompareVersions(p.displayVersion, r.minimumVersion) < 0;
             }
             else {
-                // Some installers put the version in the name ("7-Zip 23.01 (x64)")
-                std::wstring tail = p.displayName.substr(r.namePrefix.size());
+                // Some installers put the version in the name ("7-Zip 23.01 (x64)").
+                // For a pattern, read from the end of its text before the first '*'.
+                size_t literal = pattern ? r.namePrefix.find(L'*') : r.namePrefix.size();
+                while (pattern && literal > 0 && iswdigit(r.namePrefix[literal - 1])) --literal;   // "FileZilla 3*": keep the 3
+                std::wstring tail = p.displayName.substr(literal < p.displayName.size() ? literal : p.displayName.size());
                 std::wstring digits;
                 for (wchar_t c : tail) {
                     if (iswdigit(c) || c == L'.') digits += c;

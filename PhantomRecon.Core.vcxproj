@@ -55,6 +55,7 @@
   <ItemGroup>
     <ClInclude Include="AppPaths.h" />
     <ClInclude Include="AttackMapping.h" />
+    <ClInclude Include="AuditRules.h" />
     <ClInclude Include="BackgroundWorker.h" />
     <ClInclude Include="Baseline.h" />
     <ClInclude Include="CheckCatalog.h" />
@@ -102,6 +103,7 @@
   <ItemGroup>
     <ClCompile Include="AppPaths.cpp" />
     <ClCompile Include="AttackMapping.cpp" />
+    <ClCompile Include="AuditRules.cpp" />
     <ClCompile Include="AuditRunner.cpp" />
     <ClCompile Include="BackgroundWorker.cpp" />
     <ClCompile Include="Baseline.cpp" />

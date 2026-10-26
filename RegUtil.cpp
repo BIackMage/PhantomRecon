@@ -22,22 +22,39 @@ bool RegKeyExists(HKEY root, const std::wstring& subKey, REGSAM view)
     return true;
 }
 
+LONG RegOpenStatus(HKEY root, const std::wstring& subKey, REGSAM view)
+{
+    HKEY hKey = NULL;
+    LONG rc = RegOpenKeyExW(root, subKey.c_str(), 0, KEY_READ | view, &hKey);
+    if (rc == ERROR_SUCCESS) RegCloseKey(hKey);
+    else if (rc != ERROR_FILE_NOT_FOUND) {
+        OutputDebugStringW((L"[RegUtil] Cannot open " + RegRootName(root) + L"\\" + subKey + L": error " +
+                            std::to_wstring(rc) + L"\n").c_str());
+    }
+    return rc;
+}
+
 bool RegReadDword(HKEY root, const std::wstring& subKey, const std::wstring& valueName, DWORD& out, REGSAM view)
 {
     HKEY hKey = OpenKey(root, subKey, view);
     if (!hKey) return false;
     DWORD type = 0;
-    DWORD value = 0;
+    // Room for a REG_QWORD: with a 4-byte buffer RegQueryValueExW answers
+    // ERROR_MORE_DATA for one, so the QWORD branch below could never run.
+    ULONGLONG value = 0;
     DWORD size = sizeof(value);
     LONG rc = RegQueryValueExW(hKey, valueName.c_str(), NULL, &type, reinterpret_cast<BYTE*>(&value), &size);
     RegCloseKey(hKey);
     if (rc != ERROR_SUCCESS) return false;
-    if (type == REG_DWORD) {
-        out = value;
+    if (type == REG_DWORD && size == sizeof(DWORD)) {
+        out = static_cast<DWORD>(value);
         return true;
     }
-    if (type == REG_QWORD) {
-        out = value;   // low 32 bits are enough for the flags we read
+    if (type == REG_QWORD && size == sizeof(ULONGLONG)) {
+        out = static_cast<DWORD>(value & 0xFFFFFFFFull);   // low 32 bits are enough for the flags we read
+        if ((value >> 32) != 0) {
+            OutputDebugStringW((L"[RegUtil] QWORD " + valueName + L" has high bits set; using the low 32 bits\n").c_str());
+        }
         return true;
     }
     return false;

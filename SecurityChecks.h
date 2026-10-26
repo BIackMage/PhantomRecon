@@ -51,6 +51,11 @@ struct RegisteredCheck {
 };
 const std::vector<RegisteredCheck>& GetRegisteredChecks();
 
+// Every id that has a check function, whether or not the catalog lists it.
+// GetRegisteredChecks only keeps ids the catalog knows, so tests use this to
+// find a function that has no catalog row.
+std::vector<std::wstring> GetCheckFunctionIds();
+
 // Run every registered check. Exceptions inside a check become an ERROR result.
 std::vector<SecurityCheckResult> RunAllSecurityChecks(const AuditContext& context);
 std::vector<SecurityCheckResult> RunAllSecurityChecks();

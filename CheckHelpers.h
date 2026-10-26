@@ -79,7 +79,7 @@ bool IsWellKnownPublicResolver(const std::wstring& address);
 
 // --- Outdated software ---
 struct SoftwareRule {
-    std::wstring namePrefix;     // matched case-insensitively against DisplayName
+    std::wstring namePrefix;     // matched case-insensitively against DisplayName; with '*', a whole-name pattern
     std::wstring minimumVersion; // versions below this are flagged; empty = any version (end of life)
     std::wstring reason;
 };

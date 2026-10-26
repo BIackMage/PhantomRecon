@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "SecurityCheckModules.h"
 
+#include "AuditRules.h"
 #include "SystemInfo.h"
 #include "TextUtils.h"
 
@@ -61,23 +62,34 @@ static const LocalAccount* FindByRid(const std::vector<LocalAccount>& accounts, 
     return nullptr;
 }
 
-static std::vector<std::wstring> LocalAdministrators()
+// The localized name of BUILTIN\Administrators ("Administrators", "Administrateurs", ...).
+static std::wstring AdministratorsGroupName()
 {
-    std::vector<std::wstring> members;
-    // Look up the localized name of BUILTIN\Administrators from its SID.
     BYTE sid[SECURITY_MAX_SID_SIZE];
     DWORD sidSize = sizeof(sid);
-    if (!CreateWellKnownSid(WinBuiltinAdministratorsSid, NULL, sid, &sidSize)) return members;
+    if (!CreateWellKnownSid(WinBuiltinAdministratorsSid, NULL, sid, &sidSize)) return L"";
     wchar_t name[256] = {};
     wchar_t domain[256] = {};
     DWORD nameLen = 256, domainLen = 256;
     SID_NAME_USE use;
-    if (!LookupAccountSidW(NULL, sid, name, &nameLen, domain, &domainLen, &use)) return members;
+    if (!LookupAccountSidW(NULL, sid, name, &nameLen, domain, &domainLen, &use)) {
+        OutputDebugStringW((L"[SecurityChecksAccounts] LookupAccountSid(Administrators) failed: " +
+                            std::to_wstring(GetLastError()) + L"\n").c_str());
+        return L"";
+    }
+    return name;
+}
+
+static std::vector<std::wstring> LocalAdministrators()
+{
+    std::vector<std::wstring> members;
+    std::wstring name = AdministratorsGroupName();
+    if (name.empty()) return members;
 
     LPBYTE buffer = NULL;
     DWORD read = 0, total = 0;
     DWORD_PTR resume = 0;
-    if (NetLocalGroupGetMembers(NULL, name, 2, &buffer, MAX_PREFERRED_LENGTH, &read, &total, &resume) == NERR_Success) {
+    if (NetLocalGroupGetMembers(NULL, name.c_str(), 2, &buffer, MAX_PREFERRED_LENGTH, &read, &total, &resume) == NERR_Success) {
         LOCALGROUP_MEMBERS_INFO_2* info = reinterpret_cast<LOCALGROUP_MEMBERS_INFO_2*>(buffer);
         for (DWORD i = 0; i < read; ++i) {
             if (info[i].lgrmi2_domainandname) members.push_back(info[i].lgrmi2_domainandname);
@@ -129,7 +141,9 @@ SecurityCheckResult CheckBuiltinAdministrator()
         result.detail = accounts.empty() ? error : L"No built-in Administrator account found.";
         return result;
     }
-    bool renamed = !EqualsI(admin->name, L"Administrator");
+    // Compare with the default name in the Windows display language too:
+    // "Administrateur" on French Windows has not been renamed.
+    bool renamed = !IsDefaultAdministratorName(admin->name, AdministratorsGroupName());
     if (admin->disabled) {
         result.status = CHECK_PASS;
         result.detail = L"The built-in Administrator (" + admin->name + L") is disabled.";
@@ -140,7 +154,7 @@ SecurityCheckResult CheckBuiltinAdministrator()
     }
     else {
         result.status = CHECK_FAIL;
-        result.detail = L"The built-in Administrator account is enabled and still called Administrator.";
+        result.detail = L"The built-in Administrator account is enabled and still has its default name (" + admin->name + L").";
     }
     return result;
 }
