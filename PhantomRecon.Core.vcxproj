@@ -69,6 +69,7 @@
     <ClInclude Include="FuzzyHash.h" />
     <ClInclude Include="HardeningScore.h" />
     <ClInclude Include="HashUtils.h" />
+    <ClInclude Include="JsonReader.h" />
     <ClInclude Include="JsonWriter.h" />
     <ClInclude Include="KnownGood.h" />
     <ClInclude Include="LLMClient.h" />
@@ -117,6 +118,7 @@
     <ClCompile Include="FuzzyHash.cpp" />
     <ClCompile Include="HardeningScore.cpp" />
     <ClCompile Include="HashUtils.cpp" />
+    <ClCompile Include="JsonReader.cpp" />
     <ClCompile Include="JsonWriter.cpp" />
     <ClCompile Include="KnownGood.cpp" />
     <ClCompile Include="LLMClient.cpp" />

@@ -5,11 +5,15 @@
 
 #include <lm.h>
 #include <userenv.h>
+#define SECURITY_WIN32
+#include <security.h>
+#include <secext.h>
 #include <sstream>
 
 #pragma comment(lib, "netapi32.lib")
 #pragma comment(lib, "userenv.lib")
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "secur32.lib")
 
 std::wstring GetComputerNameString()
 {
@@ -152,6 +156,121 @@ std::wstring GetJoinedDomainName()
     DWORD size = 256;
     if (GetComputerNameExW(ComputerNameDnsDomain, dns, &size) && dns[0]) return dns;
     return L"";
+}
+
+static void SystemInfoLog(const std::wstring& msg)
+{
+    OutputDebugStringW((L"[SystemInfo] " + msg + L"\n").c_str());
+}
+
+std::wstring GetDnsHostNameString()
+{
+    DWORD size = 0;
+    GetComputerNameExW(ComputerNamePhysicalDnsHostname, NULL, &size);
+    if (size == 0) return L"";
+    std::wstring name(size, L'\0');
+    if (!GetComputerNameExW(ComputerNamePhysicalDnsHostname, &name[0], &size)) return L"";
+    name.resize(size);
+    return name;
+}
+
+std::wstring GetJoinedNetbiosName(bool* isDomain)
+{
+    if (isDomain) *isDomain = false;
+    LPWSTR name = NULL;
+    NETSETUP_JOIN_STATUS status = NetSetupUnknownStatus;
+    if (NetGetJoinInformation(NULL, &name, &status) != NERR_Success) return L"";
+    std::wstring result;
+    if (name && (status == NetSetupDomainName || status == NetSetupWorkgroupName)) result = name;
+    if (name) NetApiBufferFree(name);
+    if (isDomain) *isDomain = status == NetSetupDomainName;
+    return result;
+}
+
+bool GetLogonDomainAndUser(std::wstring& domain, std::wstring& user)
+{
+    domain.clear();
+    user.clear();
+    ULONG size = 0;
+    GetUserNameExW(NameSamCompatible, NULL, &size);
+    if (size == 0) return false;
+    std::wstring text(size, L'\0');
+    if (!GetUserNameExW(NameSamCompatible, &text[0], &size)) return false;
+    text.resize(size);
+    size_t slash = text.find(L'\\');
+    if (slash == std::wstring::npos) {
+        user = text;
+        return true;
+    }
+    domain = text.substr(0, slash);
+    user = text.substr(slash + 1);
+    return true;
+}
+
+std::wstring GetUserDisplayName()
+{
+    ULONG size = 0;
+    GetUserNameExW(NameDisplay, NULL, &size);
+    if (size == 0) return L"";
+    std::wstring text(size, L'\0');
+    if (!GetUserNameExW(NameDisplay, &text[0], &size)) return L"";
+    text.resize(size);
+    return text;
+}
+
+std::vector<LocalAccountName> GetLocalAccountNames()
+{
+    std::vector<LocalAccountName> out;
+    DWORD resume = 0;
+    NET_API_STATUS status;
+    do {
+        LPBYTE buffer = NULL;
+        DWORD read = 0;
+        DWORD total = 0;
+        status = NetUserEnum(NULL, 20, FILTER_NORMAL_ACCOUNT, &buffer, MAX_PREFERRED_LENGTH, &read, &total, &resume);
+        if ((status == NERR_Success || status == ERROR_MORE_DATA) && buffer) {
+            const USER_INFO_20* users = reinterpret_cast<const USER_INFO_20*>(buffer);
+            for (DWORD i = 0; i < read; ++i) {
+                LocalAccountName a;
+                if (users[i].usri20_name) a.name = users[i].usri20_name;
+                if (users[i].usri20_full_name) a.fullName = users[i].usri20_full_name;
+                a.rid = users[i].usri20_user_id;
+                if (!a.name.empty()) out.push_back(a);
+            }
+        }
+        if (buffer) NetApiBufferFree(buffer);
+    } while (status == ERROR_MORE_DATA);
+    if (status != NERR_Success) SystemInfoLog(L"NetUserEnum stopped with status " + std::to_wstring(status));
+    return out;
+}
+
+std::vector<std::wstring> GetProfileFolderNames()
+{
+    std::vector<std::wstring> out;
+    const std::wstring key = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList";
+    for (const std::wstring& sid : RegEnumSubKeys(HKEY_LOCAL_MACHINE, key)) {
+        // S-1-5-21: local and domain accounts. S-1-12-1: Microsoft Entra accounts.
+        // S-1-5-18/19/20 (system, local service, network service) are not people.
+        if (sid.rfind(L"S-1-5-21-", 0) != 0 && sid.rfind(L"S-1-12-1-", 0) != 0) continue;
+        std::wstring path = RegReadString(HKEY_LOCAL_MACHINE, key + L"\\" + sid, L"ProfileImagePath");
+        while (!path.empty() && path.back() == L'\\') path.pop_back();
+        size_t slash = path.find_last_of(L'\\');
+        std::wstring leaf = slash == std::wstring::npos ? path : path.substr(slash + 1);
+        if (!leaf.empty()) out.push_back(leaf);
+    }
+    return out;
+}
+
+std::wstring GetShortPathString(const std::wstring& path)
+{
+    if (path.empty()) return L"";
+    DWORD size = GetShortPathNameW(path.c_str(), NULL, 0);
+    if (size == 0) return L"";
+    std::wstring shortPath(size, L'\0');
+    DWORD written = GetShortPathNameW(path.c_str(), &shortPath[0], size);
+    if (written == 0 || written >= size) return L"";
+    shortPath.resize(written);
+    return shortPath;
 }
 
 long long FileTimeToUnix(const FILETIME& ft)

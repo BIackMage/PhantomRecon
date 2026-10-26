@@ -14,6 +14,8 @@ std::wstring WeeklyScanTaskName();
 // The command line the task runs (exposed for tests and for the menu tooltip).
 std::wstring WeeklyScanArguments(const std::wstring& baselinePath, const std::wstring& reportsDir);
 
+// Refuses (false, reason in error, nothing created) when baselinePath is not a
+// baseline that loads, since every weekly run would then fail.
 bool RegisterWeeklyScan(const std::wstring& exePath, const std::wstring& baselinePath,
                         const std::wstring& reportsDir, std::wstring& error);
 bool RemoveWeeklyScan(std::wstring& error);

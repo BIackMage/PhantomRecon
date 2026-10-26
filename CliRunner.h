@@ -15,6 +15,12 @@
 //   1  finished, something needs attention (an audit FAIL, or a scan with
 //      NEW / CHANGED / MISSING files, or any file scoring 7 or more)
 //   2  bad arguments or an error stopped the run
+//
+// Arguments: an option's value is never empty and never another option. Options
+// with nothing to do (no --audit, scan, --make-samples, --findings-md or
+// schedule change) are an error; only a run with no arguments shows the help.
+// A failed scan step does not stop the audit reports from being written, and
+// --notify fires on every finished run, failed ones included.
 // ---------------------------------------------------------------------------
 
 struct CliOptions {

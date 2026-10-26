@@ -42,7 +42,7 @@ static void CmdAuditSaveText(AppState& app, HWND hWnd)
     std::wstring path = BrowseForSaveFile(hWnd, L"Save the audit as text", kFilterText, L"txt",
         DefaultReportPath(app, L"security-audit", L".txt"));
     if (path.empty()) return;
-    if (!WriteSecurityReport(path, app.audit.results)) {
+    if (!WriteSecurityReport(path, app.settings.redactReports ? RedactAuditResults(app.audit.results) : app.audit.results)) {
         MessageBoxW(hWnd, (L"Could not write:\n" + path).c_str(), L"Save Audit", MB_OK | MB_ICONERROR);
         return;
     }

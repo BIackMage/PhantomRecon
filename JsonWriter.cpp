@@ -8,7 +8,22 @@ std::wstring JsonWriter::Escape(const std::wstring& value)
 {
     std::wstring out;
     out.reserve(value.size() + 8);
-    for (wchar_t c : value) {
+    for (size_t i = 0; i < value.size(); ++i) {
+        wchar_t c = value[i];
+        // A surrogate pair is copied as it is. An unpaired surrogate (legal in an NTFS
+        // file name, impossible in UTF-8) is written as a \u escape, which JSON allows,
+        // so the exact name survives the UTF-8 file.
+        if (c >= 0xD800 && c <= 0xDBFF && i + 1 < value.size() && value[i + 1] >= 0xDC00 && value[i + 1] <= 0xDFFF) {
+            out += c;
+            out += value[++i];
+            continue;
+        }
+        if (c >= 0xD800 && c <= 0xDFFF) {
+            wchar_t buf[8];
+            swprintf_s(buf, L"\\u%04x", static_cast<unsigned int>(c));
+            out += buf;
+            continue;
+        }
         switch (c) {
         case L'"':  out += L"\\\""; break;
         case L'\\': out += L"\\\\"; break;
