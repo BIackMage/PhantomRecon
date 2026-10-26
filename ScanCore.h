@@ -75,6 +75,8 @@ bool IsExecutableExtension(const std::wstring& fileName);
 int CountFilesUnder(const std::wstring& root, const ScanOptions& options, const std::function<bool()>& isCancelled);
 
 // Run one scan.
+//   Every root is normalized first (NormalizeScanRoot) and repeats are dropped. When one
+//   root lies inside another, the inner one is walked once, from its own root.
 //   Baseline:  walks every root, saves the new baseline to baselineSavePath (not on cancel).
 //   FullScan:  walks every root, compares with *comparison, then reports as MISSING the
 //              baseline entries under those roots that were not found.
@@ -90,8 +92,14 @@ ScanSummary RunScan(ScanMode mode, const std::wstring& root, const std::wstring&
                     Baseline* comparison, const std::wstring& baselineSavePath,
                     const ScanOptions& options, const ScanCallbacks& callbacks);
 
-// "C:\A; D:\B\" -> { "C:\A", "D:\B" }: trimmed, trailing backslashes dropped, no duplicates.
+// "C:\A; D:\B\; E:" -> { "C:\A", "D:\B", "E:\" }: trimmed, trailing backslashes dropped,
+// a bare drive letter made the drive root, no duplicates.
 std::vector<std::wstring> SplitScanRoots(const std::wstring& text);
+
+// One scan root as RunScan uses it: trimmed, "/" as "\", "D:" as "D:\" (the drive, not
+// D:'s current folder), absolute, 8.3 short names expanded when the folder exists, and
+// no trailing backslash except on a drive root.
+std::wstring NormalizeScanRoot(const std::wstring& root);
 
 std::wstring ScanModeName(ScanMode mode);
 

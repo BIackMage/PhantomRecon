@@ -59,6 +59,7 @@
   <ItemGroup>
     <ClCompile Include="TestBaselineScan.cpp" />
     <ClCompile Include="TestCatalogReports.cpp" />
+    <ClCompile Include="TestFixEngineCore.cpp" />
     <ClCompile Include="TestHashingAndPe.cpp" />
     <ClCompile Include="TestHelpers.cpp" />
     <ClCompile Include="TestMain.cpp" />

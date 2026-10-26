@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Baseline.h"
 
+#include "AppPaths.h"
 #include "FileAnalysis.h"
 #include "FuzzyHash.h"
 #include "TextUtils.h"
@@ -43,41 +44,111 @@ Baseline::Baseline()
 }
 
 // ---------------------------------------------------------------------------
-// NormalizePath - lowercase + collapse double backslashes
+// NormalizePath - the lookup key for a path
+//
+// Lowercase (Unicode-aware, so accented folder names match in any case), forward
+// slashes as backslashes, the \\?\ long-path prefix removed ("\\?\C:\x" is "C:\x",
+// "\\?\UNC\srv\share" is "\\srv\share"), repeated backslashes collapsed (keeping the
+// two that start a UNC path) and no trailing backslash except on a drive root.
+//
+// 8.3 short names ("C:\Users\RUNNER~1\x.exe") are expanded to the long form, so a
+// file reached through either spelling has one key. Only paths that contain '~' touch
+// the disk; when the file itself is gone (a MISSING entry) the deepest folder that
+// still exists is expanded and the rest kept as written.
+//
+// Deliberately not done here: trailing dots and spaces stay, because on NTFS
+// "tool.exe." and "tool.exe" can be two different files; a mapped drive letter and
+// its \\server\share form stay different, since resolving that needs the network.
 // ---------------------------------------------------------------------------
+static bool LongPathOf(const std::wstring& path, std::wstring& out)
+{
+    std::wstring io = ToExtendedPath(path);
+    bool prefixed = io.size() != path.size();
+    DWORD needed = GetLongPathNameW(io.c_str(), NULL, 0);
+    if (needed == 0) return false;
+    std::wstring buf(needed, L'\0');
+    DWORD written = GetLongPathNameW(io.c_str(), &buf[0], needed);
+    if (written == 0 || written >= needed) return false;
+    buf.resize(written);
+    if (prefixed) {
+        if (buf.rfind(L"\\\\?\\UNC\\", 0) == 0) buf = L"\\\\" + buf.substr(8);
+        else if (buf.rfind(L"\\\\?\\", 0) == 0) buf = buf.substr(4);
+    }
+    out = buf;
+    return true;
+}
+
+static std::wstring ExpandShortNames(const std::wstring& path)
+{
+    if (path.find(L'~') == std::wstring::npos) return path;
+    std::wstring head = path;
+    std::wstring tail;
+    while (!head.empty()) {
+        std::wstring expanded;
+        if (LongPathOf(head, expanded)) {
+            if (expanded != head) DebugLog(L"ExpandShortNames: " + head + L" -> " + expanded);
+            return expanded + tail;
+        }
+        size_t slash = head.find_last_of(L"\\/");
+        if (slash == std::wstring::npos || slash < 3) break;
+        tail = head.substr(slash) + tail;
+        head = head.substr(0, slash);
+        if (head.find(L'~') == std::wstring::npos) break;   // nothing short left to expand
+    }
+    return path;
+}
+
 std::wstring Baseline::NormalizePath(const std::wstring& path)
 {
-    // Lowercase (Unicode-aware, so accented folder names match in any case)
-    std::wstring norm = ToLowerW(path);
+    std::wstring norm = ToLowerW(ExpandShortNames(path));
+    for (wchar_t& c : norm) {
+        if (c == L'/') c = L'\\';
+    }
 
-    // Collapse double backslashes
-    size_t pos = norm.find(L"\\\\");
-    while (pos != std::wstring::npos) {
-        norm.replace(pos, 2, L"\\");
-        pos = norm.find(L"\\\\", pos);
+    if (norm.rfind(L"\\\\?\\unc\\", 0) == 0) {
+        norm = L"\\\\" + norm.substr(8);
+    }
+    else if (norm.rfind(L"\\\\?\\", 0) == 0 && norm.size() >= 6 && norm[5] == L':') {
+        norm = norm.substr(4);
+    }
+
+    bool unc = norm.rfind(L"\\\\", 0) == 0;
+    std::wstring out;
+    out.reserve(norm.size());
+    for (size_t i = 0; i < norm.size(); ++i) {
+        wchar_t c = norm[i];
+        if (c == L'\\' && !out.empty() && out.back() == L'\\' && !(unc && i == 1)) continue;
+        out += c;
     }
 
     // Remove trailing backslash unless it's a root like "C:\"
-    if (norm.size() > 3 && norm.back() == L'\\') {
-        norm.pop_back();
+    if (out.size() > 3 && out.back() == L'\\') {
+        out.pop_back();
     }
 
-    return norm;
+    return out;
 }
 
 // ---------------------------------------------------------------------------
 // WriteString - length-prefixed wstring into byte buffer
 // Format: [uint32 charCount][charCount * wchar_t]
+// The writer and ReadString share MAX_STRING_CHARS, so every file this writes loads.
 // ---------------------------------------------------------------------------
 void Baseline::WriteString(std::vector<BYTE>& buffer, const std::wstring& str)
 {
-    uint32_t charCount = static_cast<uint32_t>(str.size());
+    size_t length = str.size();
+    if (length > MAX_STRING_CHARS) {
+        DebugLog(L"WriteString: field of " + std::to_wstring(length) + L" characters cut to " +
+            std::to_wstring(MAX_STRING_CHARS));
+        length = MAX_STRING_CHARS;
+    }
+    uint32_t charCount = static_cast<uint32_t>(length);
     const BYTE* countBytes = reinterpret_cast<const BYTE*>(&charCount);
     buffer.insert(buffer.end(), countBytes, countBytes + sizeof(uint32_t));
 
     if (charCount > 0) {
         const BYTE* strBytes = reinterpret_cast<const BYTE*>(str.data());
-        buffer.insert(buffer.end(), strBytes, strBytes + charCount * sizeof(wchar_t));
+        buffer.insert(buffer.end(), strBytes, strBytes + static_cast<size_t>(charCount) * sizeof(wchar_t));
     }
 }
 
@@ -95,14 +166,16 @@ bool Baseline::ReadString(const std::vector<BYTE>& buffer, size_t& offset, std::
     std::memcpy(&charCount, buffer.data() + offset, sizeof(uint32_t));
     offset += sizeof(uint32_t);
 
-    // Sanity check - no single string should be > 64KB chars
-    if (charCount > 65536) {
-        DebugLog(L"ReadString: implausible char count, possible corruption");
+    // Same limit as WriteString. It used to be 65,536 here while the writer had none,
+    // so one long field (a file with many alternate data streams) made the whole
+    // baseline unloadable. The length is also checked against the bytes left below.
+    if (charCount > MAX_STRING_CHARS) {
+        DebugLog(L"ReadString: implausible char count " + std::to_wstring(charCount) + L", possible corruption");
         return false;
     }
 
-    size_t byteLen = charCount * sizeof(wchar_t);
-    if (offset + byteLen > buffer.size()) {
+    size_t byteLen = static_cast<size_t>(charCount) * sizeof(wchar_t);
+    if (byteLen > buffer.size() - offset) {
         DebugLog(L"ReadString: buffer underflow reading string data");
         return false;
     }
@@ -219,9 +292,28 @@ std::vector<const BaselineEntry*> Baseline::AllEntries() const
     return out;
 }
 
+// True when the signature warnings list (codes joined with "; ") holds the code.
+static bool HasWarningCode(const std::wstring& warnings, const std::wstring& code)
+{
+    for (const std::wstring& item : SplitW(warnings, L';')) {
+        if (item.compare(0, code.size(), code) == 0 &&
+            (item.size() == code.size() || item[code.size()] == L':')) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool IsMicrosoftSignedEntry(const BaselineEntry& entry)
 {
     if (entry.signature.rfind(L"Signed (Valid)", 0) != 0) return false;
+    // "Signed (Valid)" only says the hash and chain checked out; revocation is a separate
+    // test. A revoked certificate (stolen or misused key) proves nothing about who made
+    // the file, so it must not turn a new file into KNOWN or a change into UPDATED.
+    if (entry.revocation == L"REVOKED" || HasWarningCode(entry.sigWarnings, L"REVOKED")) {
+        DebugLog(L"IsMicrosoftSignedEntry: revoked certificate, not trusted as Microsoft: " + entry.path);
+        return false;
+    }
     // signature column is "Signed (Valid) (Signer Name)" for embedded signatures
     size_t open = entry.signature.find(L"(", 14);
     if (open != std::wstring::npos) {
@@ -274,12 +366,26 @@ ComparisonResult Baseline::CompareEntry(const BaselineEntry& current) const
     // Compare key fields
     std::wstring changes;
 
-    if (current.md5 != baseline->md5) {
+    // A hash column holds a digest or an error text ("MD5 Checksum Error") when the file
+    // could not be read. Two error texts are equal strings but prove nothing, so a side
+    // without a digest makes the content unverified instead of a MATCH.
+    const bool md5Comparable = IsHexText(current.md5) && IsHexText(baseline->md5);
+    const bool shaPresent = !current.sha256.empty() && !baseline->sha256.empty();   // v1 baselines have none
+    const bool shaComparable = shaPresent && IsHexText(current.sha256) && IsHexText(baseline->sha256);
+    const bool hashUnavailable = !md5Comparable || (shaPresent && !shaComparable);
+    const bool md5Changed = md5Comparable && current.md5 != baseline->md5;
+    const bool shaChanged = shaComparable && current.sha256 != baseline->sha256;
+
+    if (hashUnavailable) {
+        changes += L"Content not verified (a hash could not be computed)";
+    }
+
+    if (md5Changed) {
         if (!changes.empty()) changes += L"; ";
         changes += L"MD5 changed";
     }
 
-    if (!current.sha256.empty() && !baseline->sha256.empty() && current.sha256 != baseline->sha256) {
+    if (shaChanged) {
         if (!changes.empty()) changes += L"; ";
         changes += L"SHA-256 changed";
     }
@@ -294,8 +400,7 @@ ComparisonResult Baseline::CompareEntry(const BaselineEntry& current) const
     // Baselines written before v3 recorded catalog-signed Windows files as
     // "Unsigned" because the catalog lookup did not exist yet. If the content is
     // identical and only that label moved to a catalog signature, it is not a change.
-    bool sameContent = current.md5 == baseline->md5 &&
-        (current.sha256.empty() || baseline->sha256.empty() || current.sha256 == baseline->sha256);
+    bool sameContent = !hashUnavailable && !md5Changed && !shaChanged;
     bool legacyCatalogRelabel = sameContent && baseline->signature == L"Unsigned" &&
         current.signatureType == L"Catalog" && baseline->imphash.empty() && baseline->revocation.empty();
     if (current.signature != baseline->signature && !legacyCatalogRelabel) {
@@ -355,8 +460,7 @@ ComparisonResult Baseline::CompareEntry(const BaselineEntry& current) const
         }
     }
 
-    bool contentChanged = (current.md5 != baseline->md5) ||
-        (!current.sha256.empty() && !baseline->sha256.empty() && current.sha256 != baseline->sha256);
+    bool contentChanged = md5Changed || shaChanged;
     if (contentChanged && !baseline->ssdeep.empty() && !current.ssdeep.empty()) {
         int similarity = CompareFuzzyHashes(baseline->ssdeep, current.ssdeep);
         if (!changes.empty()) changes += L"; ";
@@ -428,12 +532,23 @@ std::wstring Baseline::GetCreationTimeString() const
     ft.dwLowDateTime = static_cast<DWORD>(m_creationTime & 0xFFFFFFFF);
     ft.dwHighDateTime = static_cast<DWORD>((m_creationTime >> 32) & 0xFFFFFFFF);
 
+    // The file stores UTC (GetSystemTimeAsFileTime). Show it in the local time zone,
+    // with the daylight saving rule that applied on that date.
+    SYSTEMTIME utc;
+    if (!FileTimeToSystemTime(&ft, &utc)) {
+        return L"Unknown";
+    }
     SYSTEMTIME st;
-    FileTimeToSystemTime(&ft, &st);
+    const wchar_t* suffix = L"";
+    if (!SystemTimeToTzSpecificLocalTime(NULL, &utc, &st)) {
+        DebugLog(L"GetCreationTimeString: local time conversion failed (error " + std::to_wstring(GetLastError()) + L"), showing UTC");
+        st = utc;
+        suffix = L" UTC";
+    }
 
     wchar_t buf[64];
-    swprintf_s(buf, 64, L"%04d-%02d-%02d %02d:%02d:%02d",
-        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    swprintf_s(buf, 64, L"%04d-%02d-%02d %02d:%02d:%02d%s",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, suffix);
     return std::wstring(buf);
 }
 
@@ -892,27 +1007,28 @@ bool Baseline::LoadFromFile(const std::wstring& filePath)
     offset += sizeof(uint64_t);
 
     // Timestamp
-    std::memcpy(&m_creationTime, buffer.data() + offset, sizeof(uint64_t));
+    uint64_t creationTime = 0;
+    std::memcpy(&creationTime, buffer.data() + offset, sizeof(uint64_t));
     offset += sizeof(uint64_t);
 
-    // Deserialize entries
-    m_entries.clear();
-    m_folders.clear();
-    m_loadedVersion = version;
     if (entryCount > 50000000ULL) {
         DebugLog(L"LoadFromFile: implausible entry count");
         return false;
     }
-    m_entries.reserve(static_cast<size_t>(entryCount));
+
+    // Parse into local containers and replace this object only when every entry was
+    // read. A failed load leaves the baseline exactly as it was before the call.
+    std::unordered_map<std::wstring, InternalEntry> entries;
+    std::unordered_set<std::wstring> folders;
+    entries.reserve(static_cast<size_t>(entryCount));
 
     for (uint64_t i = 0; i < entryCount; i++) {
         BaselineEntry entry;
         if (!DeserializeEntry(buffer, offset, entry, version)) {
             std::wstringstream ss;
-            ss << L"LoadFromFile: failed to deserialize entry " << i << L" of " << entryCount;
+            ss << L"LoadFromFile: failed to deserialize entry " << i << L" of " << entryCount
+               << L"; the baseline in memory is unchanged";
             DebugLog(ss.str());
-            m_entries.clear();
-            m_folders.clear();
             return false;
         }
 
@@ -920,9 +1036,14 @@ bool Baseline::LoadFromFile(const std::wstring& filePath)
         InternalEntry ie;
         ie.data = std::move(entry);
         ie.seen = false;
-        m_entries[key] = std::move(ie);
-        m_folders.insert(FolderKey(key));
+        folders.insert(FolderKey(key));
+        entries[key] = std::move(ie);
     }
+
+    m_entries.swap(entries);
+    m_folders.swap(folders);
+    m_creationTime = creationTime;
+    m_loadedVersion = version;
 
     std::wstringstream ss;
     ss << L"LoadFromFile: loaded " << m_entries.size() << L" entries, created "

@@ -43,6 +43,71 @@ static uint32_t SumHash(uint8_t c, uint32_t h)
     return (h * kHashPrime) ^ c;
 }
 
+// One pass at one block size, with the digest rules of ssdeep's fuzzy.c (2.13 and later):
+//   sig1: up to 63 characters, one per trigger point of blockSize. After the 63rd the
+//         hash is no longer reset and the last slot keeps the newest value.
+//   sig2: the same at 2 * blockSize, cut to 31 characters; the hash behind the tail
+//         character is no longer reset after the 31st.
+//   tail: when the rolling hash is not zero at the end, both get the running hash as a
+//         last character. When it is zero, a full sig1 still gets its 64th slot and a
+//         sig2 with more than 31 trigger points gets the 32nd one.
+// The returned count is the number of trigger characters in sig1 without the tail;
+// ssdeep halves the block size while that count is below 32. Counting the tail as
+// well (the earlier code) kept a too-large block size for exactly 31 + tail.
+struct FuzzyPass {
+    std::string sig1;
+    std::string sig2;
+    size_t      triggers1 = 0;
+};
+
+static FuzzyPass FuzzyHashAtBlockSize(const uint8_t* data, size_t size, uint32_t blockSize)
+{
+    FuzzyPass pass;
+    RollState roll;
+    uint32_t h1 = kHashInit;
+    uint32_t h2 = kHashInit;
+    char slot64 = 0;      // sig1 character 64 (overwritten at every trigger once sig1 is full)
+    char slot32 = 0;      // sig2 character 32 (the first trigger after sig2 is full)
+    const uint32_t blockSize2 = blockSize * 2;
+
+    for (size_t i = 0; i < size; ++i) {
+        uint8_t c = data[i];
+        uint32_t r = roll.Roll(c);
+        h1 = SumHash(c, h1);
+        h2 = SumHash(c, h2);
+
+        if (r % blockSize == blockSize - 1) {
+            if (pass.sig1.size() < kSpamsumLength - 1) {
+                pass.sig1 += kB64[h1 % 64];
+                h1 = kHashInit;
+            }
+            else {
+                slot64 = kB64[h1 % 64];
+            }
+        }
+        if (r % blockSize2 == blockSize2 - 1) {
+            if (pass.sig2.size() < kSpamsumLength / 2 - 1) {
+                pass.sig2 += kB64[h2 % 64];
+                h2 = kHashInit;
+            }
+            else if (slot32 == 0) {
+                slot32 = kB64[h2 % 64];
+            }
+        }
+    }
+    pass.triggers1 = pass.sig1.size();
+
+    if (roll.Sum() != 0) {
+        pass.sig1 += kB64[h1 % 64];
+        pass.sig2 += kB64[h2 % 64];
+    }
+    else {
+        if (slot64 != 0) pass.sig1 += slot64;
+        if (slot32 != 0) pass.sig2 += slot32;
+    }
+    return pass;
+}
+
 std::wstring ComputeFuzzyHashBuffer(const uint8_t* data, size_t size)
 {
     if (!data || size < 4) return L"";
@@ -51,43 +116,12 @@ std::wstring ComputeFuzzyHashBuffer(const uint8_t* data, size_t size)
     while (static_cast<uint64_t>(blockSize) * kSpamsumLength < size) blockSize *= 2;
 
     while (true) {
-        RollState roll;
-        uint32_t h1 = kHashInit;
-        uint32_t h2 = kHashInit;
-        std::string sig1;
-        std::string sig2;
-
-        for (size_t i = 0; i < size; ++i) {
-            uint8_t c = data[i];
-            uint32_t r = roll.Roll(c);
-            h1 = SumHash(c, h1);
-            h2 = SumHash(c, h2);
-
-            if (r % blockSize == blockSize - 1) {
-                if (sig1.size() < kSpamsumLength - 1) {
-                    sig1 += kB64[h1 % 64];
-                    h1 = kHashInit;
-                }
-            }
-            if (r % (blockSize * 2) == (blockSize * 2) - 1) {
-                if (sig2.size() < kSpamsumLength / 2 - 1) {
-                    sig2 += kB64[h2 % 64];
-                    h2 = kHashInit;
-                }
-            }
-        }
-
-        if (roll.Sum() != 0) {
-            sig1 += kB64[h1 % 64];
-            sig2 += kB64[h2 % 64];
-        }
-
-        if (blockSize > kMinBlocksize && sig1.size() < kSpamsumLength / 2) {
+        FuzzyPass pass = FuzzyHashAtBlockSize(data, size, blockSize);
+        if (blockSize > kMinBlocksize && pass.triggers1 < kSpamsumLength / 2) {
             blockSize /= 2;
             continue;
         }
-
-        std::string out = std::to_string(blockSize) + ":" + sig1 + ":" + sig2;
+        std::string out = std::to_string(blockSize) + ":" + pass.sig1 + ":" + pass.sig2;
         return std::wstring(out.begin(), out.end());
     }
 }

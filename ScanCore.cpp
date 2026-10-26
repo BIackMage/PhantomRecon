@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <ctime>
 #include <sstream>
+#include <unordered_set>
 
 static void DebugLog(const std::wstring& msg)
 {
@@ -40,9 +41,14 @@ void ReloadScoringConfig()
 {
     std::wstring path = AppFilePath(L"phantom_recon_scoring.ini");
     ScoringConfig& cfg = GetScoringConfig();
+    // Always start from the built-in values. Before, a deleted INI left the last loaded
+    // weights in force until restart, although the file header says deleting it reverts.
+    cfg.ResetToDefaults();
     if (FileExists(path)) {
-        cfg.ResetToDefaults();
         cfg.LoadFromFile(path);
+    }
+    else {
+        DebugLog(L"ReloadScoringConfig: no " + path + L", using built-in defaults");
     }
 }
 
@@ -317,9 +323,70 @@ BaselineEntry AnalyzeFile(const std::wstring& fullPath, const ScanOptions& optio
 }
 
 // ---------------------------------------------------------------------------
+// Scan roots
+// ---------------------------------------------------------------------------
+static std::wstring DriveRootFix(std::wstring r)
+{
+    // "D:" alone is "the current folder on D:" to Windows, but the walker joined it with
+    // "\*" and scanned the whole drive while the MISSING sweep used D:'s current folder.
+    // A scan root that names a drive means the drive.
+    if (r.size() == 2 && r[1] == L':' && iswalpha(r[0])) {
+        DebugLog(L"DriveRootFix: " + r + L" taken as the drive root");
+        r += L'\\';
+    }
+    return r;
+}
+
+std::wstring NormalizeScanRoot(const std::wstring& root)
+{
+    std::wstring r = TrimW(root);
+    if (r.empty()) return r;
+    for (wchar_t& c : r) {
+        if (c == L'/') c = L'\\';
+    }
+    r = AbsolutePath(DriveRootFix(r));
+
+    // 8.3 short names ("C:\PROGRA~1") would give every file a second spelling, and the
+    // baseline lookup is by path text. Expand them when the folder exists.
+    if (r.find(L'~') != std::wstring::npos && r.rfind(L"\\\\?\\", 0) != 0) {
+        DWORD needed = GetLongPathNameW(r.c_str(), NULL, 0);
+        if (needed > 0) {
+            std::wstring longPath(needed, L'\0');
+            DWORD written = GetLongPathNameW(r.c_str(), &longPath[0], needed);
+            if (written > 0 && written < needed) {
+                longPath.resize(written);
+                r = longPath;
+            }
+        }
+    }
+
+    while (r.size() > 3 && r.back() == L'\\') r.pop_back();
+    return r;
+}
+
+// Lowercase key of a normalized root, for comparing folders with roots.
+static std::wstring RootKey(const std::wstring& normalizedRoot)
+{
+    return ToLowerW(normalizedRoot);
+}
+
+// ---------------------------------------------------------------------------
 // Walkers
 // ---------------------------------------------------------------------------
-int CountFilesUnder(const std::wstring& root, const ScanOptions& options, const std::function<bool()>& isCancelled)
+
+// True when sub is another scan root: it is walked from its own root, so walking it
+// again from a parent root would scan its files twice and double every count.
+static bool IsOtherRoot(const std::wstring& sub, const std::unordered_set<std::wstring>* rootKeys)
+{
+    if (!rootKeys || rootKeys->size() < 2) return false;
+    if (rootKeys->count(RootKey(sub)) == 0) return false;
+    DebugLog(L"Walker: " + sub + L" is a scan root of its own, not entered from its parent");
+    return true;
+}
+
+static int CountFilesUnderRoots(const std::wstring& root, const ScanOptions& options,
+                                const std::function<bool()>& isCancelled,
+                                const std::unordered_set<std::wstring>* rootKeys)
 {
     int count = 0;
     std::vector<std::wstring> stack = { root };
@@ -337,6 +404,7 @@ int CountFilesUnder(const std::wstring& root, const ScanOptions& options, const 
                 if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;   // junctions loop
                 std::wstring sub = JoinPath(dir, fd.cFileName);
+                if (IsOtherRoot(sub, rootKeys)) continue;
                 if (!IsExcluded(sub, true, options)) stack.push_back(sub);
             }
             else if (!IsExcluded(JoinPath(dir, fd.cFileName), false, options)) {
@@ -348,6 +416,11 @@ int CountFilesUnder(const std::wstring& root, const ScanOptions& options, const 
     return count;
 }
 
+int CountFilesUnder(const std::wstring& root, const ScanOptions& options, const std::function<bool()>& isCancelled)
+{
+    return CountFilesUnderRoots(root, options, isCancelled, nullptr);
+}
+
 struct ScanContext {
     ScanMode            mode;
     Baseline*           comparison;
@@ -356,6 +429,7 @@ struct ScanContext {
     const ScanOptions*  options;
     const ScanCallbacks* callbacks;
     ScanSummary*        summary;
+    const std::unordered_set<std::wstring>* rootKeys;   // every root of this scan (lowercase)
 };
 
 static bool Cancelled(const ScanContext& ctx)
@@ -426,6 +500,7 @@ static void WalkDirectory(ScanContext& ctx, const std::wstring& root)
                 if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
                 std::wstring sub = JoinPath(dir, fd.cFileName);
+                if (IsOtherRoot(sub, ctx.rootKeys)) continue;
                 if (!IsExcluded(sub, true, *ctx.options)) subdirs.push_back(sub);
             }
             else {
@@ -441,12 +516,19 @@ static void WalkDirectory(ScanContext& ctx, const std::wstring& root)
     }
 }
 
-// Lowercase folder with exactly one trailing backslash, for prefix tests.
+// Normalized folder (the baseline's path key form) with exactly one trailing backslash,
+// for prefix tests against Baseline::NormalizePath of an entry.
 static std::wstring FolderPrefix(const std::wstring& folder)
 {
-    std::wstring p = ToLowerW(AbsolutePath(folder));
+    std::wstring p = Baseline::NormalizePath(AbsolutePath(DriveRootFix(folder)));
     if (p.empty() || p.back() != L'\\') p += L'\\';
     return p;
+}
+
+// Folder key of a file path, in the same form as FolderPrefix without the slash.
+static std::wstring FolderKeyOf(const std::wstring& path)
+{
+    return Baseline::NormalizePath(DirectoryOf(path));
 }
 
 // limitToDirs: when not empty, only baseline entries whose folder is in this set
@@ -462,11 +544,11 @@ static void ReportMissing(ScanContext& ctx, const std::vector<std::wstring>& lim
     for (const BaselineEntry* entry : ctx.comparison->GetUnseenEntries()) {
         if (IsExcluded(entry->path, false, *ctx.options)) continue;
         if (!limitToDirs.empty()) {
-            std::wstring dir = ToLowerW(DirectoryOf(entry->path));
+            std::wstring dir = FolderKeyOf(entry->path);
             if (!std::binary_search(limitToDirs.begin(), limitToDirs.end(), dir)) continue;
         }
         if (!rootPrefixes.empty()) {
-            std::wstring lower = ToLowerW(entry->path);
+            std::wstring lower = Baseline::NormalizePath(entry->path);
             bool inside = false;
             for (const std::wstring& prefix : rootPrefixes) {
                 if (lower.compare(0, prefix.size(), prefix) == 0) {
@@ -498,7 +580,7 @@ std::vector<std::wstring> SplitScanRoots(const std::wstring& text)
 {
     std::vector<std::wstring> roots;
     for (const std::wstring& part : SplitW(text, L';')) {
-        std::wstring r = TrimW(part);
+        std::wstring r = DriveRootFix(TrimW(part));
         while (r.size() > 3 && r.back() == L'\\') r.pop_back();
         if (r.empty()) continue;
         bool duplicate = false;
@@ -519,10 +601,32 @@ ScanSummary RunScan(ScanMode mode, const std::wstring& root, const std::wstring&
     return RunScan(mode, roots, csvPath, comparison, baselineSavePath, options, callbacks);
 }
 
-ScanSummary RunScan(ScanMode mode, const std::vector<std::wstring>& roots, const std::wstring& csvPath,
+// Normalize every root and drop repeats ("D:" and "d:\" are one root).
+static std::vector<std::wstring> PrepareRoots(const std::vector<std::wstring>& input)
+{
+    std::vector<std::wstring> roots;
+    std::unordered_set<std::wstring> keys;
+    for (const std::wstring& raw : input) {
+        std::wstring r = NormalizeScanRoot(raw);
+        if (r.empty()) continue;
+        if (!keys.insert(RootKey(r)).second) {
+            DebugLog(L"RunScan: root " + raw + L" repeats another root, scanned once");
+            continue;
+        }
+        if (r != raw) DebugLog(L"RunScan: root " + raw + L" normalized to " + r);
+        roots.push_back(r);
+    }
+    return roots;
+}
+
+ScanSummary RunScan(ScanMode mode, const std::vector<std::wstring>& inputRoots, const std::wstring& csvPath,
                     Baseline* comparison, const std::wstring& baselineSavePath,
                     const ScanOptions& options, const ScanCallbacks& callbacks)
 {
+    const std::vector<std::wstring> roots = PrepareRoots(inputRoots);
+    std::unordered_set<std::wstring> rootKeys;
+    for (const std::wstring& r : roots) rootKeys.insert(RootKey(r));
+
     ScanSummary summary;
     summary.mode = mode;
     summary.root = JoinW(roots, L"; ");
@@ -539,7 +643,8 @@ ScanSummary RunScan(ScanMode mode, const std::vector<std::wstring>& roots, const
     }
 
     Baseline building;
-    ScanContext ctx{ mode, comparison, mode == ScanMode::Baseline ? &building : nullptr, &csv, &options, &callbacks, &summary };
+    ScanContext ctx{ mode, comparison, mode == ScanMode::Baseline ? &building : nullptr, &csv, &options, &callbacks, &summary,
+                     &rootKeys };
     if (comparison) comparison->ResetSeenFlags();
 
     std::vector<std::wstring> fastScanDirs;
@@ -547,7 +652,7 @@ ScanSummary RunScan(ScanMode mode, const std::vector<std::wstring>& roots, const
         if (callbacks.onPhase) callbacks.onPhase(L"Finding installed programs...");
         std::vector<InstalledProgram> programs = RegistryEnumerator::EnumerateInstalledPrograms();
         std::vector<std::wstring> paths = RegistryEnumerator::GetExecutablePathsFromPrograms(programs, options.fastScanDepth);
-        for (const std::wstring& p : paths) fastScanDirs.push_back(ToLowerW(DirectoryOf(p)));
+        for (const std::wstring& p : paths) fastScanDirs.push_back(FolderKeyOf(p));
         std::sort(fastScanDirs.begin(), fastScanDirs.end());
         fastScanDirs.erase(std::unique(fastScanDirs.begin(), fastScanDirs.end()), fastScanDirs.end());
         summary.totalFiles = static_cast<int>(paths.size());
@@ -569,7 +674,7 @@ ScanSummary RunScan(ScanMode mode, const std::vector<std::wstring>& roots, const
         if (options.precount) {
             if (callbacks.onPhase) callbacks.onPhase(L"Counting files...");
             for (const std::wstring& root : roots) {
-                summary.totalFiles += CountFilesUnder(root, options, callbacks.isCancelled);
+                summary.totalFiles += CountFilesUnderRoots(root, options, callbacks.isCancelled, &rootKeys);
             }
             if (callbacks.onTotal) callbacks.onTotal(summary.totalFiles);
         }
@@ -609,7 +714,11 @@ ScanSummary RunScan(ScanMode mode, const std::vector<std::wstring>& roots, const
         }
     }
 
-    csv.Close();
+    if (!csv.Close() && !csvPath.empty() && !summary.csvFailed) {
+        // A write failed part way (disk full, drive removed); the cut-off file was removed.
+        DebugLog(L"RunScan: CSV write failed, results file not kept: " + csvPath);
+        summary.csvFailed = true;
+    }
     SaveRevocationCache();
 
     summary.seconds = static_cast<double>(GetTickCount64() - started) / 1000.0;

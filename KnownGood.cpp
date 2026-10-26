@@ -30,7 +30,11 @@ static size_t LoadLocked(KnownGoodState& s, const std::wstring& path)
     s.hashes.clear();
     s.loaded = true;
     std::wstring text;
-    if (!ReadTextFile(path, text)) return 0;
+    bool truncated = false;
+    if (!ReadTextFile(path, text, 64 * 1024 * 1024, &truncated)) return 0;
+    if (truncated) {
+        OutputDebugStringW((L"[KnownGood] list larger than 64 MB, only the start was loaded: " + path + L"\n").c_str());
+    }
     for (const std::wstring& raw : SplitAnyW(text, L"\r\n")) {
         std::wstring line = TrimW(raw);
         if (line.empty() || line[0] == L'#') continue;
@@ -42,7 +46,7 @@ static size_t LoadLocked(KnownGoodState& s, const std::wstring& path)
             name = TrimW(line.substr(comma + 1));
         }
         hash = ToLowerW(hash);
-        if (hash.size() != 64) continue;
+        if (hash.size() != 64 || !IsHexText(hash)) continue;
         s.hashes[hash] = name;
     }
     OutputDebugStringW((L"[KnownGood] loaded " + std::to_wstring(s.hashes.size()) + L" hashes from " + path + L"\n").c_str());
@@ -58,7 +62,8 @@ size_t LoadKnownGoodList(const std::wstring& path)
 
 bool IsKnownGoodHash(const std::wstring& sha256)
 {
-    if (sha256.size() != 64) return false;
+    // Only a real digest can be on the list; an error text or a partial value never is.
+    if (sha256.size() != 64 || !IsHexText(sha256)) return false;
     KnownGoodState& s = State();
     std::lock_guard<std::mutex> lock(s.mutex);
     if (!s.loaded) LoadLocked(s, DefaultKnownGoodPath());

@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "HashUtils.h"
 
+#include "AppPaths.h"
+
 #include <bcrypt.h>
 #include <vector>
 
@@ -95,18 +97,29 @@ static std::wstring HashFile(const std::wstring& filePath, LPCWSTR algorithm)
     BCryptHasher hasher(algorithm);
     if (!hasher.Ok()) return L"";
 
-    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+    // ToExtendedPath leaves short and already prefixed paths alone, so deep paths open
+    // here even when a caller passes the plain form.
+    HANDLE hFile = CreateFileW(ToExtendedPath(filePath).c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
         NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
-        DebugLog(L"Cannot open for hashing: " + filePath);
+        DebugLog(L"Cannot open for hashing: " + filePath + L" (error " + std::to_wstring(GetLastError()) + L")");
         return L"";
     }
 
     std::vector<BYTE> buffer(64 * 1024);
-    DWORD bytesRead = 0;
     bool ok = true;
-    while (ReadFile(hFile, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, NULL) && bytesRead > 0) {
+    while (true) {
+        DWORD bytesRead = 0;
+        if (!ReadFile(hFile, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, NULL)) {
+            // A read error is not the end of the file. Returning the digest of what was read
+            // so far (often the empty-input digest) would look like a real, unchanged hash.
+            DebugLog(L"Read failed while hashing (error " + std::to_wstring(GetLastError()) + L"): " + filePath);
+            ok = false;
+            break;
+        }
+        if (bytesRead == 0) break;   // end of file
         if (!hasher.Feed(buffer.data(), bytesRead)) {
+            DebugLog(L"BCryptHashData failed: " + filePath);
             ok = false;
             break;
         }
