@@ -17,6 +17,15 @@
 // bitsadmin transfer. reason receives a short description.
 bool IsSuspiciousCommandLine(const std::wstring& commandLine, std::wstring* reason);
 
+// Same rules with a strength: 0 nothing, 1 weak (hidden window, temp folder),
+// 2 strong (encoded command, download and run, script-runner tricks).
+int CommandLineSuspicion(const std::wstring& commandLine, std::wstring* reason);
+
+// Split an AppInit_DLLs value into DLL paths. Entries are separated by commas or
+// spaces, but a path may itself contain spaces, so tokens are joined until one
+// ends in ".dll".
+std::vector<std::wstring> SplitAppInitList(const std::wstring& value);
+
 // Extract the program path from a command line ("\"C:\a b\x.exe\" -y" -> "C:\a b\x.exe").
 // Expands environment variables. Bare names (no folder) are returned as given.
 std::wstring ProgramFromCommandLine(const std::wstring& commandLine);

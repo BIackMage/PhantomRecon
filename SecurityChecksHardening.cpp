@@ -425,11 +425,23 @@ SecurityCheckResult CheckSmbV1()
     std::wstringstream details;
     bool on = false;
 
-    int feature = 0;
-    if (OptionalFeatureState(L"SMB1Protocol", feature)) {
-        details << L"SMB1Protocol feature: " << (feature == 1 ? L"Enabled" : feature == 2 ? L"Disabled" : L"Not present") << L"\n";
-        if (feature == 1) on = true;
+    // The SMB1Protocol package can stay "enabled" while both of its parts are off;
+    // only the client and server parts decide whether SMB1 can actually be used.
+    auto stateText = [](int s) { return s == 1 ? L"Enabled" : s == 2 ? L"Disabled" : L"Not present"; };
+    int feature = 0, clientPart = 0, serverPart = 0;
+    bool haveFeature = OptionalFeatureState(L"SMB1Protocol", feature);
+    bool haveClient = OptionalFeatureState(L"SMB1Protocol-Client", clientPart);
+    bool haveServer = OptionalFeatureState(L"SMB1Protocol-Server", serverPart);
+    if (haveFeature) details << L"SMB1Protocol package: " << stateText(feature) << L"\n";
+    if (haveClient) {
+        details << L"SMB1 client part: " << stateText(clientPart) << L"\n";
+        if (clientPart == 1) on = true;
     }
+    if (haveServer) {
+        details << L"SMB1 server part: " << stateText(serverPart) << L"\n";
+        if (serverPart == 1) on = true;
+    }
+    if (haveFeature && feature == 1 && !haveClient && !haveServer) on = true;   // older builds have no parts
 
     DWORD start = 4;
     bool clientDriver = RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\mrxsmb10", L"Start", start);

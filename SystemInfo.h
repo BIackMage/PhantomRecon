@@ -29,7 +29,7 @@ bool SetProcessPrivilege(const wchar_t* privilegeName, bool enable);
 
 // Current user name (no domain) and the profile folder path.
 std::wstring GetCurrentUserNameString();
-std::wstring GetUserProfileDirectory();
+std::wstring GetUserProfileFolder();
 
 // DNS domain the computer is joined to, or "" when it is not domain-joined.
 std::wstring GetJoinedDomainName();

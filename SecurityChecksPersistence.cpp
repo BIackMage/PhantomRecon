@@ -4,6 +4,7 @@
 #include "AppPaths.h"
 #include "Baseline.h"
 #include "CheckHelpers.h"
+#include "DebugTrace.h"
 #include "FileAnalysis.h"
 #include "FileIO.h"
 #include "HashUtils.h"
@@ -26,7 +27,7 @@
 
 static void DebugLog(const std::wstring& msg)
 {
-    OutputDebugStringW((L"[Persistence] " + msg + L"\n").c_str());
+    Trace(L"Persistence", msg);
 }
 
 enum class Level { None = 0, Review = 1, High = 2 };
@@ -52,6 +53,7 @@ static void Flag(PersistenceEntry& e, Level level, const std::wstring& why)
 // Resolve the program, check its signature and location.
 static void Inspect(PersistenceEntry& e)
 {
+    DebugLog(L"Inspect: " + e.source + L" | " + e.name + L" | " + e.command);
     if (e.program.empty() && !e.command.empty()) e.program = ProgramFromCommandLine(e.command);
     if (!e.program.empty() && e.program.find(L'\\') == std::wstring::npos) {
         wchar_t full[MAX_PATH] = {};
@@ -59,7 +61,8 @@ static void Inspect(PersistenceEntry& e)
     }
 
     std::wstring why;
-    if (!e.command.empty() && IsSuspiciousCommandLine(e.command, &why)) Flag(e, Level::High, why);
+    int strength = e.command.empty() ? 0 : CommandLineSuspicion(e.command, &why);
+    if (strength > 0) Flag(e, strength == 2 ? Level::High : Level::Review, why);
 
     if (e.program.empty() || e.program.find(L'\\') == std::wstring::npos) return;
     if (!FileExists(e.program)) {
@@ -262,7 +265,7 @@ static void CollectAppInit(std::vector<PersistenceEntry>& out)
         if (dlls.empty()) continue;
         DWORD load = 0;
         RegReadDword(HKEY_LOCAL_MACHINE, key, L"LoadAppInit_DLLs", load, view);
-        for (const std::wstring& dll : SplitAnyW(dlls, L", ")) {
+        for (const std::wstring& dll : SplitAppInitList(dlls)) {
             PersistenceEntry e;
             e.source = view == KEY_WOW64_32KEY ? L"AppInit DLLs (32-bit)" : L"AppInit DLLs";
             e.location = std::wstring(L"HKLM\\") + key;
@@ -351,7 +354,13 @@ static void CollectPrintMonitors(std::vector<PersistenceEntry>& out)
         e.program = driver.find(L'\\') == std::wstring::npos ? system32 + driver : driver;
         e.command = e.program;
         Inspect(e);
-        if (!e.microsoft) Flag(e, Level::Review, L"third-party print monitor DLL loaded by the spooler (SYSTEM)");
+        if (!e.microsoft) {
+            // Printer vendors often ship unsigned port monitors. Worth a look, not an alarm.
+            if (e.level == Level::High && e.reasons.size() == 1 && e.reasons[0].rfind(L"not validly signed", 0) == 0) {
+                e.level = Level::Review;
+            }
+            Flag(e, Level::Review, L"third-party print monitor DLL loaded by the spooler (SYSTEM)");
+        }
         out.push_back(e);
     }
 }
@@ -386,9 +395,27 @@ static void CollectComHijacks(std::vector<PersistenceEntry>& out)
     const std::wstring userBase = L"Software\\Classes\\CLSID";
     for (const std::wstring& clsid : RegEnumSubKeys(HKEY_CURRENT_USER, userBase)) {
         std::wstring server = ComServerPath(HKEY_CURRENT_USER, userBase, clsid);
-        if (server.empty()) continue;
+        bool hasServerKey = RegKeyExists(HKEY_CURRENT_USER, userBase + L"\\" + clsid + L"\\InprocServer32") ||
+                            RegKeyExists(HKEY_CURRENT_USER, userBase + L"\\" + clsid + L"\\LocalServer32");
+        if (!hasServerKey) continue;
         bool overridesMachine = RegKeyExists(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Classes\\CLSID\\" + clsid + L"\\InprocServer32") ||
                                 RegKeyExists(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Classes\\CLSID\\" + clsid + L"\\LocalServer32");
+        if (server.empty() || server == L"-") {
+            // A blank per-user override switches a system component off for this
+            // user. The best-known case is the Windows 11 "classic right-click menu"
+            // tweak. It runs nothing, so it is listed, not alarmed.
+            if (overridesMachine) {
+                PersistenceEntry e;
+                e.source = L"Blank COM override";
+                e.location = L"HKCU\\" + userBase + L"\\" + clsid;
+                e.name = clsid;
+                Flag(e, Level::Review, L"turns off the system's " +
+                     ComServerPath(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Classes\\CLSID", clsid) +
+                     L" for this user (often the Windows 11 classic context menu tweak)");
+                out.push_back(e);
+            }
+            continue;
+        }
         PersistenceEntry e;
         e.source = overridesMachine ? L"COM registration overriding the system" : L"Per-user COM registration";
         e.location = L"HKCU\\" + userBase + L"\\" + clsid;
@@ -643,18 +670,31 @@ SecurityCheckResult CheckPersistence(const AuditContext& context)
     ComScope com;
 
     std::vector<PersistenceEntry> entries;
+    DebugLog(L"CollectRunKeys");
     CollectRunKeys(entries);
+    DebugLog(L"CollectStartupFolders");
     CollectStartupFolders(entries);
+    DebugLog(L"CollectWinlogon");
     CollectWinlogon(entries);
+    DebugLog(L"CollectIfeo");
     CollectIfeo(entries);
+    DebugLog(L"CollectAppInit");
     CollectAppInit(entries);
+    DebugLog(L"CollectWmi");
     CollectWmi(entries);
+    DebugLog(L"CollectLsa");
     CollectLsa(entries);
+    DebugLog(L"CollectPrintMonitors");
     CollectPrintMonitors(entries);
+    DebugLog(L"CollectShellExtensions");
     CollectShellExtensions(entries);
+    DebugLog(L"CollectComHijacks");
     CollectComHijacks(entries);
+    DebugLog(L"CollectOfficeAddins");
     CollectOfficeAddins(entries);
+    DebugLog(L"CollectBrowserExtensions");
     CollectBrowserExtensions(entries);
+    DebugLog(L"CollectServices");
     CollectServices(entries);
     DebugLog(L"Collected " + std::to_wstring(entries.size()) + L" autostart entries");
 

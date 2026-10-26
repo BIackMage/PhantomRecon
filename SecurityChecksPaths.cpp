@@ -28,6 +28,7 @@ SecurityCheckResult CheckDllSearchPaths()
         if (s.startType == SERVICE_DISABLED || s.exePath.empty()) continue;
         std::wstring dir = DirectoryOf(s.exePath);
         if (dir.empty() || !DirectoryExists(dir)) continue;
+        if (IsPackagedAppPath(s.exePath)) continue;   // protected by Windows as a whole
         std::wstring key = ToLowerW(dir);
         if (!seen.insert(key).second) continue;
         std::wstring who;

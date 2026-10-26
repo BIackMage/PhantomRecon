@@ -2,6 +2,7 @@
 #include "FileAnalysis.h"
 
 #include "AppPaths.h"
+#include "DebugTrace.h"
 #include "FileIO.h"
 #include "TextUtils.h"
 
@@ -26,7 +27,7 @@
 
 static void DebugLog(const std::wstring& msg)
 {
-    OutputDebugStringW((L"[FileAnalysis] " + msg + L"\n").c_str());
+    Trace(L"FileAnalysis", msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +92,13 @@ static PCCERT_CONTEXT OpenSignerCertificate(const std::wstring& filePath, DWORD 
     if (!CryptQueryObject(CERT_QUERY_OBJECT_FILE, filePath.c_str(), contentFlags,
         CERT_QUERY_FORMAT_FLAG_BINARY, 0, &dwEncoding, &dwContentType, &dwFormatType,
         &hStore, &hMsg, NULL)) {
+        return NULL;
+    }
+    // Some content types come back without a message or a store. Without both
+    // there is no signer to read.
+    if (!hMsg || !hStore) {
+        if (hMsg) CryptMsgClose(hMsg);
+        if (hStore) CertCloseStore(hStore, 0);
         return NULL;
     }
 
@@ -369,6 +377,7 @@ static bool VerifyViaCatalog(const std::wstring& filePath, SignatureInfo& info)
             continue;
         }
 
+        DebugLog(L"Catalog lookup, hash length " + std::to_wstring(hashLen));
         HCATINFO hCatInfo = CryptCATAdminEnumCatalogFromHash(hCatAdmin, hash.data(), hashLen, 0, NULL);
         if (hCatInfo) {
             CATALOG_INFO catalogInfo = {};
@@ -397,12 +406,15 @@ static bool VerifyViaCatalog(const std::wstring& filePath, SignatureInfo& info)
                 data.dwStateAction = WTD_STATEACTION_VERIFY;
                 data.dwProvFlags = WTD_SAFER_FLAG;
 
+                DebugLog(std::wstring(L"WinVerifyTrust (catalog): ") + catalogInfo.wszCatalogFile);
                 LONG rc = WinVerifyTrust(NULL, &policy, &data);
                 data.dwStateAction = WTD_STATEACTION_CLOSE;
                 WinVerifyTrust(NULL, &policy, &data);
+                DebugLog(L"Catalog verify result " + std::to_wstring(rc) + L", reading catalog signer");
 
                 info.catalogFile = catalogInfo.wszCatalogFile;
-                PCCERT_CONTEXT catSigner = OpenSignerCertificate(info.catalogFile, CERT_QUERY_CONTENT_FLAG_ALL, NULL);
+                // A security catalog is a PKCS #7 signed message wrapping a trust list.
+                PCCERT_CONTEXT catSigner = OpenSignerCertificate(info.catalogFile, CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED, NULL);
                 if (catSigner) {
                     info.catalogSigner = GetCertNameW(catSigner, 0);
                     CertFreeCertificateContext(catSigner);
@@ -461,6 +473,7 @@ SignatureInfo AnalyzeFileSignature(const std::wstring& filePath, RevocationMode 
     winTrustData.dwStateAction = WTD_STATEACTION_VERIFY;
     winTrustData.dwProvFlags = WTD_SAFER_FLAG;
 
+    DebugLog(L"WinVerifyTrust (file): " + filePath);
     LONG trustStatus = WinVerifyTrust(NULL, &policyGUID, &winTrustData);
     winTrustData.dwStateAction = WTD_STATEACTION_CLOSE;
     WinVerifyTrust(NULL, &policyGUID, &winTrustData);
@@ -478,6 +491,20 @@ SignatureInfo AnalyzeFileSignature(const std::wstring& filePath, RevocationMode 
             info.warnings.push_back(L"CATALOG_SIGNED: Signed through a Windows security catalog ("
                 + (info.catalogSigner.empty() ? std::wstring(L"unknown signer") : info.catalogSigner) + L")");
             CheckSignerLocationMismatch(filePath, info, info.warnings);
+        }
+        else if (IsPackagedAppPath(filePath)) {
+            // Store / MSIX apps are signed as a whole package (AppxSignature.p7x).
+            // Windows checks that signature at install time and protects the folder,
+            // so individual files carry no signature of their own.
+            info.status = L"Signed (App package)";
+            info.signatureType = L"Package";
+            info.hashValid = true;
+            info.chainTrusted = true;
+            std::wstring rest = filePath.substr(filePath.find(L"\\WindowsApps\\") + 13);
+            std::wstring package = rest.substr(0, rest.find(L'\\'));
+            info.catalogSigner = package.rfind(L"Microsoft.", 0) == 0 || package.rfind(L"MicrosoftCorporationII.", 0) == 0
+                ? L"Microsoft Corporation (app package)" : package;
+            info.revocation = L"Not checked (app package)";
         }
         else {
             info.status = L"Unsigned";
@@ -592,7 +619,7 @@ SignatureSummary GetSignatureSummary(const std::wstring& filePath)
     else {
         SignatureInfo info = AnalyzeFileSignature(ToExtendedPath(filePath), RevocationMode::Off);
         summary.status = info.status;
-        summary.valid = info.status == L"Signed (Valid)";
+        summary.valid = info.status == L"Signed (Valid)" || info.status == L"Signed (App package)";
         if (info.signerName != L"N/A") summary.signer = info.signerName;
         else summary.signer = info.catalogSigner;
         summary.microsoft = summary.valid && IsMicrosoftSignerName(summary.signer);

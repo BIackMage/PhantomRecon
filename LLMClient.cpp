@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "LLMClient.h"
+#include "Redactor.h"
 #include "StringConv.h"
 
 #include <windows.h>
@@ -308,7 +309,18 @@ std::string LLMClient::ParseResponse(const std::string& responseBody)
 std::string LLMClient::SendChatCompletion(const std::vector<LLMMessage>& messages)
 {
     LLMConfig config = GetConfig();   // one snapshot for the whole request
-    std::string body = BuildRequestBody(config, messages);
+
+    // Redact and cap every message before it leaves the process, even for localhost.
+    std::vector<LLMMessage> outgoing = messages;
+    for (LLMMessage& m : outgoing) {
+        std::wstring text = Utf8ToWide(m.content);
+        if (config.redact) text = RedactText(text);
+        size_t cap = config.maxPromptChars > 200 ? static_cast<size_t>(config.maxPromptChars) : 200;
+        if (text.size() > cap) text = text.substr(0, cap) + L"\n[truncated by Phantom Recon]";
+        m.content = WideToUtf8(text);
+    }
+
+    std::string body = BuildRequestBody(config, outgoing);
     std::string response = HttpPost(config.endpoint, body);
     if (response.empty()) return "";
     return ParseResponse(response);

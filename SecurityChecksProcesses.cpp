@@ -74,7 +74,7 @@ SecurityCheckResult CheckRunningPrograms(const AuditContext& context)
     std::wstringstream baselineNotes;
 
     for (const ProcessInfo& p : processes) {
-        if (p.pid <= 4) continue;
+        if (p.pid <= 4 || p.pid == GetCurrentProcessId()) continue;
         std::vector<std::wstring> reasons;
         bool severe = false;
 

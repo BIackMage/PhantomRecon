@@ -93,6 +93,9 @@ SecurityCheckResult CheckWritableServiceExes()
     for (const ServiceInfo& s : services) {
         if (s.startType == SERVICE_DISABLED) continue;
         if (s.exePath.empty() || !FileExists(s.exePath)) continue;
+        // Store app folders are locked down by Windows as a whole, whatever the
+        // individual file permissions say.
+        if (IsPackagedAppPath(s.exePath)) continue;
         std::wstring who;
         if (LowPrivilegeWritable(s.exePath, false, &who)) {
             found++;

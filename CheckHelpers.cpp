@@ -14,6 +14,26 @@
 // ---------------------------------------------------------------------------
 bool IsSuspiciousCommandLine(const std::wstring& commandLine, std::wstring* reason)
 {
+    return CommandLineSuspicion(commandLine, reason) > 0;
+}
+
+std::vector<std::wstring> SplitAppInitList(const std::wstring& value)
+{
+    std::vector<std::wstring> out;
+    std::wstring current;
+    for (const std::wstring& token : SplitAnyW(value, L", \t")) {
+        current += current.empty() ? token : L" " + token;
+        if (EndsWithI(current, L".dll")) {
+            out.push_back(current);
+            current.clear();
+        }
+    }
+    if (!TrimW(current).empty()) out.push_back(current);
+    return out;
+}
+
+int CommandLineSuspicion(const std::wstring& commandLine, std::wstring* reason)
+{
     std::wstring c = ToLowerW(commandLine);
     // Undo the simplest escaping tricks before matching.
     std::wstring flat;
@@ -21,46 +41,45 @@ bool IsSuspiciousCommandLine(const std::wstring& commandLine, std::wstring* reas
         if (ch != L'^' && ch != L'`' && ch != L'"') flat += ch;
     }
 
-    struct Rule { const wchar_t* needle; const wchar_t* why; };
+    struct Rule { const wchar_t* needle; const wchar_t* why; int strength; };
     static const Rule rules[] = {
-        { L" -encodedcommand ", L"encoded PowerShell command" },
-        { L" -enc ",            L"encoded PowerShell command" },
-        { L" -ec ",             L"encoded PowerShell command" },
-        { L" -e jab",           L"encoded PowerShell command" },
-        { L"frombase64string",  L"decodes base64 at run time" },
-        { L"downloadstring(",   L"downloads and runs code" },
-        { L"downloadfile(",     L"downloads a file" },
-        { L"net.webclient",     L"downloads with Net.WebClient" },
-        { L"invoke-webrequest", L"downloads with Invoke-WebRequest" },
-        { L"iwr http",          L"downloads with Invoke-WebRequest" },
-        { L"invoke-expression", L"runs text as code" },
-        { L"iex(",              L"runs text as code" },
-        { L"iex (",             L"runs text as code" },
-        { L"mshta http",        L"mshta runs a remote HTML application" },
-        { L"mshta.exe http",    L"mshta runs a remote HTML application" },
-        { L"mshta vbscript:",   L"mshta runs inline script" },
-        { L"mshta javascript:", L"mshta runs inline script" },
-        { L"javascript:",       L"inline JavaScript in a command line" },
-        { L"/i:http",           L"regsvr32 loads a remote scriptlet" },
-        { L"scrobj.dll",        L"regsvr32 scriptlet loader" },
-        { L"certutil -urlcache", L"certutil used as a downloader" },
-        { L"certutil.exe -urlcache", L"certutil used as a downloader" },
-        { L"certutil -decode",  L"certutil decodes a payload" },
-        { L"bitsadmin /transfer", L"bitsadmin used as a downloader" },
-        { L"-windowstyle hidden", L"hidden PowerShell window" },
-        { L"-w hidden",         L"hidden PowerShell window" },
-        { L"process call create", L"WMIC starts a process" },
-        { L"cmstp ",            L"cmstp can run arbitrary INF commands" },
-        { L"\\appdata\\local\\temp\\", L"runs from the Temp folder" },
-        { L"\\users\\public\\", L"runs from the Public folder" },
+        { L" -encodedcommand ", L"encoded PowerShell command", 2 },
+        { L" -enc ",            L"encoded PowerShell command", 2 },
+        { L" -ec ",             L"encoded PowerShell command", 2 },
+        { L"frombase64string",  L"decodes base64 at run time", 2 },
+        { L"downloadstring(",   L"downloads and runs code", 2 },
+        { L"downloadfile(",     L"downloads a file", 2 },
+        { L"net.webclient",     L"downloads with Net.WebClient", 2 },
+        { L"invoke-webrequest", L"downloads with Invoke-WebRequest", 1 },
+        { L"iwr http",          L"downloads with Invoke-WebRequest", 1 },
+        { L"invoke-expression", L"runs text as code", 2 },
+        { L"iex(",              L"runs text as code", 2 },
+        { L"iex (",             L"runs text as code", 2 },
+        { L"mshta http",        L"mshta runs a remote HTML application", 2 },
+        { L"mshta.exe http",    L"mshta runs a remote HTML application", 2 },
+        { L"mshta vbscript:",   L"mshta runs inline script", 2 },
+        { L"mshta javascript:", L"mshta runs inline script", 2 },
+        { L"javascript:",       L"inline JavaScript in a command line", 2 },
+        { L"/i:http",           L"regsvr32 loads a remote scriptlet", 2 },
+        { L"scrobj.dll",        L"regsvr32 scriptlet loader", 2 },
+        { L"certutil -urlcache", L"certutil used as a downloader", 2 },
+        { L"certutil.exe -urlcache", L"certutil used as a downloader", 2 },
+        { L"certutil -decode",  L"certutil decodes a file", 2 },
+        { L"bitsadmin /transfer", L"bitsadmin used as a downloader", 2 },
+        { L"process call create", L"WMIC starts a process", 1 },
+        { L"-windowstyle hidden", L"hidden PowerShell window", 1 },
+        { L"-w hidden",         L"hidden PowerShell window", 1 },
+        { L"\\appdata\\local\\temp\\", L"runs from the Temp folder", 1 },
+        { L"\\users\\public\\", L"runs from the Public folder", 1 },
     };
+    int best = 0;
     for (const Rule& r : rules) {
-        if (flat.find(r.needle) != std::wstring::npos) {
+        if (r.strength > best && flat.find(r.needle) != std::wstring::npos) {
+            best = r.strength;
             if (reason) *reason = r.why;
-            return true;
         }
     }
-    return false;
+    return best;
 }
 
 std::wstring ProgramFromCommandLine(const std::wstring& commandLineIn)

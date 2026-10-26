@@ -12,6 +12,7 @@
 #include <windows.h>
 #include <wincrypt.h>
 #include <iomanip>
+#include <map>
 #include <set>
 #include <sstream>
 
@@ -74,9 +75,23 @@ SecurityCheckResult CheckOutdatedSoftware()
     }
 
     std::vector<SoftwareFinding> findings = FindOutdatedSoftware(programs, rules);
-    std::wstringstream details;
+    // Installers such as Python register one entry per component. Show each
+    // product once, under its shortest name, with a count of the parts.
+    std::map<std::wstring, std::pair<SoftwareFinding, int>> grouped;
     for (const SoftwareFinding& f : findings) {
+        std::wstring key = f.reason + L"|" + f.version;
+        auto it = grouped.find(key);
+        if (it == grouped.end()) grouped[key] = { f, 1 };
+        else {
+            it->second.second++;
+            if (f.name.size() < it->second.first.name.size()) it->second.first.name = f.name;
+        }
+    }
+    std::wstringstream details;
+    for (const auto& pair : grouped) {
+        const SoftwareFinding& f = pair.second.first;
         details << L"  " << f.name << L" " << f.version;
+        if (pair.second.second > 1) details << L" (and " << (pair.second.second - 1) << L" related components)";
         if (!f.minimumVersion.empty()) details << L" (update to " << f.minimumVersion << L" or later)";
         details << L": " << f.reason << L"\n";
     }

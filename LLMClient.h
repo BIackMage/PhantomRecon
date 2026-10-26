@@ -23,6 +23,8 @@ struct LLMConfig {
     std::string  model    = "local-model";
     int          maxTokens = 2048;
     double       temperature = 0.3;  // Low temperature for factual analysis
+    bool         redact = true;      // replace user, host and domain names before sending
+    int          maxPromptChars = 12000;   // each message is cut to this many characters
 };
 
 struct LLMMessage {

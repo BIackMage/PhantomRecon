@@ -186,8 +186,13 @@ SecurityCheckResult CheckLocalAccounts()
     details << L"Administrators group: " << (admins.empty() ? L"(could not read)" : JoinW(admins, L", ")) << L"\n";
 
     if (problems > 0) {
-        result.status = CHECK_FAIL;
-        result.detail = std::to_wstring(problems) + L" enabled account(s) do not need a password.\n" + details.str();
+        // The "password not required" flag lets the account have a blank local
+        // password. Accounts set up with a Microsoft account often carry it while
+        // still signing in with the online password, so this is a warning to check,
+        // not proof of a blank password.
+        result.status = CHECK_WARNING;
+        result.detail = std::to_wstring(problems) + L" enabled account(s) are allowed to have no password. "
+            L"Make sure each one actually has a password (or a Microsoft account sign-in).\n" + details.str();
     }
     else if (admins.size() > 3) {
         result.status = CHECK_WARNING;

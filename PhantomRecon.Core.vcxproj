@@ -57,6 +57,7 @@
     <ClInclude Include="Baseline.h" />
     <ClInclude Include="CheckCatalog.h" />
     <ClInclude Include="CheckHelpers.h" />
+    <ClInclude Include="DebugTrace.h" />
     <ClInclude Include="FileAnalysis.h" />
     <ClInclude Include="FileIO.h" />
     <ClInclude Include="FileOrigin.h" />
@@ -85,6 +86,12 @@
     <ClInclude Include="targetver.h" />
     <ClInclude Include="TextUtils.h" />
     <ClInclude Include="Version.h" />
+    <ClInclude Include="CliRunner.h" />
+    <ClInclude Include="Redactor.h" />
+    <ClInclude Include="Reports.h" />
+    <ClInclude Include="ResultsModel.h" />
+    <ClInclude Include="SampleData.h" />
+    <ClInclude Include="ScheduledScan.h" />
     <ClInclude Include="WmiQuery.h" />
   </ItemGroup>
   <ItemGroup>
@@ -95,6 +102,7 @@
     <ClCompile Include="Baseline.cpp" />
     <ClCompile Include="CheckCatalog.cpp" />
     <ClCompile Include="CheckHelpers.cpp" />
+    <ClCompile Include="DebugTrace.cpp" />
     <ClCompile Include="FileAnalysis.cpp" />
     <ClCompile Include="FileIO.cpp" />
     <ClCompile Include="FileOrigin.cpp" />
@@ -126,6 +134,13 @@
     <ClCompile Include="SecurityChecksTasks.cpp" />
     <ClCompile Include="ServiceUtil.cpp" />
     <ClCompile Include="SystemInfo.cpp" />
+    <ClCompile Include="CliRunner.cpp" />
+    <ClCompile Include="Redactor.cpp" />
+    <ClCompile Include="ReportHtml.cpp" />
+    <ClCompile Include="ReportJson.cpp" />
+    <ClCompile Include="ResultsModel.cpp" />
+    <ClCompile Include="SampleData.cpp" />
+    <ClCompile Include="ScheduledScan.cpp" />
     <ClCompile Include="WmiQuery.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -132,7 +132,7 @@ std::wstring GetCurrentUserNameString()
     return name;
 }
 
-std::wstring GetUserProfileDirectory()
+std::wstring GetUserProfileFolder()
 {
     wchar_t buf[MAX_PATH] = {};
     DWORD n = GetEnvironmentVariableW(L"USERPROFILE", buf, MAX_PATH);

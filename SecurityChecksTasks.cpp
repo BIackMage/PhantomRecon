@@ -224,9 +224,13 @@ SecurityCheckResult CheckScheduledTasks()
             std::wstring why;
             bool severe = false;
 
-            if (IsSuspiciousCommandLine(command, &why)) {
+            // Windows' own tasks run Windows programs with hidden windows all the time;
+            // only strong signs count for them.
+            bool windowsOwnTask = microsoftFolder && IsUnderWindowsDirectory(program);
+            int strength = CommandLineSuspicion(command, &why);
+            if (strength == 2 || (strength == 1 && !windowsOwnTask)) {
                 reasons.push_back(why);
-                severe = true;
+                if (strength == 2) severe = true;
             }
             if (IsUserDropLocation(program)) {
                 reasons.push_back(L"program is in a user drop folder");

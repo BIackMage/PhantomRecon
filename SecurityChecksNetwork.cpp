@@ -317,12 +317,12 @@ SecurityCheckResult CheckHostsFile()
     }
     if (watchedCount > 0) {
         result.status = CHECK_FAIL;
-        result.detail = std::to_wstring(watchedCount) + L" entr(ies) redirect security, update or banking sites:\n" + watched.str();
+        result.detail = std::to_wstring(watchedCount) + L" entry or entries redirect security, update or banking sites:\n" + watched.str();
         if (!other.str().empty()) result.detail += L"Other entries:\n" + other.str();
     }
     else if (!entries.empty()) {
         result.status = CHECK_INFO;
-        result.detail = std::to_wstring(entries.size()) + L" custom entr(ies), none for well-known sites:\n" + other.str();
+        result.detail = std::to_wstring(entries.size()) + L" custom entry or entries, none for well-known sites:\n" + other.str();
     }
     else {
         result.status = CHECK_PASS;

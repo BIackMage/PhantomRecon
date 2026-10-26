@@ -208,6 +208,46 @@ static std::wstring SidToName(PSID sid)
     return L"(unknown)";
 }
 
+// Ask Windows whether this process's own (non-elevated) token may write. Uses the
+// full access check, so deny entries, folder protection and integrity all count.
+static bool CurrentTokenCanWrite(const std::wstring& path, bool isDirectory)
+{
+    DWORD needed = 0;
+    SECURITY_INFORMATION si = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+    GetFileSecurityW(path.c_str(), si, NULL, 0, &needed);
+    if (needed == 0) return false;
+    std::vector<BYTE> sd(needed);
+    if (!GetFileSecurityW(path.c_str(), si, sd.data(), needed, &needed)) return false;
+
+    HANDLE token = NULL, impersonation = NULL;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &token)) return false;
+    BOOL dup = DuplicateToken(token, SecurityImpersonation, &impersonation);
+    CloseHandle(token);
+    if (!dup) return false;
+
+    GENERIC_MAPPING mapping = { FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_GENERIC_EXECUTE, FILE_ALL_ACCESS };
+    DWORD desired = isDirectory ? FILE_ADD_FILE : (FILE_WRITE_DATA | FILE_APPEND_DATA);
+    MapGenericMask(&desired, &mapping);
+    PRIVILEGE_SET privileges = {};
+    DWORD privilegesSize = sizeof(privileges);
+    DWORD granted = 0;
+    BOOL allowed = FALSE;
+    BOOL ok = AccessCheck(sd.data(), impersonation, desired, &mapping, &privileges, &privilegesSize, &granted, &allowed);
+    CloseHandle(impersonation);
+    return ok && allowed;
+}
+
+static bool ProcessIsElevated()
+{
+    HANDLE token = NULL;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return false;
+    TOKEN_ELEVATION elevation = {};
+    DWORD size = 0;
+    BOOL ok = GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size);
+    CloseHandle(token);
+    return ok && elevation.TokenIsElevated != 0;
+}
+
 bool LowPrivilegeWritable(const std::wstring& path, bool isDirectory, std::wstring* whoOut)
 {
     PACL dacl = NULL;
@@ -237,8 +277,11 @@ bool LowPrivilegeWritable(const std::wstring& path, bool isDirectory, std::wstri
             lowSids.push_back(sid);
         }
     }
+    // The current user counts only when this run is not elevated (an administrator
+    // can write anywhere, which is not a finding), and only when Windows' own access
+    // check agrees (WindowsApps and similar protected folders say no).
     std::vector<BYTE> self = CurrentUserSid();
-    if (!self.empty()) lowSids.push_back(self);
+    bool considerSelf = !self.empty() && !ProcessIsElevated();
 
     const DWORD fileWrite = FILE_WRITE_DATA | FILE_APPEND_DATA | GENERIC_WRITE | GENERIC_ALL | WRITE_DAC | WRITE_OWNER;
     const DWORD dirWrite = FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | GENERIC_WRITE | GENERIC_ALL | WRITE_DAC | WRITE_OWNER;
@@ -263,6 +306,11 @@ bool LowPrivilegeWritable(const std::wstring& path, bool isDirectory, std::wstri
                 break;
             }
         }
+        if (!writable && considerSelf && EqualSid(aceSid, self.data()) &&
+            CurrentTokenCanWrite(ToExtendedPath(path), isDirectory)) {
+            writable = true;
+            if (whoOut) *whoOut = SidToName(aceSid);
+        }
     }
 
     LocalFree(sd);
@@ -277,20 +325,44 @@ static std::wstring KnownFolderEnv(const wchar_t* var)
     return buf;
 }
 
+// True when the path is <drive>:\Users\<someone>\<folder>\... (the real profile
+// folder, not any folder that happens to have the same name).
+static bool UnderProfileFolder(const std::wstring& lower, const wchar_t* folder)
+{
+    size_t users = lower.find(L":\\users\\");
+    if (users == std::wstring::npos) return false;
+    size_t nameStart = users + 8;
+    size_t nameEnd = lower.find(L'\\', nameStart);
+    if (nameEnd == std::wstring::npos) return false;
+    std::wstring rest = lower.substr(nameEnd + 1);
+    std::wstring want = std::wstring(folder) + L"\\";
+    return rest.rfind(want, 0) == 0;
+}
+
 bool IsUserDropLocation(const std::wstring& path)
 {
     std::wstring lower = ToLowerW(path);
     if (lower.rfind(L"\\\\", 0) == 0 && lower.rfind(L"\\\\?\\", 0) != 0) return true;   // network share
+    if (UnderProfileFolder(lower, L"downloads") || UnderProfileFolder(lower, L"desktop") ||
+        UnderProfileFolder(lower, L"appdata\\local\\temp")) {
+        return true;
+    }
     const wchar_t* markers[] = {
-        L"\\temp\\", L"\\tmp\\", L"\\downloads\\", L"\\desktop\\", L"\\users\\public\\",
-        L"\\$recycle.bin\\", L"\\appdata\\local\\temp\\", L"\\windows\\temp\\",
+        L":\\users\\public\\", L":\\$recycle.bin\\", L":\\windows\\temp\\", L":\\temp\\", L":\\tmp\\",
     };
     for (const wchar_t* m : markers) {
         if (lower.find(m) != std::wstring::npos) return true;
     }
     std::wstring temp = ToLowerW(KnownFolderEnv(L"TEMP"));
-    if (!temp.empty() && lower.rfind(temp, 0) == 0) return true;
+    if (!temp.empty() && lower.rfind(temp + L"\\", 0) == 0) return true;
     return false;
+}
+
+bool IsPackagedAppPath(const std::wstring& path)
+{
+    std::wstring pf = KnownFolderEnv(L"ProgramFiles");
+    if (pf.empty()) pf = L"C:\\Program Files";
+    return StartsWithI(path, pf + L"\\WindowsApps\\");
 }
 
 bool IsUnderWindowsDirectory(const std::wstring& path)

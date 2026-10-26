@@ -70,6 +70,10 @@ bool LowPrivilegeWritable(const std::wstring& path, bool isDirectory, std::wstri
 // Desktop, Public, the recycle bin, or a network share.
 bool IsUserDropLocation(const std::wstring& path);
 
+// True for files of Store / MSIX apps under Program Files\WindowsApps. Windows
+// verifies the package signature at install time and protects these folders.
+bool IsPackagedAppPath(const std::wstring& path);
+
 // True when the path is under %SystemRoot%.
 bool IsUnderWindowsDirectory(const std::wstring& path);
 
