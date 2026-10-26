@@ -245,7 +245,7 @@ SecurityCheckResult CheckListeningPorts()
         Group& g = pair.second;
         if (!g.external) continue;
         bool hasPath = g.image.find(L'\\') != std::wstring::npos;
-        bool windowsBinary = hasPath && IsUnderWindowsDirectory(g.image);
+        bool windowsBinary = hasPath && IsProtectedWindowsPath(g.image);
         SignatureSummary sig;
         if (hasPath) sig = GetSignatureSummary(g.image);
         bool appRule = hasPath && rules.programs.count(ToLowerW(g.image)) > 0;
@@ -294,11 +294,26 @@ SecurityCheckResult CheckListeningPorts()
 SecurityCheckResult CheckHostsFile()
 {
     SecurityCheckResult result = MakeCheckResult(L"net.hosts");
-    std::wstring path = ExpandEnvironment(L"%SystemRoot%\\System32\\drivers\\etc\\hosts");
+    // Windows reads the hosts file from the folder in Tcpip\Parameters\DataBasePath.
+    // Pointing that value at another folder swaps the hosts file without touching the
+    // usual one, so the value is read and a changed folder is reported.
+    std::wstring defaultFolder = ExpandEnvironment(L"%SystemRoot%\\System32\\drivers\\etc");
+    std::wstring dataBasePath = TrimW(RegReadString(HKEY_LOCAL_MACHINE,
+        L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters", L"DataBasePath"));
+    std::wstring path = HostsFilePath(dataBasePath, defaultFolder);
+    std::wstring configured = dataBasePath;
+    while (configured.size() > 3 && (configured.back() == L'\\' || configured.back() == L'/')) configured.pop_back();
+    bool movedFolder = !configured.empty() && !EqualsI(configured, defaultFolder);
+    std::wstring folderNote = movedFolder
+        ? L"Windows reads the hosts file from a non-standard folder: DataBasePath = " + dataBasePath +
+          L" (the default is " + defaultFolder + L"). Check who changed it.\n"
+        : L"";
+    OutputDebugStringW((L"[Network] hosts file: " + path + (movedFolder ? L" (DataBasePath changed)" : L"") + L"\n").c_str());
+
     std::wstring text;
     if (!ReadTextFile(path, text)) {
-        result.status = CHECK_PASS;
-        result.detail = L"There is no hosts file.";
+        result.status = movedFolder ? CHECK_WARNING : CHECK_PASS;
+        result.detail = folderNote + L"There is no hosts file at " + path + L".";
         return result;
     }
     std::vector<HostsEntry> entries = ParseHostsFile(text);
@@ -321,12 +336,17 @@ SecurityCheckResult CheckHostsFile()
         if (!other.str().empty()) result.detail += L"Other entries:\n" + other.str();
     }
     else if (!entries.empty()) {
-        result.status = CHECK_INFO;
+        result.status = movedFolder ? CHECK_WARNING : CHECK_INFO;
         result.detail = std::to_wstring(entries.size()) + L" custom entry or entries, none for well-known sites:\n" + other.str();
     }
     else {
-        result.status = CHECK_PASS;
+        result.status = movedFolder ? CHECK_WARNING : CHECK_PASS;
         result.detail = L"The hosts file has no active entries.";
+    }
+    result.detail = folderNote + result.detail;
+    if (!movedFolder) {
+        if (!result.detail.empty() && result.detail.back() != L'\n') result.detail += L"\n";
+        result.detail += L"File: " + path + L"\n";
     }
     return result;
 }
@@ -352,6 +372,9 @@ SecurityCheckResult CheckDnsSettings()
         return result;
     }
 
+    // Hand-set servers are in the NameServer value of the adapter, under Tcpip for IPv4
+    // and Tcpip6 for IPv6. Each server is matched against the list for its own family,
+    // so a hand-set IPv6 server is checked even when IPv4 comes from DHCP.
     std::wstringstream details;
     int suspicious = 0;
     for (IP_ADAPTER_ADDRESSES* a = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data()); a; a = a->Next) {
@@ -359,29 +382,49 @@ SecurityCheckResult CheckDnsSettings()
         std::wstring name = a->FriendlyName ? a->FriendlyName : L"";
         std::string guid = a->AdapterName ? a->AdapterName : "";
         std::wstring guidW(guid.begin(), guid.end());
-        std::wstring staticServers = RegReadString(HKEY_LOCAL_MACHINE,
-            L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\" + guidW, L"NameServer");
-        bool isStatic = !TrimW(staticServers).empty();
+        std::set<std::wstring> staticV4, staticV6;
+        for (const std::wstring& s : ParseNameServerList(RegReadString(HKEY_LOCAL_MACHINE,
+                 L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\" + guidW, L"NameServer"))) {
+            staticV4.insert(CanonicalAddress(s));
+        }
+        for (const std::wstring& s : ParseNameServerList(RegReadString(HKEY_LOCAL_MACHINE,
+                 L"SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters\\Interfaces\\" + guidW, L"NameServer"))) {
+            staticV6.insert(CanonicalAddress(s));
+        }
 
         std::vector<std::wstring> servers;
+        std::vector<std::wstring> handSet;
         for (IP_ADAPTER_DNS_SERVER_ADDRESS* d = a->FirstDnsServerAddress; d; d = d->Next) {
-            wchar_t text[64] = {};
-            DWORD len = 64;
-            if (WSAAddressToStringW(d->Address.lpSockaddr, d->Address.iSockaddrLength, NULL, text, &len) == 0) {
-                servers.push_back(text);
+            const SOCKADDR* sa = d->Address.lpSockaddr;
+            if (!sa) continue;
+            std::wstring text;
+            bool v6 = false;
+            // InetNtopW needs no Winsock start-up, unlike WSAAddressToStringW, and leaves
+            // out the IPv6 zone id ("%12"), which only names a local interface.
+            if (sa->sa_family == AF_INET && d->Address.iSockaddrLength >= static_cast<INT>(sizeof(sockaddr_in))) {
+                text = AddressText(AF_INET, &reinterpret_cast<const sockaddr_in*>(sa)->sin_addr);
             }
+            else if (sa->sa_family == AF_INET6 && d->Address.iSockaddrLength >= static_cast<INT>(sizeof(sockaddr_in6))) {
+                text = AddressText(AF_INET6, &reinterpret_cast<const sockaddr_in6*>(sa)->sin6_addr);
+                v6 = true;
+            }
+            text = StripAddressZone(text);
+            if (text.empty()) continue;
+            bool isStatic = (v6 ? staticV6 : staticV4).count(CanonicalAddress(text)) > 0;
+            servers.push_back(text + (isStatic ? L" (set by hand)" : L""));
+            if (isStatic) handSet.push_back(text);
         }
         if (servers.empty()) continue;
-        details << L"  " << name << L" (" << (isStatic ? L"set by hand" : L"from DHCP") << L"): " << JoinW(servers, L", ") << L"\n";
-        if (isStatic) {
-            for (const std::wstring& s : servers) {
-                if (!IsPrivateOrLocalAddress(s) && !IsWellKnownPublicResolver(s)) {
-                    suspicious++;
-                    details << L"      " << s << L" is a public address that is not a well-known resolver\n";
-                }
+        details << L"  " << name << L": " << JoinW(servers, L", ") << L"\n";
+        for (const std::wstring& s : handSet) {
+            if (!IsPrivateOrLocalAddress(s) && !IsWellKnownPublicResolver(s)) {
+                suspicious++;
+                details << L"      " << s << L" is a public address that is not a well-known resolver\n";
             }
         }
     }
+    OutputDebugStringW((L"[Network] DNS: " + std::to_wstring(suspicious) + L" unusual hand-set server(s)\n").c_str());
+    if (details.str().empty()) details << L"No DNS servers are set on any connected adapter.\n";
 
     DWORD autoDoh = 0;
     RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\Dnscache\\Parameters", L"EnableAutoDoh", autoDoh);

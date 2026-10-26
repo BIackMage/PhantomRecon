@@ -26,8 +26,11 @@ struct ProcessInfo {
     DWORD        parentPid = 0;
     std::wstring name;        // lowercase exe name
     std::wstring image;       // full path, "" when not accessible
+    unsigned long long created = 0;   // FILETIME of the start, 0 when not readable
+    bool         pseudo = false;      // kernel pseudo-process (Registry, MemCompression, ...): no file
 };
 
+// Only the image name and start time are read (PROCESS_QUERY_LIMITED_INFORMATION); never memory.
 static std::vector<ProcessInfo> SnapshotProcesses()
 {
     std::vector<ProcessInfo> out;
@@ -47,7 +50,18 @@ static std::vector<ProcessInfo> SnapshotProcesses()
                     wchar_t path[MAX_PATH * 2] = {};
                     DWORD size = MAX_PATH * 2;
                     if (QueryFullProcessImageNameW(h, 0, path, &size)) p.image = path;
+                    FILETIME created = {}, exited = {}, kernel = {}, user = {};
+                    if (GetProcessTimes(h, &created, &exited, &kernel, &user)) {
+                        p.created = (static_cast<unsigned long long>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+                    }
                     CloseHandle(h);
+                }
+                // Elevated, Windows names some kernel pseudo-processes ("Registry",
+                // "MemCompression") instead of giving a path. There is no file to check.
+                if (IsPseudoProcessImage(p.image)) {
+                    DebugLog(L"Pseudo-process " + p.image + L" (pid " + std::to_wstring(p.pid) + L") skipped");
+                    p.pseudo = true;
+                    p.image.clear();
                 }
             }
             out.push_back(p);
@@ -55,6 +69,24 @@ static std::vector<ProcessInfo> SnapshotProcesses()
     }
     CloseHandle(snap);
     return out;
+}
+
+// The parent a snapshot names, if it is still the process that started this one.
+// Windows reuses PIDs: when the parent exits, a later process can get its PID.
+// confirmed is false when either start time could not be read.
+static const ProcessInfo* RealParent(const ProcessInfo& child, const std::map<DWORD, const ProcessInfo*>& byPid, bool& confirmed)
+{
+    confirmed = false;
+    auto parent = byPid.find(child.parentPid);
+    if (parent == byPid.end() || child.parentPid == 0) return nullptr;
+    int order = ParentStartOrder(parent->second->created, child.created);
+    if (order < 0) {
+        DebugLog(L"pid " + std::to_wstring(child.pid) + L": parent pid " + std::to_wstring(child.parentPid) +
+                 L" now belongs to " + parent->second->name + L", which started later; not its parent");
+        return nullptr;
+    }
+    confirmed = order > 0;
+    return parent->second;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +105,7 @@ SecurityCheckResult CheckRunningPrograms(const AuditContext& context)
     int inBaseline = 0, notInBaseline = 0, outsideBaseline = 0, changed = 0;
 
     for (const ProcessInfo& p : processes) {
-        if (p.pid <= 4 || p.pid == GetCurrentProcessId()) continue;
+        if (p.pid <= 4 || p.pid == GetCurrentProcessId() || p.pseudo) continue;
         std::vector<std::wstring> reasons;
         bool severe = false;
 
@@ -86,22 +118,20 @@ SecurityCheckResult CheckRunningPrograms(const AuditContext& context)
                 severe = true;
             }
         }
-        // Parent of core Windows processes
+        // Parent of core Windows processes, and Office starting a shell or script host.
+        // A parent whose start time could not be read may be a later process that got
+        // the old PID, so that case is a REVIEW, not a HIGH.
+        bool parentConfirmed = false;
+        const ProcessInfo* parent = RealParent(p, byPid, parentConfirmed);
+        const wchar_t* unconfirmed = L" (start times not readable, so the parent could not be confirmed)";
         std::wstring expectedParent = ExpectedParentProcess(p.name);
-        if (!expectedParent.empty()) {
-            auto parent = byPid.find(p.parentPid);
-            if (parent != byPid.end() && parent->second->name != expectedParent) {
-                reasons.push_back(L"started by " + parent->second->name + L" instead of " + expectedParent);
-                severe = true;
-            }
+        if (!expectedParent.empty() && parent && parent->name != expectedParent) {
+            reasons.push_back(L"started by " + parent->name + L" instead of " + expectedParent + (parentConfirmed ? L"" : unconfirmed));
+            if (parentConfirmed) severe = true;
         }
-        // Office starting a shell or script host
-        if (IsShellOrScriptHost(p.name)) {
-            auto parent = byPid.find(p.parentPid);
-            if (parent != byPid.end() && IsOfficeProcess(parent->second->name)) {
-                reasons.push_back(L"started by " + parent->second->name + L" (Office starting a shell)");
-                severe = true;
-            }
+        if (IsShellOrScriptHost(p.name) && parent && IsOfficeProcess(parent->name)) {
+            reasons.push_back(L"started by " + parent->name + L" (Office starting a shell)" + (parentConfirmed ? L"" : unconfirmed));
+            if (parentConfirmed) severe = true;
         }
 
         if (p.image.empty()) {
@@ -113,7 +143,9 @@ SecurityCheckResult CheckRunningPrograms(const AuditContext& context)
             }
             std::wstring key = ToLowerW(p.image);
             if (checkedImages.insert(key).second) {
-                if (!IsUnderWindowsDirectory(p.image) || IsUserDropLocation(p.image)) {
+                // Windows' own folders are trusted, except the ones normal users can
+                // write to (C:\Windows\Tasks, Temp, Tracing and similar).
+                if (!IsProtectedWindowsPath(p.image)) {
                     SignatureSummary sig = GetSignatureSummary(p.image);
                     if (!sig.valid && IsUserDropLocation(p.image)) {
                         reasons.push_back(L"unsigned program in a user drop folder");

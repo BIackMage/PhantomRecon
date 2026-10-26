@@ -60,15 +60,35 @@ std::wstring ToExtendedPath(const std::wstring& path);
 // Make a path absolute (GetFullPathNameW). Returns the input on failure.
 std::wstring AbsolutePath(const std::wstring& path);
 
-// True when the DACL lets a low-privilege principal write: Everyone, Authenticated
-// Users, BUILTIN\Users, INTERACTIVE, or the current user. For a folder "write" means
-// it can create files in it; for a file it means it can change the contents.
+// True when a normal user can write: Everyone, Authenticated Users, BUILTIN\Users or
+// INTERACTIVE through the DACL, or the signed-in user's own non-elevated token. When
+// this program runs elevated, the user's linked (non-elevated) token and the token of
+// the desktop shell are asked instead, so folders in the user's own profile still
+// count. For a folder "write" means it can create files in it (create-folder-only
+// rights do not count); for a file it means it can change the contents. Changing the
+// permissions or the owner counts as write. Deny entries are honoured.
 // whoOut receives the principal that has the access, for reports.
 bool LowPrivilegeWritable(const std::wstring& path, bool isDirectory, std::wstring* whoOut = nullptr);
 
+// The DACL half of LowPrivilegeWritable on its own: would a standard user holding
+// Everyone, Authenticated Users, BUILTIN\Users and INTERACTIVE get write access from
+// this DACL (an ACL*, evaluated in order, allow and deny entries, generic rights
+// mapped)? A null dacl means no DACL, which grants everyone full access.
+bool DaclLetsLowPrivilegeGroupsWrite(const void* dacl, bool isDirectory, std::wstring* whoOut = nullptr);
+
 // True when the path is in a place where ordinary users drop files: Temp, Downloads,
-// Desktop, Public, the recycle bin, or a network share.
+// Desktop (also when OneDrive or the user moved them), Public, the recycle bin, the
+// folders under %SystemRoot% that normal users can write to, or a network share.
 bool IsUserDropLocation(const std::wstring& path);
+
+// True for paths inside the folders under %SystemRoot% that Windows itself lets normal
+// users create files in: Tasks, Temp, Tracing, spool\drivers\color and similar.
+bool IsUserWritableWindowsFolder(const std::wstring& path);
+
+// True when the path is under %SystemRoot%, not in one of the folders above, and its
+// own folder is not writable by normal users. Use this, not IsUnderWindowsDirectory,
+// before trusting a file because of where it is.
+bool IsProtectedWindowsPath(const std::wstring& path);
 
 // True for files of Store / MSIX apps under Program Files\WindowsApps. Windows
 // verifies the package signature at install time and protects these folders.

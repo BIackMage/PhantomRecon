@@ -181,21 +181,6 @@ static std::set<std::wstring> AuthRootThumbprints(size_t& programListSize)
     return out;
 }
 
-static bool IsBuiltInRootSubject(const std::wstring& subject)
-{
-    const wchar_t* builtIn[] = {
-        L"Microsoft Root Authority", L"Microsoft Root Certificate Authority", L"Microsoft Authenticode(tm) Root Authority",
-        L"Copyright (c) 1997 Microsoft Corp.", L"Microsoft ECC Product Root Certificate Authority",
-        L"Microsoft ECC TS Root Certificate Authority", L"Microsoft Time Stamp Root Certificate Authority",
-        L"Microsoft Identity Verification Root Certificate Authority", L"Symantec Enterprise Mobile Root for Microsoft",
-        L"Thawte Timestamping CA", L"VeriSign Time Stamping Service Root",
-    };
-    for (const wchar_t* b : builtIn) {
-        if (StartsWithI(subject, b)) return true;
-    }
-    return false;
-}
-
 struct RootFinding {
     std::wstring store;
     std::wstring subject;
@@ -218,7 +203,10 @@ static void ScanRootStore(DWORD location, const wchar_t* locationName, HKEY regR
         std::wstring thumb = Sha1Hex(cert);
         std::wstring subject = CertName(cert, 0);
         if (authRoot.count(thumb)) continue;
-        if (IsBuiltInRootSubject(subject)) continue;
+        // Roots Windows ships outside the program list are matched by thumbprint. A
+        // name is free text: anyone can make a root called "Microsoft Root Authority".
+        if (IsBuiltInWindowsRootThumbprint(thumb)) continue;
+        OutputDebugStringW((L"[Software] root not in the program list: " + subject + L" " + thumb + L"\n").c_str());
         RootFinding f;
         f.store = locationName;
         f.subject = AsciiPunctuation(subject);

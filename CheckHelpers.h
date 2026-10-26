@@ -125,3 +125,71 @@ struct AuditSubcategory {
     bool           wantFailure;
 };
 const std::vector<AuditSubcategory>& GetRecommendedAuditSubcategories();
+
+// ---------------------------------------------------------------------------
+// Audit checks B: network, paths, persistence, processes, software, tasks.
+// ---------------------------------------------------------------------------
+
+// The file a Windows host program really runs: the DLL of rundll32 or regsvr32, the
+// script of wscript, cscript, mshta, powershell -File or pwsh, the target of cmd /c
+// (followed through "start" and nested hosts) and of conhost --headless. Expanded.
+// "" when the command does not go through one of these hosts or names no file.
+std::wstring ScriptHostPayload(const std::wstring& commandLine);
+
+// True when an Authenticode signature is normal for this kind of file (programs,
+// DLLs, drivers, installers). False for scripts, shortcuts and manifests (.url,
+// .vsto, .bat, .ps1 and so on), where "unsigned" says nothing about the file.
+bool SignatureExpected(const std::wstring& path);
+
+// A file URL, as in Office add-in Manifest values and Internet shortcuts, to a path:
+// "file:///C:/Program%20Files/x/a.vsto|vstolocal" -> "C:\Program Files\x\a.vsto".
+// Text that is not a file URL comes back trimmed, without any "|" suffix.
+std::wstring FileUrlToPath(const std::wstring& manifestValue);
+
+// Message key of a localized browser extension name ("__MSG_appName__" -> "appName").
+// "" when the name is not a complete message reference with a non-empty key.
+std::wstring ExtensionMessageKey(const std::wstring& name);
+
+// Text of an autostart snapshot key: lowercase, every run of whitespace (spaces, tabs,
+// line breaks) turned into one space, trimmed. A key always reads back as written.
+std::wstring NormalizeSnapshotKey(const std::wstring& text);
+
+// A task author that names Microsoft: contains "Microsoft", or is a resource string
+// from Windows' own folder ("$(@%SystemRoot%\system32\x.dll,-101)"). Empty is not.
+bool IsMicrosoftTaskAuthor(const std::wstring& author);
+
+// One entry of a PATH-style list with spaces, quotes and trailing backslashes
+// removed. The backslash of a drive root stays: "C:\" is never cut to "C:", which
+// would mean the current folder of drive C.
+std::wstring CleanPathListEntry(const std::wstring& entry);
+
+// DNS server text: "fe80::1%12" -> "fe80::1" (the zone id names a local interface).
+std::wstring StripAddressZone(const std::wstring& address);
+
+// A NameServer registry value ("192.0.2.1,192.0.2.2" or space separated) as a list,
+// zone ids removed.
+std::vector<std::wstring> ParseNameServerList(const std::wstring& value);
+
+// Canonical text of an IP address so two spellings of one IPv6 address compare
+// equal. Not an address: the input in lowercase.
+std::wstring CanonicalAddress(const std::wstring& address);
+
+// The hosts file Windows reads: <DataBasePath>\hosts, or <defaultFolder>\hosts when
+// the value is empty. dataBasePath must already be expanded.
+std::wstring HostsFilePath(const std::wstring& dataBasePath, const std::wstring& defaultFolder);
+
+// True for the SHA-1 thumbprint (hex, any case) of a root certificate Windows ships
+// outside Microsoft's root program list: the old Microsoft, Microsoft timestamping
+// and identity roots, Thawte and VeriSign timestamping and the Symantec mobile root.
+// Matched by thumbprint only, so a look-alike with the same name does not pass.
+bool IsBuiltInWindowsRootThumbprint(const std::wstring& sha1Hex);
+
+// Is the PID a process snapshot names as parent still the real parent? Windows reuses
+// PIDs, so a "parent" that started after the child is another process.
+// Times are FILETIME values; 0 means unknown.
+// 1 = parent started first, -1 = parent started later (PID reused), 0 = cannot tell.
+int ParentStartOrder(unsigned long long parentCreated, unsigned long long childCreated);
+
+// True for kernel pseudo-processes whose image name is not a file path (Registry,
+// MemCompression, Secure System, vmmem): there is no file to sign or locate.
+bool IsPseudoProcessImage(const std::wstring& image);

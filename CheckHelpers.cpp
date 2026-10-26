@@ -429,3 +429,451 @@ const std::vector<AuditSubcategory>& GetRecommendedAuditSubcategories()
     };
     return subcategories;
 }
+
+// ---------------------------------------------------------------------------
+// Audit checks B: network, paths, persistence, processes, software, tasks
+// ---------------------------------------------------------------------------
+static void HelperTrace(const std::wstring& msg)
+{
+    OutputDebugStringW((L"[CheckHelpers] " + msg + L"\n").c_str());
+}
+
+namespace {
+
+struct CommandArg {
+    std::wstring text;     // quotes removed
+    size_t       start = 0;
+    bool         quoted = false;
+};
+
+// Split a command line the way most programs do: spaces and tabs separate arguments
+// unless inside double quotes; the quotes themselves are dropped.
+std::vector<CommandArg> SplitCommandArgs(const std::wstring& s)
+{
+    std::vector<CommandArg> out;
+    size_t i = 0;
+    while (i < s.size()) {
+        while (i < s.size() && (s[i] == L' ' || s[i] == L'\t')) ++i;
+        if (i >= s.size()) break;
+        CommandArg a;
+        a.start = i;
+        bool inQuotes = false;
+        while (i < s.size()) {
+            wchar_t c = s[i];
+            if (c == L'"') {
+                inQuotes = !inQuotes;
+                a.quoted = true;
+                ++i;
+                continue;
+            }
+            if (!inQuotes && (c == L' ' || c == L'\t')) break;
+            a.text += c;
+            ++i;
+        }
+        out.push_back(a);
+    }
+    return out;
+}
+
+bool IsSwitchArg(const std::wstring& t)
+{
+    return !t.empty() && (t[0] == L'/' || t[0] == L'-');
+}
+
+// True when name (without the dash) is an accepted abbreviation of one of the full
+// parameter names. PowerShell takes any unambiguous prefix.
+bool IsParameterPrefix(const std::wstring& name, std::initializer_list<const wchar_t*> fullNames)
+{
+    if (name.empty()) return false;
+    for (const wchar_t* full : fullNames) {
+        if (std::wstring(full).rfind(name, 0) == 0) return true;
+    }
+    return false;
+}
+
+std::wstring PayloadAt(const std::wstring& commandLine, int depth);
+
+// Everything after a host's own switches, followed one level deeper.
+std::wstring PayloadOfRest(const std::wstring& rest, int depth)
+{
+    std::wstring r = TrimW(rest);
+    // cmd /c ""C:\a b\x.exe" arg": cmd drops the outer pair of quotes.
+    if (r.size() >= 2 && r[0] == L'"' && r[1] == L'"') {
+        r = r.substr(1);
+        size_t last = r.find_last_of(L'"');
+        if (last != std::wstring::npos) r.erase(last, 1);
+    }
+    if (r.empty()) return L"";
+    if (depth < 4) {
+        std::wstring inner = PayloadAt(r, depth + 1);
+        if (!inner.empty()) return inner;
+    }
+    return ProgramFromCommandLine(r);
+}
+
+std::wstring PayloadAt(const std::wstring& commandLineIn, int depth)
+{
+    std::wstring commandLine = TrimW(commandLineIn);
+    std::vector<CommandArg> args = SplitCommandArgs(commandLine);
+    if (args.empty()) return L"";
+
+    // The host program: the first argument, or for an unquoted path with spaces
+    // ("C:\Program Files\PowerShell\7\pwsh.exe -File x.ps1") the words up to ".exe".
+    size_t last = 0;
+    std::wstring program = args[0].text;
+    std::wstring firstName = ToLowerW(FileNameOf(program));
+    if (EndsWithI(firstName, L".exe")) firstName = firstName.substr(0, firstName.size() - 4);
+    static const wchar_t* const hosts[] = {
+        L"rundll32", L"regsvr32", L"wscript", L"cscript", L"mshta", L"powershell", L"pwsh", L"cmd", L"conhost",
+    };
+    bool firstIsHost = false;
+    for (const wchar_t* h : hosts) {
+        if (firstName == h) firstIsHost = true;
+    }
+    if (!args[0].quoted && !firstIsHost && args[0].text.find(L'\\') != std::wstring::npos) {
+        std::wstring joined;
+        for (size_t k = 0; k < args.size(); ++k) {
+            if (args[k].quoted) break;
+            joined += (k == 0 ? L"" : L" ") + args[k].text;
+            if (EndsWithI(joined, L".exe") || EndsWithI(joined, L".com")) {
+                program = joined;
+                last = k;
+                break;
+            }
+        }
+    }
+    std::wstring host = ToLowerW(FileNameOf(program));
+    if (EndsWithI(host, L".exe")) host = host.substr(0, host.size() - 4);
+    const size_t n = args.size();
+    const size_t firstArg = last + 1;
+
+    std::wstring payload;
+    if (host == L"rundll32") {
+        if (firstArg < n) {
+            const std::wstring& a = args[firstArg].text;
+            size_t comma = a.find(L',');
+            std::wstring dll = TrimW(comma == std::wstring::npos ? a : a.substr(0, comma));
+            std::wstring entry = comma == std::wstring::npos ? (firstArg + 1 < n ? args[firstArg + 1].text : L"")
+                                                             : a.substr(comma + 1);
+            size_t afterEntry = comma == std::wstring::npos ? firstArg + 2 : firstArg + 1;
+            bool shell32 = EqualsI(FileNameOf(dll), L"shell32.dll") || EqualsI(FileNameOf(dll), L"shell32");
+            if (shell32 && StartsWithI(TrimW(entry), L"control_rundll") && afterEntry < n) {
+                // "rundll32 shell32.dll,Control_RunDLL x.cpl" opens a Control Panel item.
+                std::wstring cpl = args[afterEntry].text;
+                size_t cplComma = cpl.find(L',');
+                payload = cplComma == std::wstring::npos ? cpl : cpl.substr(0, cplComma);
+            }
+            else {
+                payload = dll;
+            }
+        }
+    }
+    else if (host == L"regsvr32") {
+        for (size_t k = firstArg; k < n; ++k) {
+            if (!IsSwitchArg(args[k].text)) payload = args[k].text;
+        }
+    }
+    else if (host == L"wscript" || host == L"cscript") {
+        for (size_t k = firstArg; k < n; ++k) {
+            if (!IsSwitchArg(args[k].text)) {
+                payload = args[k].text;
+                break;
+            }
+        }
+    }
+    else if (host == L"mshta") {
+        if (firstArg < n && !IsSwitchArg(args[firstArg].text)) payload = args[firstArg].text;
+    }
+    else if (host == L"powershell" || host == L"pwsh") {
+        for (size_t k = firstArg; k < n; ++k) {
+            std::wstring t = ToLowerW(args[k].text);
+            if (!IsSwitchArg(t)) {
+                // Windows PowerShell runs a bare script path as a command; pwsh treats
+                // any first plain argument as -File.
+                if (host == L"pwsh" || EndsWithI(t, L".ps1")) payload = args[k].text;
+                break;
+            }
+            std::wstring name = t.substr(1);
+            if (IsParameterPrefix(name, { L"file" })) {
+                if (k + 1 < n) payload = args[k + 1].text;
+                break;
+            }
+            if (IsParameterPrefix(name, { L"command", L"encodedcommand" }) || name == L"ec") break;
+            if (IsParameterPrefix(name, { L"executionpolicy", L"windowstyle", L"version", L"psconsolefile", L"inputformat",
+                                          L"outputformat", L"configurationname", L"workingdirectory", L"settingsfile",
+                                          L"custompipename", L"encodedarguments" }) ||
+                name == L"ep" || name == L"wd") {
+                ++k;   // that parameter takes a value
+            }
+        }
+    }
+    else if (host == L"cmd") {
+        for (size_t k = firstArg; k < n; ++k) {
+            std::wstring t = ToLowerW(args[k].text);
+            if (t == L"/c" || t == L"/k" || t == L"/r") {
+                if (k + 1 >= n) return L"";
+                std::wstring rest = commandLine.substr(args[k + 1].start);
+                std::vector<CommandArg> restArgs = SplitCommandArgs(rest);
+                if (!restArgs.empty() && EqualsI(restArgs[0].text, L"start")) {
+                    // start ["title"] [/min /b /d folder ...] program
+                    size_t r = 1;
+                    if (r < restArgs.size() && restArgs[r].quoted) ++r;
+                    while (r < restArgs.size() && IsSwitchArg(restArgs[r].text)) {
+                        if (EqualsI(restArgs[r].text, L"/d")) ++r;
+                        ++r;
+                    }
+                    if (r >= restArgs.size()) return L"";
+                    rest = rest.substr(restArgs[r].start);
+                }
+                payload = PayloadOfRest(rest, depth);
+                break;
+            }
+            if (!IsSwitchArg(t)) break;
+        }
+    }
+    else if (host == L"conhost") {
+        for (size_t k = firstArg; k < n; ++k) {
+            std::wstring t = ToLowerW(args[k].text);
+            if (t.rfind(L"--", 0) == 0) {
+                if (t == L"--width" || t == L"--height" || t == L"--signal" || t == L"--server") ++k;
+                continue;
+            }
+            if (t == L"0x4") continue;   // legacy console handle argument
+            payload = PayloadOfRest(commandLine.substr(args[k].start), depth);
+            break;
+        }
+    }
+    else {
+        return L"";
+    }
+
+    payload = TrimW(payload);
+    while (!payload.empty() && payload.front() == L'"') payload.erase(payload.begin());
+    while (!payload.empty() && payload.back() == L'"') payload.pop_back();
+    if (payload.empty()) return L"";
+    std::wstring lower = ToLowerW(payload);
+    if (lower.find(L"://") != std::wstring::npos || lower.rfind(L"javascript:", 0) == 0 ||
+        lower.rfind(L"vbscript:", 0) == 0 || lower.rfind(L"about:", 0) == 0) {
+        return L"";   // inline or remote code; CommandLineSuspicion reports those
+    }
+    payload = ExpandEnvironment(payload);
+    // A bare word with no folder and no extension is a shell built-in ("echo"), not a file.
+    if (payload.find(L'\\') == std::wstring::npos && ExtensionOf(payload).empty()) return L"";
+    return payload;
+}
+
+} // namespace
+
+std::wstring ScriptHostPayload(const std::wstring& commandLine)
+{
+    std::wstring payload = PayloadAt(commandLine, 0);
+    if (!payload.empty()) HelperTrace(L"ScriptHostPayload: " + payload + L" <- " + commandLine);
+    return payload;
+}
+
+bool SignatureExpected(const std::wstring& path)
+{
+    static const wchar_t* const unsignedKinds[] = {
+        L".url", L".lnk", L".website", L".vsto", L".manifest", L".application", L".xml", L".txt", L".ini", L".json",
+        L".bat", L".cmd", L".vbs", L".vbe", L".js", L".jse", L".wsf", L".wsh", L".ps1", L".psm1", L".psd1",
+        L".hta", L".reg", L".inf", L".py", L".pyw", L".jar", L".html", L".htm",
+    };
+    std::wstring ext = ExtensionOf(path);
+    for (const wchar_t* e : unsignedKinds) {
+        if (ext == e) {
+            HelperTrace(L"SignatureExpected: no for " + path);
+            return false;
+        }
+    }
+    return true;
+}
+
+std::wstring FileUrlToPath(const std::wstring& manifestValue)
+{
+    std::wstring path = manifestValue;
+    size_t bar = path.find(L'|');
+    if (bar != std::wstring::npos) path = path.substr(0, bar);
+    path = TrimW(path);
+    bool url = false;
+    if (StartsWithI(path, L"file:///")) {
+        path = path.substr(8);
+        url = true;
+    }
+    else if (StartsWithI(path, L"file://")) {
+        path = L"//" + path.substr(7);   // file://server/share/x.vsto
+        url = true;
+    }
+    if (url) {
+        // Percent-decode the UTF-8 bytes of the URL ("Program%20Files").
+        int needed = WideCharToMultiByte(CP_UTF8, 0, path.c_str(), static_cast<int>(path.size()), NULL, 0, NULL, NULL);
+        std::string bytes(static_cast<size_t>(needed > 0 ? needed : 0), '\0');
+        if (needed > 0) WideCharToMultiByte(CP_UTF8, 0, path.c_str(), static_cast<int>(path.size()), &bytes[0], needed, NULL, NULL);
+        auto hexValue = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return -1;
+        };
+        std::string decoded;
+        for (size_t i = 0; i < bytes.size(); ++i) {
+            int hi = i + 2 < bytes.size() ? hexValue(bytes[i + 1]) : -1;
+            int lo = i + 2 < bytes.size() ? hexValue(bytes[i + 2]) : -1;
+            if (bytes[i] == '%' && hi >= 0 && lo >= 0) {
+                decoded += static_cast<char>(hi * 16 + lo);
+                i += 2;
+            }
+            else {
+                decoded += bytes[i];
+            }
+        }
+        int wide = MultiByteToWideChar(CP_UTF8, 0, decoded.c_str(), static_cast<int>(decoded.size()), NULL, 0);
+        std::wstring out(static_cast<size_t>(wide > 0 ? wide : 0), L'\0');
+        if (wide > 0) MultiByteToWideChar(CP_UTF8, 0, decoded.c_str(), static_cast<int>(decoded.size()), &out[0], wide);
+        path = ReplaceAllW(out, L"/", L"\\");
+        HelperTrace(L"FileUrlToPath: " + manifestValue + L" -> " + path);
+    }
+    return path;
+}
+
+std::wstring ExtensionMessageKey(const std::wstring& name)
+{
+    // "__MSG_" + key + "__", with at least one character of key.
+    if (name.size() <= 8 || name.rfind(L"__MSG_", 0) != 0) return L"";
+    if (name.compare(name.size() - 2, 2, L"__") != 0) {
+        HelperTrace(L"ExtensionMessageKey: incomplete reference " + name);
+        return L"";
+    }
+    return name.substr(6, name.size() - 8);
+}
+
+std::wstring NormalizeSnapshotKey(const std::wstring& text)
+{
+    std::wstring lower = ToLowerW(text);
+    std::wstring out;
+    bool pendingSpace = false;
+    for (wchar_t c : lower) {
+        bool space = c == L' ' || c == L'\t' || c == L'\r' || c == L'\n' || c == L'\v' || c == L'\f' || c == 0x00A0;
+        if (space) {
+            pendingSpace = !out.empty();
+            continue;
+        }
+        if (pendingSpace) out += L' ';
+        pendingSpace = false;
+        out += c;
+    }
+    if (out.size() != lower.size()) HelperTrace(L"NormalizeSnapshotKey: whitespace folded in " + out);
+    return out;
+}
+
+bool IsMicrosoftTaskAuthor(const std::wstring& author)
+{
+    std::wstring a = TrimW(author);
+    if (a.empty()) {
+        HelperTrace(L"IsMicrosoftTaskAuthor: no author recorded");
+        return false;
+    }
+    if (ContainsI(a, L"Microsoft")) return true;
+    std::wstring lower = ToLowerW(a);
+    const wchar_t* windowsResources[] = { L"$(@%systemroot%\\", L"@%systemroot%\\", L"$(@%windir%\\", L"@%windir%\\" };
+    for (const wchar_t* prefix : windowsResources) {
+        if (lower.rfind(prefix, 0) == 0) return true;
+    }
+    return false;
+}
+
+std::wstring CleanPathListEntry(const std::wstring& entry)
+{
+    std::wstring d = TrimW(entry);
+    while (!d.empty() && d.front() == L'"') d.erase(d.begin());
+    while (!d.empty() && d.back() == L'"') d.pop_back();
+    d = TrimW(d);
+    while (d.size() > 1 && (d.back() == L'\\' || d.back() == L'/')) {
+        if (d.size() == 3 && d[1] == L':') break;   // "C:\" is the drive root
+        d.pop_back();
+    }
+    if (d != entry) HelperTrace(L"CleanPathListEntry: [" + entry + L"] -> [" + d + L"]");
+    return d;
+}
+
+std::wstring StripAddressZone(const std::wstring& address)
+{
+    size_t percent = address.find(L'%');
+    if (percent != std::wstring::npos) HelperTrace(L"StripAddressZone: " + address);
+    return TrimW(percent == std::wstring::npos ? address : address.substr(0, percent));
+}
+
+std::vector<std::wstring> ParseNameServerList(const std::wstring& value)
+{
+    std::vector<std::wstring> out;
+    for (const std::wstring& part : SplitAnyW(value, L", \t;")) {
+        std::wstring s = StripAddressZone(part);
+        if (!s.empty()) out.push_back(s);
+    }
+    if (!out.empty()) HelperTrace(L"ParseNameServerList: " + JoinW(out, L", "));
+    return out;
+}
+
+std::wstring CanonicalAddress(const std::wstring& addressIn)
+{
+    std::wstring address = StripAddressZone(addressIn);
+    wchar_t text[64] = {};
+    IN_ADDR v4 = {};
+    if (InetPtonW(AF_INET, address.c_str(), &v4) == 1 && InetNtopW(AF_INET, &v4, text, 64)) return text;
+    IN6_ADDR v6 = {};
+    if (InetPtonW(AF_INET6, address.c_str(), &v6) == 1 && InetNtopW(AF_INET6, &v6, text, 64)) return ToLowerW(text);
+    HelperTrace(L"CanonicalAddress: not an IP address: " + address);
+    return ToLowerW(address);
+}
+
+std::wstring HostsFilePath(const std::wstring& dataBasePath, const std::wstring& defaultFolder)
+{
+    std::wstring folder = TrimW(dataBasePath);
+    if (folder.empty()) folder = defaultFolder;
+    std::wstring hosts = JoinPath(folder, L"hosts");
+    HelperTrace(L"HostsFilePath: " + hosts);
+    return hosts;
+}
+
+bool IsBuiltInWindowsRootThumbprint(const std::wstring& sha1Hex)
+{
+    // Read from the Root store of a Windows 11 25H2 install, October 2026. None of these
+    // is in the AuthRoot program list; Windows adds them itself.
+    static const wchar_t* const thumbprints[] = {
+        L"CDD4EEAE6000AC7F40C3802C171E30148030C072",   // Microsoft Root Certificate Authority
+        L"3B1EFD3A66EA28B16697394703A72CA340A05BD5",   // Microsoft Root Certificate Authority 2010
+        L"8F43288AD272F3103B6FB1428485EA3014C0BCFE",   // Microsoft Root Certificate Authority 2011
+        L"A43489159A520F0D93D032CCAF37E7FE20A8B419",   // Microsoft Root Authority
+        L"7F88CD7223F3C813818C994614A89C99FA3B5247",   // Microsoft Authenticode(tm) Root Authority
+        L"245C97DF7514E7CF2DF8BE72AE957B9E04741E85",   // Copyright (c) 1997 Microsoft Corp.
+        L"06F1AA330B927B753A40E68CDF22E34BCBEF3352",   // Microsoft ECC Product Root Certificate Authority 2018
+        L"31F9FC8BA3805986B721EA7295C65B3A44534274",   // Microsoft ECC TS Root Certificate Authority 2018
+        L"0119E81BE9A14CD8E22F40AC118C687ECBA3F4D8",   // Microsoft Time Stamp Root Certificate Authority 2014
+        L"F40042E2E5F7E8EF8189FED15519AECE42C3BFA2",   // Microsoft Identity Verification Root Certificate Authority 2020
+        L"92B46C76E13054E104F230517E6E504D43AB10B5",   // Symantec Enterprise Mobile Root for Microsoft
+        L"BE36A4562FB2EE05DBB3D32323ADF445084ED656",   // Thawte Timestamping CA
+        L"18F7C1FCC3090203FD5BAA2F861A754976C8DD25",   // VeriSign Time Stamping Service Root
+    };
+    for (const wchar_t* t : thumbprints) {
+        if (EqualsI(sha1Hex, t)) {
+            HelperTrace(L"IsBuiltInWindowsRootThumbprint: built-in root " + sha1Hex);
+            return true;
+        }
+    }
+    return false;
+}
+
+int ParentStartOrder(unsigned long long parentCreated, unsigned long long childCreated)
+{
+    if (parentCreated == 0 || childCreated == 0) return 0;
+    if (parentCreated > childCreated) HelperTrace(L"ParentStartOrder: parent started after the child, PID was reused");
+    return parentCreated <= childCreated ? 1 : -1;
+}
+
+bool IsPseudoProcessImage(const std::wstring& image)
+{
+    std::wstring s = TrimW(image);
+    if (s.empty()) return false;
+    bool pseudo = s.find(L'\\') == std::wstring::npos && s.find(L'/') == std::wstring::npos;
+    if (pseudo) HelperTrace(L"IsPseudoProcessImage: " + s);
+    return pseudo;
+}
