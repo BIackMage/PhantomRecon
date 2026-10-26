@@ -1,0 +1,50 @@
+# Builds every project and runs the tests on each push and pull request.
+name: Build and test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: ASCII punctuation in source and docs
+        run: python tools/check_punctuation.py
+
+      - name: Build (Release x64)
+        run: msbuild PhantomRecon.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal /warnaserror
+
+      - name: Run tests
+        run: .\x64\Release\PhantomReconTests.exe
+
+      - name: Command-line smoke test
+        shell: pwsh
+        run: |
+          $demo = Join-Path $env:RUNNER_TEMP "samples"
+          .\x64\Release\PhantomReconCli.exe --make-samples $demo
+          if ($LASTEXITCODE -ne 0) { throw "--make-samples failed with $LASTEXITCODE" }
+          .\x64\Release\PhantomReconCli.exe --full $demo --baseline "$demo\demo_baseline.prbl" --revocation off `
+            --report "$env:RUNNER_TEMP\demo.html" --json "$env:RUNNER_TEMP\demo.json" --quiet
+          # 1 = finished and found NEW / CHANGED / MISSING files, which the sample pack is built to show
+          if ($LASTEXITCODE -ne 1) { throw "expected exit code 1 from the sample scan, got $LASTEXITCODE" }
+          $json = Get-Content "$env:RUNNER_TEMP\demo.json" -Raw | ConvertFrom-Json
+          if ($json.schema -ne "phantomrecon.report/1") { throw "unexpected JSON schema: $($json.schema)" }
+
+      - name: Keep the programs
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhantomRecon-x64
+          path: |
+            x64/Release/PhantomRecon.exe
+            x64/Release/PhantomReconCli.exe
+          retention-days: 14

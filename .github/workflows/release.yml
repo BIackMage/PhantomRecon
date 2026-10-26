@@ -1,0 +1,69 @@
+# Publishes a release when a version tag (v1.2.3) is pushed.
+# The tag must match PHANTOMRECON_VERSION_W in Version.h.
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Check the tag matches Version.h
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $line = Select-String -Path Version.h -Pattern 'PHANTOMRECON_VERSION_W\s+L"([^"]+)"'
+          $version = $line.Matches[0].Groups[1].Value
+          if ($tag -ne $version) { throw "Tag v$tag does not match Version.h ($version)" }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build (Release x64)
+        run: msbuild PhantomRecon.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal /warnaserror
+
+      - name: Run tests
+        run: .\x64\Release\PhantomReconTests.exe
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "PhantomRecon-$env:VERSION-x64"
+          $stage = Join-Path "dist" $name
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item x64\Release\PhantomRecon.exe, x64\Release\PhantomReconCli.exe, LICENSE, README.md $stage
+          New-Item -ItemType Directory -Force "$stage\docs" | Out-Null
+          .\x64\Release\PhantomReconCli.exe --findings-md "$stage\docs\FINDINGS.md"
+          if ($LASTEXITCODE -ne 0) { throw "--findings-md failed" }
+          Compress-Archive -Path "$stage\*" -DestinationPath "dist\$name.zip" -Force
+          $hash = (Get-FileHash "dist\$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -FilePath "dist\$name.zip.sha256" -Encoding ascii
+          "ZIP=dist\$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SHA=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @"
+          Phantom Recon $env:VERSION for 64-bit Windows 10 and 11.
+
+          Unzip and run PhantomRecon.exe (window) or PhantomReconCli.exe --help (console).
+          Nothing is installed and nothing leaves the PC unless you turn on the AI panel and point it elsewhere.
+
+          SHA-256 of the zip: $env:SHA
+
+          The programs are not code-signed, so Windows SmartScreen may warn on first run.
+          Check the SHA-256 above before you run them.
+
+          License: PolyForm Noncommercial 1.0.0. Free for any noncommercial use; selling it is not allowed.
+          "@
+          gh release create "${{ github.ref_name }}" "$env:ZIP" "$env:ZIP.sha256" --title "Phantom Recon $env:VERSION" --notes $notes
