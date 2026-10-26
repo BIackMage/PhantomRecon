@@ -155,6 +155,7 @@ static const CodeInfo kCodes[] = {
     { L"UNUSUAL_ENTRY_SECTION",   L"T1027.002", L"The program starts outside its normal code section, which packers and injected stubs do." },
     { L"PACKER_ENTRY_PATTERN",    L"T1027.002", L"The first instructions match a known packer's unpacking stub." },
     { L"LOW_IMPORTS",             L"T1106",     L"The program imports almost no Windows functions, so it probably looks them up at run time to hide what it uses." },
+    { L"DOTNET_PROTECTOR",        L"T1027.002", L"The .NET metadata names a protector such as ConfuserEx or SmartAssembly, which hides the program's real code." },
     // PE header anomalies (PeFile.cpp)
     { L"TIMESTAMP_FUTURE",        L"T1070.006", L"The build timestamp is in the future. Tools that fake timestamps leave this mark." },
     { L"TIMESTAMP_ZERO",          L"T1070.006", L"The build timestamp was wiped to zero." },
@@ -169,13 +170,16 @@ static const CodeInfo kCodes[] = {
     { L"PDB_SUSPICIOUS_WORDS",    L"T1027",     L"The debug path contains words like payload, loader or inject." },
     { L"SECTION_COUNT_HIGH",      L"T1027.002", L"The program has an unusual number of sections." },
     { L"SECTION_NAME_ODD",        L"T1027.002", L"A section name is empty or contains unprintable characters." },
+    { L"IMPORT_TABLE_HUGE",       L"T1027",     L"The import table lists far more entries than any normal program; only the first part was read. Files built to slow scanners down look like this." },
     { L"DOTNET",                  L"",          L"This is a .NET program." },
+    { L"REPRODUCIBLE_BUILD",      L"",          L"The program was built reproducibly, so the build-time field holds a content hash, not a date." },
     // Origin (FileOrigin.cpp)
     { L"MOTW_INTERNET",           L"T1204.002", L"Windows recorded that this file was downloaded from the internet." },
     { L"MOTW_RESTRICTED",         L"T1204.002", L"Windows recorded that this file came from a site in the Restricted zone." },
     { L"MOTW_MISSING",            L"T1553.005", L"An executable in Downloads or the Desktop has no download mark. Archive tools and attackers strip it to avoid warnings." },
     { L"ADS_EXECUTABLE",          L"T1564.004", L"A hidden NTFS stream attached to this file contains a program or script." },
     { L"ADS_PRESENT",             L"T1564.004", L"The file has an extra NTFS data stream. Usually harmless (some apps tag files this way), sometimes used to hide data." },
+    { L"ADS_MANY",                L"T1564.004", L"The file carries an unusual number of extra NTFS data streams; only the first ones were inspected." },
     // Scripts (ScriptAnalysis.cpp)
     { L"ENCODED_COMMAND",         L"T1027.010", L"PowerShell is started with a base64-encoded command, which hides what it runs." },
     { L"INVOKE_EXPRESSION",       L"T1059.001", L"The script runs text as code (Invoke-Expression / IEX), often after downloading it." },

@@ -18,9 +18,11 @@
 // ---------------------------------------------------------------------------
 
 struct SamplePeSpec {
+    // Function names; "#<n>" imports ordinal n instead of a name.
     std::vector<std::pair<std::string, std::vector<std::string>>> imports = {
         { "KERNEL32.dll", { "ExitProcess", "GetStdHandle", "WriteFile" } },
     };
+    bool        reproducible = false;     // add an IMAGE_DEBUG_TYPE_REPRO debug entry
     uint32_t    timestamp = 0x65000000;   // a date in 2023
     int         checksumMode = 0;         // 0 correct, 1 wrong, 2 zero
     int         tlsCallbacks = 0;

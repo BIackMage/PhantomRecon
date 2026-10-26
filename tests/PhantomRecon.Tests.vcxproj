@@ -63,6 +63,7 @@
     <ClCompile Include="TestHashingAndPe.cpp" />
     <ClCompile Include="TestHelpers.cpp" />
     <ClCompile Include="TestMain.cpp" />
+    <ClCompile Include="TestFixFileAnalysis.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\PhantomRecon.Core.vcxproj">

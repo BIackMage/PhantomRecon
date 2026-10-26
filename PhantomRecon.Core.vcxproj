@@ -74,6 +74,7 @@
     <ClInclude Include="MalwareScoring.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="PeFile.h" />
+    <ClInclude Include="PeOrdinals.h" />
     <ClInclude Include="RegistryEnumerator.h" />
     <ClInclude Include="RegUtil.h" />
     <ClInclude Include="ScanCore.h" />
@@ -119,6 +120,7 @@
     <ClCompile Include="LLMClient.cpp" />
     <ClCompile Include="MalwareScoring.cpp" />
     <ClCompile Include="PeFile.cpp" />
+    <ClCompile Include="PeOrdinals.cpp" />
     <ClCompile Include="RegistryEnumerator.cpp" />
     <ClCompile Include="RegUtil.cpp" />
     <ClCompile Include="ScanCore.cpp" />

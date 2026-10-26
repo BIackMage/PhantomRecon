@@ -173,7 +173,8 @@ static void WriteScan(std::wstringstream& html, const ReportData& d)
         if (!r.changeDetails.empty() && r.changeDetails != L"No changes") notes.push_back(r.changeDetails);
         for (const std::wstring* list : { &e.sigWarnings, &e.peAnomalies, &e.originWarnings, &e.scriptIndicators }) {
             for (const std::wstring& item : SplitW(*list, L';')) {
-                if (IndicatorCode(item) != L"CATALOG_SIGNED" && IndicatorCode(item) != L"DOTNET") notes.push_back(item);
+                std::wstring code = IndicatorCode(item);
+                if (code != L"CATALOG_SIGNED" && code != L"DOTNET" && code != L"REPRODUCIBLE_BUILD") notes.push_back(item);
             }
         }
         if (e.packingStatus.rfind(L"PACKED", 0) == 0) notes.push_back(e.packingStatus);

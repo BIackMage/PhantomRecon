@@ -14,16 +14,27 @@
 
 struct PeImport {
     std::string dll;          // as written in the import table, e.g. "KERNEL32.dll"
-    std::string function;     // empty for ordinal imports
+    std::string function;     // by name: the name; by ordinal: the name from PeOrdinals when known, else empty
     uint16_t    ordinal = 0;
     bool        byOrdinal = false;
 };
+
+// Most import entries (thunks) the parser visits in one file. Real programs
+// stay far below it; a hostile file that points thousands of descriptors at one
+// huge table would otherwise ask for hundreds of millions.
+const uint32_t kMaxPeImportThunks = 32768;
+
+// Section headers kept in PeInfo::sections. Every header in the file still
+// counts for the overlay start and the section count.
+const uint32_t kMaxPeSectionsKept = 96;
 
 struct PeSection {
     std::string name;             // up to 8 chars, NUL-trimmed
     uint32_t    virtualAddress = 0;
     uint32_t    virtualSize = 0;
-    uint32_t    rawPointer = 0;
+    uint32_t    rawPointer = 0;       // PointerToRawData as written in the header
+    uint32_t    rawPointerLoaded = 0; // where the Windows loader actually reads: rounded down to 512 bytes
+                                      // when FileAlignment is at least 512 (as pefile does)
     uint32_t    rawSize = 0;
     uint32_t    characteristics = 0;
     double      entropySample = 0.0;   // entropy of the first 4 KB of raw data
@@ -45,13 +56,17 @@ struct PeInfo {
     uint64_t    imageBase = 0;
     uint32_t    entryPointRva = 0;
     uint32_t    sizeOfHeaders = 0;
+    uint32_t    fileAlignment = 0;
 
     uint32_t    checksumHeader = 0;
     uint32_t    checksumComputed = 0;
     bool        checksumComputedOk = false;
 
-    std::vector<PeSection> sections;
+    std::vector<PeSection> sections;        // the first kMaxPeSectionsKept headers
+    uint32_t    sectionHeaderCount = 0;     // every section header read from the file
     std::vector<PeImport>  imports;
+    bool        importsTruncated = false;   // the import table hit kMaxPeImportThunks
+    std::string dotNetProtector;            // "ConfuserEx" or "SmartAssembly" when the .NET metadata names one
     std::vector<uint8_t>   entryBytes;  // first 16 bytes at the entry point
 
     uint32_t    tlsCallbackCount = 0;
@@ -73,8 +88,9 @@ PeInfo ParsePeFile(const std::wstring& path);
 PeInfo ParsePeBuffer(const uint8_t* data, size_t size);
 
 // Import hash in the pefile / VirusTotal format: lowercase "dll.function" items,
-// dll extension (.dll/.ocx/.sys) removed, ordinals as "ord<N>", comma joined, MD5.
-// Empty when there are no imports.
+// dll extension (.dll/.ocx/.sys) removed, comma joined, MD5. Ordinal imports
+// from ws2_32, wsock32 and oleaut32 use their names (pefile's ordlookup);
+// other ordinals are "ord<N>". Empty when there are no imports.
 std::wstring ComputeImphash(const PeInfo& pe);
 
 // The string the imphash is computed over (exposed for tests).

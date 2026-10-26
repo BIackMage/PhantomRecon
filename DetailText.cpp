@@ -88,7 +88,9 @@ std::wstring BuildRowDetailText(const ScanRow& row)
     ListLines(out, L"Warnings", e.sigWarnings);
     out << L"\n";
 
-    bool isProgram = e.totalImports > 0 || !e.packingStatus.empty() || e.peTimestamp != 0;
+    // Scripts and other non-PE files carry packingStatus "Not a PE file"; they have no program structure.
+    bool notPe = e.packingStatus == L"Not a PE file";
+    bool isProgram = !notPe && (e.totalImports > 0 || !e.packingStatus.empty() || e.peTimestamp != 0);
     if (isProgram) {
         out << L"Program structure\n";
         Line(out, L"Packing", e.packingStatus);
@@ -101,7 +103,22 @@ std::wstring BuildRowDetailText(const ScanRow& row)
             Line(out, L"Data after the last section", std::to_wstring(e.overlaySize) + L" bytes, entropy " +
                                                      FormatFixed(e.overlayEntropy, 2));
         }
-        if (e.peTimestamp != 0) Line(out, L"Build time in the header", FormatUnixTime(static_cast<long long>(e.peTimestamp)));
+        if (e.peTimestamp != 0) {
+            // A reproducible build stores a content hash in this field; showing it as a date would mislead.
+            bool reproducible = false;
+            for (const std::wstring& part : SplitW(e.peAnomalies, L';')) {
+                if (IndicatorCode(part) == L"REPRODUCIBLE_BUILD") reproducible = true;
+            }
+            if (reproducible) {
+                wchar_t hex[16];
+                swprintf_s(hex, L"0x%08X", static_cast<unsigned int>(e.peTimestamp));
+                Line(out, L"Build time in the header", std::wstring(L"not a date (reproducible build; the field holds the hash ") +
+                                                       hex + L")");
+            }
+            else {
+                Line(out, L"Build time in the header", FormatUnixTime(static_cast<long long>(e.peTimestamp)));
+            }
+        }
         Line(out, L"Debug symbols path", e.pdbPath);
         ListLines(out, L"Packing indicators", e.packIndicators);
         ListLines(out, L"Header findings", e.peAnomalies);

@@ -227,6 +227,9 @@ BaselineEntry AnalyzeFile(const std::wstring& fullPath, const ScanOptions& optio
         entry.pdbPath = Utf8ToWide(pe.pdbPath);
         peAnomalies = FindPeAnomalies(pe, ToLowerW(fullPath), static_cast<int64_t>(time(nullptr)));
         if (pe.isDotNet) peAnomalies.push_back(L"DOTNET: .NET assembly");
+        if (pe.isReproducible) {
+            peAnomalies.push_back(L"REPRODUCIBLE_BUILD: The build-time field holds a content hash, not a date");
+        }
     }
     entry.peAnomalies = JoinCodes(peAnomalies);
 
@@ -240,8 +243,16 @@ BaselineEntry AnalyzeFile(const std::wstring& fullPath, const ScanOptions& optio
     entry.zoneHostUrl = origin.hostUrl;
     entry.zoneReferrerUrl = origin.referrerUrl;
     {
+        // Any user can attach thousands of streams to a file. List a bounded
+        // number so the field (and the baseline record holding it) stays small.
+        const size_t maxListed = 32;
         std::vector<std::wstring> streams;
-        for (const AltStream& s : origin.streams) streams.push_back(s.name + L" (" + std::to_wstring(s.size) + L")");
+        for (const AltStream& s : origin.streams) {
+            if (streams.size() >= maxListed) break;
+            streams.push_back(s.name + L" (" + std::to_wstring(s.size) + L")");
+        }
+        int64_t notListed = origin.streamCount - static_cast<int64_t>(streams.size());
+        if (notListed > 0) streams.push_back(std::to_wstring(notListed) + L" more streams not listed");
         entry.altStreams = JoinW(streams, L"; ");
     }
     entry.originWarnings = JoinCodes(origin.warnings);
@@ -265,8 +276,7 @@ BaselineEntry AnalyzeFile(const std::wstring& fullPath, const ScanOptions& optio
 
     double score = CalculateMalwareScore(entry.entropy, isSigned, isHidden, isInTempDir, importResult);
 
-    if (!sigInfo.hashValid && sigInfo.status != L"Unsigned") score += cfg.anomalies.hash_mismatch;
-    if (!sigInfo.chainTrusted && sigInfo.status != L"Unsigned") score += cfg.anomalies.untrusted_chain;
+    score += SignatureAnomalyScore(sigInfo);
     if (packResult.isPacked) score += cfg.anomalies.packing;
     if (packResult.writableExecSections > 0) score += cfg.anomalies.rwx_sections;
     if (sigInfo.revocation == L"REVOKED") score += cfg.revocation.revoked;
@@ -318,6 +328,33 @@ BaselineEntry AnalyzeFile(const std::wstring& fullPath, const ScanOptions& optio
     AddUniqueTechniques(techniques, script.techniques);
     if (isHidden) AddUniqueTechniques(techniques, { L"T1564.001" });
     entry.attackIds = JoinW(techniques, L", ");
+
+    // Every text field comes from the file or its streams, so a hostile file
+    // decides how long it is. Keep each one far below what the baseline reader
+    // accepts (65,536 characters), so one file can never make a baseline unloadable.
+    const size_t maxField = 16384;
+    auto capField = [maxField, &fullPath](std::wstring& field, const wchar_t* name) {
+        if (field.size() <= maxField) return;
+        DebugLog(std::wstring(L"Field ") + name + L" shortened from " + std::to_wstring(field.size()) +
+            L" characters: " + fullPath);
+        field = field.substr(0, maxField) + L" (shortened)";
+    };
+    capField(entry.signature, L"signature");
+    capField(entry.issuer, L"issuer");
+    capField(entry.rootCA, L"rootCA");
+    capField(entry.catalogSigner, L"catalogSigner");
+    capField(entry.version, L"version");
+    capField(entry.developer, L"developer");
+    capField(entry.permissions, L"permissions");
+    capField(entry.sigWarnings, L"sigWarnings");
+    capField(entry.packIndicators, L"packIndicators");
+    capField(entry.peAnomalies, L"peAnomalies");
+    capField(entry.pdbPath, L"pdbPath");
+    capField(entry.zoneHostUrl, L"zoneHostUrl");
+    capField(entry.zoneReferrerUrl, L"zoneReferrerUrl");
+    capField(entry.altStreams, L"altStreams");
+    capField(entry.originWarnings, L"originWarnings");
+    capField(entry.scriptIndicators, L"scriptIndicators");
 
     return entry;
 }

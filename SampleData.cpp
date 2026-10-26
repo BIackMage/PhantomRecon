@@ -59,6 +59,10 @@ std::vector<uint8_t> BuildSamplePe(const SamplePeSpec& spec)
     }
     for (size_t d = 0; d < dllCount; ++d) {
         for (const std::string& fn : spec.imports[d].second) {
+            if (!fn.empty() && fn[0] == '#') {
+                hintOff[d].push_back(0);   // by ordinal: no hint/name entry
+                continue;
+            }
             size_t off = AppendAligned(rdata, 2 + fn.size() + 1, 2);
             PutBytes(rdata, off + 2, fn.c_str(), fn.size() + 1);
             hintOff[d].push_back(off);
@@ -73,14 +77,18 @@ std::vector<uint8_t> BuildSamplePe(const SamplePeSpec& spec)
         desc.FirstThunk = rdataRva + static_cast<uint32_t>(iatOff[d]);
         Put(rdata, descOff + d * sizeof(IMAGE_IMPORT_DESCRIPTOR), desc);
         for (size_t f = 0; f < hintOff[d].size(); ++f) {
-            uint64_t thunk = rdataRva + hintOff[d][f];
+            const std::string& fn = spec.imports[d].second[f];
+            uint64_t thunk = (!fn.empty() && fn[0] == '#')
+                ? (IMAGE_ORDINAL_FLAG64 | static_cast<uint64_t>(std::stoul(fn.substr(1)) & 0xFFFF))
+                : rdataRva + hintOff[d][f];
             Put(rdata, iltOff[d] + f * 8, thunk);
             Put(rdata, iatOff[d] + f * 8, thunk);
         }
     }
 
     // Debug directory with a CodeView (RSDS) record
-    size_t debugOff = AppendAligned(rdata, sizeof(IMAGE_DEBUG_DIRECTORY), 4);
+    const size_t debugEntries = spec.reproducible ? 2 : 1;
+    size_t debugOff = AppendAligned(rdata, debugEntries * sizeof(IMAGE_DEBUG_DIRECTORY), 4);
     size_t cvOff = AppendAligned(rdata, 24 + spec.pdbPath.size() + 1, 4);
     {
         const char rsds[4] = { 'R', 'S', 'D', 'S' };
@@ -134,6 +142,12 @@ std::vector<uint8_t> BuildSamplePe(const SamplePeSpec& spec)
         dbg.AddressOfRawData = rdataRva + static_cast<DWORD>(cvOff);
         dbg.PointerToRawData = rdataFile + static_cast<DWORD>(cvOff);
         Put(rdata, debugOff, dbg);
+        if (spec.reproducible) {
+            IMAGE_DEBUG_DIRECTORY repro = {};
+            repro.TimeDateStamp = spec.timestamp;
+            repro.Type = 16;   // IMAGE_DEBUG_TYPE_REPRO
+            Put(rdata, debugOff + sizeof(IMAGE_DEBUG_DIRECTORY), repro);
+        }
     }
 
     std::vector<uint8_t> image(dataFile + dataRaw, 0);
@@ -178,7 +192,7 @@ std::vector<uint8_t> BuildSamplePe(const SamplePeSpec& spec)
     opt.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = rdataRva + static_cast<DWORD>(descOff);
     opt.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = static_cast<DWORD>((dllCount + 1) * sizeof(IMAGE_IMPORT_DESCRIPTOR));
     opt.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG].VirtualAddress = rdataRva + static_cast<DWORD>(debugOff);
-    opt.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG].Size = sizeof(IMAGE_DEBUG_DIRECTORY);
+    opt.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG].Size = static_cast<DWORD>(debugEntries * sizeof(IMAGE_DEBUG_DIRECTORY));
     if (spec.tlsCallbacks > 0) {
         opt.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress = rdataRva + static_cast<DWORD>(tlsOff);
         opt.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].Size = sizeof(IMAGE_TLS_DIRECTORY64);
