@@ -167,6 +167,7 @@ ScanOptions ScanOptionsFromSettings(const AppSettings& settings)
     options.revocation = mode;
     options.fastScanDepth = Clamp(settings.fastScanDepth, 1, 8);
     options.computeFuzzyHash = settings.fuzzyHashing;
+    options.redactCsv = settings.redactReports;   // "hide names" covers the scan CSV too
     return options;
 }
 

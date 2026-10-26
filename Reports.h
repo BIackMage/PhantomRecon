@@ -30,13 +30,19 @@ struct ReportData {
     ScanSummary          scan;
     std::vector<ScanRow> rows;
     std::wstring         scanTitle;    // e.g. "Full Scan of C:\Program Files" or "Baseline comparison"
+    std::wstring         scanModeName; // shown instead of ScanModeName(scan.mode) when set ("Baseline comparison")
 };
 
 // Fill time, host, OS and user. When redact is true the copy is redacted.
 void FillReportHost(ReportData& data, bool redact);
 
-// Apply redaction to every string in the report (paths, details, names).
+// Apply redaction to every string in the report (names, titles, check details, every
+// text field of every row). Safe to apply more than once.
 ReportData RedactReport(const ReportData& data);
+
+// The same redaction for output that is not a ReportData: the CSV and the text report.
+std::vector<ScanRow> RedactRows(const std::vector<ScanRow>& rows);
+std::vector<SecurityCheckResult> RedactAuditResults(const std::vector<SecurityCheckResult>& results);
 
 std::wstring BuildJsonReport(const ReportData& data);
 std::wstring BuildHtmlReport(const ReportData& data);

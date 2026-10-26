@@ -26,24 +26,47 @@ void FillReportHost(ReportData& data, bool redact)
     data.redacted = redact;
 }
 
+static void DebugLog(const std::wstring& msg)
+{
+    OutputDebugStringW((L"[Reports] " + msg + L"\n").c_str());
+}
+
+std::vector<ScanRow> RedactRows(const std::vector<ScanRow>& rows)
+{
+    std::vector<ScanRow> out;
+    out.reserve(rows.size());
+    for (const ScanRow& r : rows) out.push_back(RedactScanRow(r));
+    return out;
+}
+
+std::vector<SecurityCheckResult> RedactAuditResults(const std::vector<SecurityCheckResult>& results)
+{
+    std::vector<SecurityCheckResult> out = results;
+    for (SecurityCheckResult& r : out) {
+        r.name = RedactText(r.name);
+        r.detail = RedactText(r.detail);
+    }
+    return out;
+}
+
 ReportData RedactReport(const ReportData& in)
 {
     ReportData d = in;
     d.redacted = true;
-    d.hostName = RedactText(d.hostName);
-    d.userName = RedactText(d.userName);
-    for (SecurityCheckResult& r : d.audit) r.detail = RedactText(r.detail);
+    // The host and user fields hold exactly one name each; the placeholder is certain
+    // even when the name is too unusual for the word matcher.
+    d.hostName = d.hostName.empty() ? L"" : L"<host>";
+    d.userName = d.userName.empty() ? L"" : L"<user>";
+    d.osText = RedactText(d.osText);
+    d.audit = RedactAuditResults(d.audit);
     d.scan.root = RedactText(d.scan.root);
     d.scan.csvPath = RedactText(d.scan.csvPath);
     d.scan.baselinePath = RedactText(d.scan.baselinePath);
+    d.scan.finalState = RedactText(d.scan.finalState);
     d.scanTitle = RedactText(d.scanTitle);
-    for (ScanRow& r : d.rows) {
-        r.entry.path = RedactText(r.entry.path);
-        r.entry.permissions = RedactText(r.entry.permissions);
-        r.entry.pdbPath = RedactText(r.entry.pdbPath);
-        r.entry.sigWarnings = RedactText(r.entry.sigWarnings);
-        r.changeDetails = RedactText(r.changeDetails);
-    }
+    d.scanModeName = RedactText(d.scanModeName);
+    d.rows = RedactRows(d.rows);
+    DebugLog(L"RedactReport: " + std::to_wstring(d.audit.size()) + L" findings, " + std::to_wstring(d.rows.size()) + L" rows");
     return d;
 }
 
@@ -76,10 +99,13 @@ std::vector<TechniqueCount> CollectTechniques(const ReportData& data)
     return out;
 }
 
-std::wstring BuildNavigatorReport(const ReportData& data)
+std::wstring BuildNavigatorReport(const ReportData& input)
 {
+    // The technique comments name files ("file: tool.exe"), so they come from the
+    // redacted rows when names are hidden.
+    ReportData data = input.redacted ? RedactReport(input) : input;
     return BuildNavigatorLayer(L"Phantom Recon findings", L"Techniques suggested by findings on " +
-        (data.redacted ? std::wstring(L"<host>") : data.hostName) + L", " + data.generatedAt, CollectTechniques(data));
+        data.hostName + L", " + data.generatedAt, CollectTechniques(data));
 }
 
 static void WriteEntry(JsonWriter& w, const ScanRow& row)
@@ -182,7 +208,7 @@ std::wstring BuildJsonReport(const ReportData& input)
         w.Key(L"scan");
         w.BeginObject();
         w.Key(L"title"); w.String(data.scanTitle);
-        w.Key(L"mode"); w.String(ScanModeName(s.mode));
+        w.Key(L"mode"); w.String(data.scanModeName.empty() ? ScanModeName(s.mode) : data.scanModeName);
         w.Key(L"root"); w.String(s.root);
         w.Key(L"startedAt"); w.String(s.startedAt);
         w.Key(L"seconds"); w.Number(s.seconds);

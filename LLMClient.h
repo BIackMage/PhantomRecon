@@ -58,7 +58,6 @@ private:
 
     void SetLastError(const std::string& error);
 
-    static std::string BuildRequestBody(const LLMConfig& config, const std::vector<LLMMessage>& messages);
     std::string HttpPost(const std::wstring& url, const std::string& body);
     std::string ParseResponse(const std::string& responseBody);
 };
@@ -66,9 +65,29 @@ private:
 // Global singleton
 LLMClient& GetLLMClient();
 
-// True when the URL's host is this machine (localhost, 127.x.x.x, ::1).
+// Largest answer body read from the AI server. A longer answer is refused, not cut.
+const size_t kMaxAiReplyBytes = 4u * 1024u * 1024u;
+// Most of an error answer (HTTP status other than 200) kept for the message.
+const size_t kMaxAiErrorBytes = 4096u;
+
+// True when the URL's host is this machine: exactly "localhost", "::1" / "[::1]", or a
+// dotted-quad IPv4 literal in 127.0.0.0/8 (four decimal parts 0 to 255, no leading
+// zeros). "127.attacker.example" and "127.1" are not this PC.
 // Used by the sidebar to decide whether to ask before sending scan data.
 bool IsLoopbackEndpoint(const std::wstring& url);
+
+// The host part only ("127.0.0.1"), for the same test.
+bool IsLoopbackIPv4Literal(const std::wstring& host);
+
+// OpenAI-compatible request body. Only finite numbers are written: a temperature that
+// is not a finite number becomes the default, and it is kept within 0 to 2.
+std::string BuildChatRequestJson(const LLMConfig& config, const std::vector<LLMMessage>& messages);
+
+// The assistant's text from an OpenAI-compatible answer: choices[0].message.content
+// (a string, or an array of text parts), or choices[0].text. \uXXXX escapes are
+// decoded. False with a plain-words reason in error for invalid JSON, an "error"
+// object, no choices, or an empty answer.
+bool ExtractChatReply(const std::string& responseBody, std::string& content, std::string& error);
 
 // ---------------------------------------------------------------------------
 // Prompt builders

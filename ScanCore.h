@@ -25,6 +25,7 @@ struct ScanOptions {
     bool computeFuzzyHash = true;
     bool precount = true;                            // walk once first so progress can show a percentage
     int  fastScanDepth = 3;
+    bool redactCsv = false;                          // hide user, computer and domain names in the CSV rows
 };
 
 // Parse an exclusion list (one entry per line or ';' separated):

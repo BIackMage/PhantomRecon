@@ -5,6 +5,7 @@
 #include "CommandHelpers.h"
 #include "GuiComponents.h"
 #include "MainLayout.h"
+#include "Reports.h"
 #include "ScanCsv.h"
 #include "ScanEngine.h"
 #include "ScheduledScan.h"
@@ -121,7 +122,7 @@ static void CmdExportRows(AppState& app, HWND hWnd)
         DefaultReportPath(app, L"phantom-recon-rows", L".csv"));
     if (path.empty()) return;
     std::vector<ScanRow> rows = app.results.VisibleRows();
-    if (!ExportRowsToCsv(path, rows)) {
+    if (!ExportRowsToCsv(path, app.settings.redactReports ? RedactRows(rows) : rows)) {
         MessageBoxW(hWnd, (L"Could not write:\n" + path).c_str(), L"Export", MB_OK | MB_ICONERROR);
         return;
     }

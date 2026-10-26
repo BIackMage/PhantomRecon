@@ -134,7 +134,8 @@ static int RowPriority(const ScanRow& r)
 static void WriteScan(std::wstringstream& html, const ReportData& d)
 {
     const ScanSummary& s = d.scan;
-    html << L"<h2>" << H(d.scanTitle.empty() ? ScanModeName(s.mode) : d.scanTitle) << L"</h2>\n";
+    std::wstring modeName = d.scanModeName.empty() ? ScanModeName(s.mode) : d.scanModeName;
+    html << L"<h2>" << H(d.scanTitle.empty() ? modeName : d.scanTitle) << L"</h2>\n";
     html << L"<p class=\"meta\">" << s.executables << L" executable files analysed out of " << s.filesProcessed
          << L" files" << (s.root.empty() ? L"" : L" under " + H(s.root)) << L", in " << FormatFixed(s.seconds, 0) << L" seconds"
          << (s.cancelled ? L". The scan was cancelled; results are partial." : L".") << L"</p>\n";

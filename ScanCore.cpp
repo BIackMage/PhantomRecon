@@ -11,6 +11,7 @@
 #include "PeFile.h"
 #include "RegistryEnumerator.h"
 #include "ScanCsv.h"
+#include "Redactor.h"
 #include "ScoringConfig.h"
 #include "ScriptAnalysis.h"
 #include "StringConv.h"
@@ -476,7 +477,7 @@ static bool Cancelled(const ScanContext& ctx)
 
 static void Emit(ScanContext& ctx, const ScanRow& row)
 {
-    if (ctx.csv && ctx.csv->IsOpen()) ctx.csv->Write(row);
+    if (ctx.csv && ctx.csv->IsOpen()) ctx.csv->Write(ctx.options->redactCsv ? RedactScanRow(row) : row);
     ScanSummary& s = *ctx.summary;
     if (row.status == L"MATCH") s.match++;
     else if (row.status == L"NEW") s.added++;

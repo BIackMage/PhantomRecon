@@ -2,6 +2,7 @@
 #include "ScheduledScan.h"
 
 #include "AppPaths.h"
+#include "Baseline.h"
 #include "WmiQuery.h"
 
 #include <windows.h>
@@ -77,6 +78,14 @@ static ITaskService* ConnectService(std::wstring& error)
 bool RegisterWeeklyScan(const std::wstring& exePath, const std::wstring& baselinePath,
                         const std::wstring& reportsDir, std::wstring& error)
 {
+    // A task without a usable baseline would fail every Sunday, quietly. Refuse instead.
+    Baseline check;
+    if (baselinePath.empty() || !FileExists(baselinePath) || !check.LoadFromFile(baselinePath)) {
+        error = L"There is no usable baseline at " + baselinePath + L", so the weekly scan would fail every week. "
+                L"Take a baseline first. No task was created.";
+        DebugLog(L"Register refused: " + error);
+        return false;
+    }
     if (IsPortableMode()) {
         error = L"Portable mode never creates scheduled tasks.";
         return false;
