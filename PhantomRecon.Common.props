@@ -2,11 +2,30 @@
 <!--
   Settings shared by every project in the solution: compiler standard, warning
   level, character set and the include path. Each .vcxproj imports this file.
+
+  Runtime library: the C and C++ runtime is linked statically (/MT, /MTd), so the
+  release zip runs on a clean Windows install without the Visual C++
+  Redistributable. Every project must use the same setting or the link fails.
+
+  Hardening: Control Flow Guard (/guard:cf) on the compiler and the linker in Release
+  (Debug keeps Edit and Continue, /ZI, which cannot be combined with it). Warning
+  level 4, and warnings are errors in every build, not only on the CI command line.
+  /Qspectre is not used: it needs the Spectre-mitigated runtime libraries, an
+  optional Visual Studio component that neither a default install nor the CI image
+  is guaranteed to have, and this program runs no untrusted code inside its own
+  process, which is the case that mitigation is for.
+
+  Release builds are reproducible as far as MSVC allows: /Brepro replaces the time
+  stamps in the objects and the programs with a hash of the content, and
+  /PDBALTPATH keeps the build machine's folder out of the programs (only the .pdb
+  file name is recorded). Keep the .pdb files of every published release: they
+  are the only way to read a crash dump from that build.
 -->
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemDefinitionGroup>
     <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -15,21 +34,35 @@
       <PreprocessorDefinitions>UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
+    <Link>
+      <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
+    </Link>
+    <Lib>
+      <TreatLibWarningAsErrors>true</TreatLibWarningAsErrors>
+    </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
     <ClCompile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <ControlFlowGuard>Guard</ControlFlowGuard>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/Brepro %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalOptions>/guard:cf /Brepro /PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions>
     </Link>
+    <Lib>
+      <AdditionalOptions>/Brepro %(AdditionalOptions)</AdditionalOptions>
+    </Lib>
   </ItemDefinitionGroup>
 </Project>

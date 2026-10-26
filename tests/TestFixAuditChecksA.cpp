@@ -257,11 +257,11 @@ TEST(FixAudit_UacSecureDesktop)
 TEST(FixAudit_TpmServiceStoppedIsNotNoTpm)
 {
     CHECK(ClassifyTbsResult(TBS_SUCCESS) == TbsOutcome::Present);
-    CHECK(ClassifyTbsResult(TBS_E_TPM_NOT_FOUND) == TbsOutcome::NoTpm);
-    CHECK(ClassifyTbsResult(TBS_E_SERVICE_NOT_RUNNING) == TbsOutcome::ServiceUnavailable);
-    CHECK(ClassifyTbsResult(TBS_E_SERVICE_DISABLED) == TbsOutcome::ServiceUnavailable);
-    CHECK(ClassifyTbsResult(TBS_E_SERVICE_START_PENDING) == TbsOutcome::ServiceUnavailable);
-    CHECK(ClassifyTbsResult(TBS_E_INTERNAL_ERROR) == TbsOutcome::Error);
+    CHECK(ClassifyTbsResult(static_cast<TBS_RESULT>(TBS_E_TPM_NOT_FOUND)) == TbsOutcome::NoTpm);
+    CHECK(ClassifyTbsResult(static_cast<TBS_RESULT>(TBS_E_SERVICE_NOT_RUNNING)) == TbsOutcome::ServiceUnavailable);
+    CHECK(ClassifyTbsResult(static_cast<TBS_RESULT>(TBS_E_SERVICE_DISABLED)) == TbsOutcome::ServiceUnavailable);
+    CHECK(ClassifyTbsResult(static_cast<TBS_RESULT>(TBS_E_SERVICE_START_PENDING)) == TbsOutcome::ServiceUnavailable);
+    CHECK(ClassifyTbsResult(static_cast<TBS_RESULT>(TBS_E_INTERNAL_ERROR)) == TbsOutcome::Error);
     CHECK_EQ(TpmStatusWithoutTbs(1), std::wstring(CHECK_WARNING));    // a TPM device exists
     CHECK_EQ(TpmStatusWithoutTbs(-1), std::wstring(CHECK_WARNING));   // cannot tell
     CHECK_EQ(TpmStatusWithoutTbs(0), std::wstring(CHECK_FAIL));       // driver sees none

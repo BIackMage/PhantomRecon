@@ -46,6 +46,12 @@ known_good_sha256.txt
 portable.flag
 reports/
 
+# Output of the tools/ scripts (release files, winget manifests, test logs)
+manifests/
+tests.log
+__pycache__/
+*.pyc
+
 # Private planning notes kept outside the repo
 *.private.md
 *.private.txt

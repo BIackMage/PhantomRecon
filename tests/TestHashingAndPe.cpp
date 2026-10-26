@@ -186,11 +186,33 @@ TEST(Pe_GarbageIsRejected)
     CHECK(!pe.valid);
     CHECK(FindPeAnomalies(pe, L"x.exe", 1790000000).empty());
 
-    // Truncate a real sample: the parser must fail cleanly, not crash.
+    // Truncate a real sample: the parser must fail cleanly, not crash, and what it
+    // does report about a cut-off file must be true. The sample's headers start at
+    // 0x80; the optional header ends at 0x188 and the three section headers (40 bytes
+    // each) at 0x200. Section data starts at 0x400.
     std::vector<uint8_t> image = BuildSamplePe(SamplePeSpec());
-    for (size_t cut : { size_t(2), size_t(64), size_t(0x100), size_t(0x200), image.size() / 2 }) {
+    REQUIRE(image.size() > 0x800);
+    for (size_t cut : { size_t(2), size_t(64), size_t(0x100), size_t(0x187) }) {
         PeInfo t = ParsePeBuffer(image.data(), cut);
-        CHECK(!t.valid || t.sections.size() <= 3);
+        if (t.valid) tf::Fail(__FILE__, __LINE__, "a file cut at " + std::to_string(cut) + " bytes parsed as valid");
+        CHECK(!t.error.empty());
+    }
+    struct Cut {
+        size_t size;
+        size_t sections;   // complete section headers inside the cut
+    };
+    for (Cut cut : { Cut{ 0x188, 0 }, Cut{ 0x1B0, 1 }, Cut{ 0x200, 3 }, Cut{ image.size() / 2, 3 }, Cut{ image.size() - 1, 3 } }) {
+        PeInfo t = ParsePeBuffer(image.data(), cut.size);
+        std::string at = " (cut at " + std::to_string(cut.size) + ")";
+        if (!t.valid) {
+            tf::Fail(__FILE__, __LINE__, "complete headers rejected" + at + ": " + tf::Narrow(t.error));
+            continue;
+        }
+        if (t.sections.size() != cut.sections) tf::Fail(__FILE__, __LINE__, "sections " + std::to_string(t.sections.size()) + at);
+        CHECK_EQ(t.sectionHeaderCount, static_cast<uint32_t>(cut.sections));
+        CHECK_EQ(t.fileSize, static_cast<int64_t>(cut.size));
+        // A file that ends inside its own sections has nothing appended after them.
+        if (t.overlaySize != 0) tf::Fail(__FILE__, __LINE__, "overlay of " + std::to_string(t.overlaySize) + " bytes" + at);
     }
     CHECK(!ParsePeBuffer(nullptr, 0).valid);
 }

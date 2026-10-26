@@ -87,12 +87,16 @@ Engine (`PhantomRecon.Core.vcxproj`, static library):
 | `CheckCatalog.cpp` | Every check's title, severity, mappings, explanation, fix and undo |
 | `AuditRunner.cpp`, `SecurityChecks*.cpp` | The audit and its checks |
 | `CheckHelpers.cpp` | Pure decision logic behind the checks (testable) |
+| `AuditRules.cpp` | Pure verdict logic for the Defender, hardening, account, logging and firewall checks: facts in, status out |
+| `PeOrdinals.cpp` | Function names for imports by ordinal (ws2_32, wsock32, oleaut32) for the imphash and import scoring |
 | `HardeningScore.cpp`, `AttackMapping.cpp` | Score; ATT&CK names, finding codes, Navigator |
 | `ReportHtml.cpp`, `ReportJson.cpp`, `DetailText.cpp` | Reports; plain-text explanations for windows and AI |
 | `Redactor.cpp`, `LLMClient.cpp` | Name hiding; the optional AI client |
+| `JsonWriter.cpp`, `JsonReader.cpp` | JSON out (reports, AI requests); strict JSON in (AI answers, treated as hostile) |
 | `SampleData.cpp`, `ScheduledScan.cpp`, `CliRunner.cpp` | Sample pack, weekly task, the console program's logic |
 | `StartupRequest.cpp` | The window program's command line |
-| `AppPaths.cpp`, `FileIO.cpp`, `RegUtil.cpp`, `ServiceUtil.cpp`, `WmiQuery.cpp`, `SystemInfo.cpp`, `HashUtils.cpp`, `TextUtils.h` | Shared helpers |
+| `BackgroundWorker.cpp`, `DebugTrace.cpp` | Joinable worker threads; trace lines (`PHANTOMRECON_TRACE=1`) |
+| `AppPaths.cpp`, `FileIO.cpp`, `RegUtil.cpp`, `ServiceUtil.cpp`, `WmiQuery.cpp`, `SystemInfo.cpp`, `HashUtils.cpp`, `TextUtils.h`, `StringConv.h` | Shared helpers |
 
 Window app (`PhantomRecon.vcxproj`):
 
@@ -106,9 +110,28 @@ Window app (`PhantomRecon.vcxproj`):
 | `GuiComponents.cpp`, `Theme.cpp` | List, progress bar, dialogs, clipboard; light and dark |
 | `FindingsWindow.cpp`, `DetailWindow.cpp`, `AppDialogs.cpp`, `SettingsDialog.cpp` | Secondary windows |
 | `AiSidebar.cpp` | The optional AI panel |
-| `AppState.h`, `AppMessages.h`, `BackgroundWorker.cpp` | State, messages, threads |
+| `AppState.h`, `AppMessages.h` | State and messages (threads come from `BackgroundWorker` in the engine) |
 
-Console program: `cli/CliMain.cpp`. Tests: `tests/`.
+Console program: `cli/CliMain.cpp`.
+
+Tests (`tests/`, `PhantomReconTests.exe`):
+
+| File | Owns |
+|------|------|
+| `TestMain.cpp`, `TestFramework.h` | The runner: filters, per-run temp folder, data-folder override, crash and hang reports, exit codes |
+| `JsonCheck.h` | Strict JSON syntax check with key counts, for the report tests |
+| `Test*.cpp` | One file per area; `TestFix<Area>.cpp` hold the tests for review fixes |
+
+Tools and CI (`tools/`, `.github/workflows/`):
+
+| File | Owns |
+|------|------|
+| `release_common.py` | Tag format, release file names, version sources, step outputs (one home for each) |
+| `check_punctuation.py`, `check_versions.py`, `check_findings_doc.py` | Text checks: ASCII punctuation, one version everywhere, FINDINGS.md matches the catalog |
+| `run_tests.py`, `unelevated.py` | Run the tests with a log and judge the totals; run them again without administrator rights |
+| `ci_smoke_test.py`, `gui_start_check.py` | The console program end to end on the sample pack; the window program starts and closes |
+| `check_release_tag.py`, `package_release.py`, `publish_release.py`, `make_winget_manifest.py` | Release: tag check, zip and symbols and checksums, draft release, winget manifests |
+| `build.yml`, `release.yml`, `docs.yml` | Workflows. Each step calls one script above; no logic lives in the YAML |
 
 ## Build, test, verify
 
@@ -117,10 +140,27 @@ msbuild PhantomRecon.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal
 .\x64\Release\PhantomReconTests.exe
 ```
 
-A change is done when the build has no warnings (CI builds with warnings as errors), every
-test passes, and you have run the program and exercised the path you touched. Engine
-changes get a test. The window code has no automated tests; say in the commit message
-what you ran by hand.
+A change is done when the build has no warnings, every test passes, and you have run the
+program and exercised the path you touched. Engine changes get a test. The window code
+has no automated tests; say in the commit message what you ran by hand. The same checks
+CI runs, on your PC: `python tools\run_tests.py`, `python tools\ci_smoke_test.py`,
+`python tools\check_versions.py`, `python tools\check_findings_doc.py` (`--fix`
+regenerates `docs/FINDINGS.md` after a catalog change), `python tools\check_punctuation.py`.
+
+Build settings live in `PhantomRecon.Common.props` and apply to every project: warning
+level 4 with warnings as errors, Control Flow Guard, the static C runtime (`/MT`, so the
+release zip runs without the Visual C++ Redistributable; a test fails if a program
+imports a runtime DLL), and reproducible Release builds (`/Brepro`). The projects pin
+Windows SDK 10.0.22621.0; to build with another installed SDK, add
+`/p:WindowsTargetPlatformVersion=<version>` to the msbuild line, but CI uses the pinned one.
+
+The test runner points the program's data folder (scoring INI, known-good list,
+revocation cache, snapshot: everything `AppFilePath` returns) at its own empty
+per-run temp folder through the `PHANTOMRECON_DATA_DIR` environment variable, so files
+next to the exe never change a result. Only `PhantomReconTests.exe` honours that
+variable; the app and the console program ignore it, so it cannot be used to slip a
+different known-good list into a real scan. Runner options and exit codes are at the
+top of `tests/TestMain.cpp`.
 
 Set `PHANTOMRECON_TRACE=1` to print engine trace lines (`Trace()` in `DebugTrace.cpp`) to
 stderr. Every module also writes `OutputDebugStringW` lines with a `[Module]` prefix,
@@ -129,6 +169,8 @@ visible in DebugView or the debugger. Leave existing debug lines in place.
 ## Style
 
 - Win32 and the C++17 standard library only. No third-party dependencies.
+- Build, CI and release tooling is Python (standard library only) in `tools/`. A
+  workflow step calls a script; it does not carry inline PowerShell.
 - `std::wstring` for anything that touches the file system or the UI. UTF-8
   `std::string` only at the JSON boundary of the AI client. Convert with `StringConv.h`.
 - ASCII in source and docs: no typographic dashes or quotes (they break PowerShell on the

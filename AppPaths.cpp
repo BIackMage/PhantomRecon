@@ -45,8 +45,41 @@ std::wstring GetExeDirectory()
     return exe.substr(0, slash + 1);
 }
 
+static const wchar_t kDataFolderEnvVar[] = L"PHANTOMRECON_DATA_DIR";
+
+std::wstring DataFolderEnvironmentName()
+{
+    return kDataFolderEnvVar;
+}
+
+// The data-folder override (see AppPaths.h). Honoured only by the test program, so a
+// value planted in a user's environment can never point a real scan at another
+// known-good list or scoring file. Read on every call: the test runner sets it before
+// the first test, and nothing caches the answer.
+static std::wstring DataFolderOverride()
+{
+    wchar_t buffer[MAX_PATH + 1] = {};
+    DWORD n = GetEnvironmentVariableW(kDataFolderEnvVar, buffer, MAX_PATH + 1);
+    if (n == 0 || n > MAX_PATH) return L"";
+    std::wstring dir(buffer, n);
+
+    if (ToLowerW(FileNameOf(GetExePath())) != L"phantomrecontests.exe") {
+        DebugLog(std::wstring(kDataFolderEnvVar) + L" is set but ignored: only PhantomReconTests.exe honours it");
+        return L"";
+    }
+    bool absolute = (dir.size() >= 3 && dir[1] == L':' && (dir[2] == L'\\' || dir[2] == L'/')) || dir.rfind(L"\\\\", 0) == 0;
+    if (!absolute || !DirectoryExists(dir)) {
+        DebugLog(std::wstring(kDataFolderEnvVar) + L" ignored, not an existing absolute folder: " + dir);
+        return L"";
+    }
+    if (dir.back() != L'\\' && dir.back() != L'/') dir.push_back(L'\\');
+    return dir;
+}
+
 std::wstring AppFilePath(const std::wstring& fileName)
 {
+    std::wstring overrideDir = DataFolderOverride();
+    if (!overrideDir.empty()) return overrideDir + fileName;
     return GetExeDirectory() + fileName;
 }
 

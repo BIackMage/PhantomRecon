@@ -1,50 +1,99 @@
-# Builds every project and runs the tests on each push and pull request.
+# Builds every project and runs every check on each push to any branch and on each
+# pull request. Pushes that change only documentation run docs.yml instead.
+# The release workflow calls this same workflow, so a release is built and tested
+# exactly like any other commit.
+#
+# Every step runs a script from tools/ (Python), so the same commands work on a PC.
+# Actions are pinned to full commit SHAs; the comment names the release.
 name: Build and test
 
 on:
   push:
-    branches: [ main ]
+    branches: [ '**' ]
+    paths-ignore: [ '**.md', 'docs/**', 'LICENSE' ]
   pull_request:
+    paths-ignore: [ '**.md', 'docs/**', 'LICENSE' ]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build (empty for the commit that started the run)
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
   build:
-    runs-on: windows-latest
+    # Pinned image: Visual Studio 2022 with the v143 tools and the Windows SDK the
+    # projects ask for (10.0.22621.0).
+    runs-on: windows-2022
+    timeout-minutes: 45
+    # A newer push to the same pull request cancels the run still going for the older one.
+    concurrency:
+      group: build-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
 
-      - uses: microsoft/setup-msbuild@v2
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3.0.0
+        with:
+          vs-version: '[17.0,18.0)'
 
       - name: ASCII punctuation in source and docs
         run: python tools/check_punctuation.py
 
-      - name: Build (Release x64)
+      - name: Build (Release x64, warnings are errors)
         run: msbuild PhantomRecon.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal /warnaserror
 
-      - name: Run tests
-        run: .\x64\Release\PhantomReconTests.exe
+      - name: Tests (as administrator, how the runner starts every step)
+        run: python tools/run_tests.py --log "$env:RUNNER_TEMP\diagnostics\tests.log"
+
+      - name: Tests without administrator rights
+        run: python tools/run_tests.py --unelevated --log "$env:RUNNER_TEMP\diagnostics\tests-unelevated.log"
+
+      - name: Version in Version.h, README and the program agree
+        run: python tools/check_versions.py
+
+      - name: docs/FINDINGS.md matches the check catalog
+        run: python tools/check_findings_doc.py
 
       - name: Command-line smoke test
-        shell: pwsh
-        run: |
-          $demo = Join-Path $env:RUNNER_TEMP "samples"
-          .\x64\Release\PhantomReconCli.exe --make-samples $demo
-          if ($LASTEXITCODE -ne 0) { throw "--make-samples failed with $LASTEXITCODE" }
-          .\x64\Release\PhantomReconCli.exe --full $demo --baseline "$demo\demo_baseline.prbl" --revocation off `
-            --report "$env:RUNNER_TEMP\demo.html" --json "$env:RUNNER_TEMP\demo.json" --quiet
-          # 1 = finished and found NEW / CHANGED / MISSING files, which the sample pack is built to show
-          if ($LASTEXITCODE -ne 1) { throw "expected exit code 1 from the sample scan, got $LASTEXITCODE" }
-          $json = Get-Content "$env:RUNNER_TEMP\demo.json" -Raw | ConvertFrom-Json
-          if ($json.schema -ne "phantomrecon.report/1") { throw "unexpected JSON schema: $($json.schema)" }
+        run: python tools/ci_smoke_test.py --work "$env:RUNNER_TEMP\diagnostics\smoke"
 
-      - name: Keep the programs
-        uses: actions/upload-artifact@v4
+      - name: Window program starts and closes
+        run: python tools/gui_start_check.py
+
+      - name: Keep the logs when something failed
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/diagnostics
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Keep the programs and their symbols
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: PhantomRecon-x64
           path: |
             x64/Release/PhantomRecon.exe
             x64/Release/PhantomReconCli.exe
+            x64/Release/PhantomRecon.pdb
+            x64/Release/PhantomReconCli.pdb
           retention-days: 14
+          if-no-files-found: error

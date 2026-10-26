@@ -1,69 +1,88 @@
-# Publishes a release when a version tag (v1.2.3) is pushed.
-# The tag must match PHANTOMRECON_VERSION_W in Version.h.
+# Makes a DRAFT release when a version tag (v1.2.3, or v1.2.3-rc.1 for a release
+# candidate) is pushed. Nothing reaches users until the maintainer checks the draft
+# and presses Publish on GitHub.
+#
+# 1. build: the whole Build and test workflow (punctuation, build, both test runs,
+#    version and FINDINGS.md checks, CLI smoke test, window start check). Nothing is
+#    packaged unless all of it passes.
+# 2. release: checks the tag against the built program, packages the zip, symbols,
+#    checksums and winget manifests (tools/package_release.py), then creates or
+#    replaces the draft (tools/publish_release.py).
+#
+# To rebuild a draft after a fix that does not change the version (for example a
+# workflow fix), run this workflow by hand with the tag. A published release is
+# never changed; that takes a new version.
+#
+# The tag reaches the scripts only through the RELEASE_TAG environment variable,
+# never pasted into a command line.
 name: Release
 
 on:
   push:
     tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build again (its draft release is replaced)
+        type: string
+        required: true
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
   release:
-    runs-on: windows-latest
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 20
+    permissions:
+      contents: write   # create the draft release and upload its files; nothing else
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+          fetch-depth: 1
+          persist-credentials: false
 
-      - uses: microsoft/setup-msbuild@v2
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
 
-      - name: Check the tag matches Version.h
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}".TrimStart('v')
-          $line = Select-String -Path Version.h -Pattern 'PHANTOMRECON_VERSION_W\s+L"([^"]+)"'
-          $version = $line.Matches[0].Groups[1].Value
-          if ($tag -ne $version) { throw "Tag v$tag does not match Version.h ($version)" }
-          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Get the programs the build job tested
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: PhantomRecon-x64
+          path: x64/Release
 
-      - name: Build (Release x64)
-        run: msbuild PhantomRecon.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal /warnaserror
+      - name: Check the tag against the program version
+        run: python tools/check_release_tag.py
 
-      - name: Run tests
-        run: .\x64\Release\PhantomReconTests.exe
+      - name: Package the zip, symbols, checksums and winget manifests
+        run: python tools/package_release.py --out dist
 
-      - name: Package
-        shell: pwsh
-        run: |
-          $name = "PhantomRecon-$env:VERSION-x64"
-          $stage = Join-Path "dist" $name
-          New-Item -ItemType Directory -Force $stage | Out-Null
-          Copy-Item x64\Release\PhantomRecon.exe, x64\Release\PhantomReconCli.exe, LICENSE, README.md $stage
-          New-Item -ItemType Directory -Force "$stage\docs" | Out-Null
-          .\x64\Release\PhantomReconCli.exe --findings-md "$stage\docs\FINDINGS.md"
-          if ($LASTEXITCODE -ne 0) { throw "--findings-md failed" }
-          Compress-Archive -Path "$stage\*" -DestinationPath "dist\$name.zip" -Force
-          $hash = (Get-FileHash "dist\$name.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $name.zip" | Out-File -FilePath "dist\$name.zip.sha256" -Encoding ascii
-          "ZIP=dist\$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "SHA=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Keep the release files with the run
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: dist
+          retention-days: 30
+          if-no-files-found: error
 
-      - name: Publish the release
-        shell: pwsh
+      - name: Create or replace the draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          $notes = @"
-          Phantom Recon $env:VERSION for 64-bit Windows 10 and 11.
-
-          Unzip and run PhantomRecon.exe (window) or PhantomReconCli.exe --help (console).
-          Nothing is installed and nothing leaves the PC unless you turn on the AI panel and point it elsewhere.
-
-          SHA-256 of the zip: $env:SHA
-
-          The programs are not code-signed, so Windows SmartScreen may warn on first run.
-          Check the SHA-256 above before you run them.
-
-          License: PolyForm Noncommercial 1.0.0. Free for any noncommercial use; selling it is not allowed.
-          "@
-          gh release create "${{ github.ref_name }}" "$env:ZIP" "$env:ZIP.sha256" --title "Phantom Recon $env:VERSION" --notes $notes
+        run: python tools/publish_release.py --dist dist

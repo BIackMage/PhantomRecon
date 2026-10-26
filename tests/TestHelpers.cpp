@@ -8,8 +8,10 @@
 #include "../CliRunner.h"
 #include "../FileIO.h"
 #include "../FileOrigin.h"
+#include "../JsonReader.h"
 #include "../LLMClient.h"
 #include "../ScanCore.h"
+#include "../ScanCsv.h"
 #include "../ScriptAnalysis.h"
 #include "../SecurityChecks.h"
 #include "../StartupRequest.h"
@@ -82,6 +84,11 @@ TEST(Paths_Helpers)
     CHECK(!FileExists(dir));
 
     // A folder we just created is writable by us; Windows itself is not writable by normal users.
+    // Both directions, so a function that always answers "no" (for example because it
+    // cannot read permissions) fails here.
+    std::wstring who;
+    CHECK(LowPrivilegeWritable(dir, true, &who));
+    CHECK(!who.empty());
     wchar_t sys[MAX_PATH] = {};
     GetSystemDirectoryW(sys, MAX_PATH);
     CHECK(!LowPrivilegeWritable(sys, true, nullptr));
@@ -352,9 +359,46 @@ TEST(Cli_ArgumentParsing)
     CHECK_EQ(RunCli(ParseCliArguments({ L"--make-samples", pack }), env), 0);
     std::wstring html = tf::TestDir() + L"demo.html";
     std::wstring csv = tf::TestDir() + L"demo.csv";
+    std::wstring json = tf::TestDir() + L"demo.json";
     int code = RunCli(ParseCliArguments({ L"--full", pack, L"--baseline", pack + L"\\demo_baseline.prbl",
-                                          L"--report", html, L"--csv", csv, L"--revocation", L"off", L"--quiet" }), env);
+                                          L"--report", html, L"--csv", csv, L"--json", json, L"--revocation", L"off",
+                                          L"--quiet" }), env);
     CHECK_EQ(code, 1);   // NEW, CHANGED and MISSING files need attention
     CHECK(FileExists(html));
     CHECK(FileExists(csv));
+
+    // Exit code 1 also comes from any file scoring 7 or more, so on its own it would
+    // pass with the comparison broken. The counts prove the comparison ran.
+    std::vector<uint8_t> raw;
+    REQUIRE(ReadBinaryFile(json, raw));
+    JsonValue doc;
+    std::string error;
+    REQUIRE(ParseJson(std::string(raw.begin(), raw.end()), doc, error));
+    const JsonValue* scan = doc.Find("scan");
+    REQUIRE(scan != nullptr);
+    const JsonValue* counts = scan->Find("counts");
+    REQUIRE(counts != nullptr);
+    auto count = [&](const char* key) {
+        const JsonValue* v = counts->Find(key);
+        return v && v->type == JsonValue::Type::Number ? static_cast<int>(v->number) : -1;
+    };
+    CHECK_EQ(count("new"), 1);
+    CHECK_EQ(count("changed"), 1);
+    CHECK_EQ(count("missing"), 1);
+    CHECK_EQ(count("match"), 5);
+    CHECK_EQ(count("updated"), 0);
+    CHECK_EQ(count("known"), 0);
+
+    // And the CSV holds one row per file, with the same statuses.
+    std::vector<ScanRow> rows;
+    REQUIRE(LoadRowsFromCsv(csv, rows));
+    int fresh = 0, changed = 0, missing = 0;
+    for (const ScanRow& r : rows) {
+        if (r.status == L"NEW") ++fresh;
+        if (r.status == L"CHANGED") ++changed;
+        if (r.status == L"MISSING") ++missing;
+    }
+    CHECK_EQ(fresh, 1);
+    CHECK_EQ(changed, 1);
+    CHECK_EQ(missing, 1);
 }

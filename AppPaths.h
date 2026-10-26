@@ -23,8 +23,18 @@ std::wstring GetExeDirectory();
 // Full path of the running executable.
 std::wstring GetExePath();
 
-// GetExeDirectory() + fileName.
+// GetExeDirectory() + fileName: where the program's own data files live (scoring INI,
+// known-good list, revocation cache, persistence snapshot, settings).
+//
+// Test hook: when the environment variable named by DataFolderEnvironmentName()
+// (PHANTOMRECON_DATA_DIR) holds an existing absolute folder AND the running program is
+// PhantomReconTests.exe, that folder is used instead of the exe folder. The test runner
+// points it at its per-run temp folder so results never depend on files left next to
+// the exe. PhantomRecon.exe and PhantomReconCli.exe ignore the variable.
 std::wstring AppFilePath(const std::wstring& fileName);
+
+// "PHANTOMRECON_DATA_DIR", the variable AppFilePath reads in the test program.
+std::wstring DataFolderEnvironmentName();
 
 // See the comment block above.
 bool IsPortableMode();
