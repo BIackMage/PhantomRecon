@@ -2,7 +2,8 @@
 
 The project keeps source and docs to ASCII punctuation (see CLAUDE.md): long dashes,
 curly quotes and arrows break PowerShell on the maintainer's machine and look wrong in
-the console program's output.
+the console program's output. It also rejects UTF-16 text files, which Git's line-ending
+conversion corrupts on checkout.
 
 Usage:
   python tools/check_punctuation.py          report, exit 1 when anything is found
@@ -46,17 +47,25 @@ def main() -> int:
         if not path.is_file():
             continue
         raw = path.read_bytes()
+        rel = path.relative_to(root)
+        if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+            # .gitattributes converts line endings byte by byte, which corrupts UTF-16
+            # on checkout (a resource script lost its menus and window name this way).
+            print(f"{rel}: UTF-16 text file; save it as UTF-8 or ASCII")
+            problems += 1
+            continue
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
-            continue   # resource scripts may be UTF-16; they are checked by hand
+            print(f"{rel}: not valid UTF-8")
+            problems += 1
+            continue
         bom = text.startswith(chr(0xFEFF))
         body = text[1:] if bom else text
         found = [(i + 1, line) for i, line in enumerate(body.split("\n")) if any(ch in line for ch in REPLACEMENTS)]
         if not found:
             continue
         problems += len(found)
-        rel = path.relative_to(root)
         for line_no, line in found[:5]:
             shown = "".join(f"<U+{ord(c):04X}>" if c in REPLACEMENTS else c for c in line.strip())
             print(f"{rel}:{line_no}: {shown[:140]}")
@@ -68,7 +77,7 @@ def main() -> int:
             path.write_bytes(((chr(0xFEFF) if bom else "") + body).encode("utf-8"))
             print(f"{rel}: fixed")
     if problems and not fix:
-        print(f"{problems} line(s) with typographic punctuation. Run with --fix to replace them.")
+        print(f"{problems} problem(s) found. --fix replaces typographic punctuation; UTF-16 files must be re-saved.")
         return 1
     return 0
 

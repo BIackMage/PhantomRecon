@@ -75,13 +75,23 @@ bool IsExecutableExtension(const std::wstring& fileName);
 int CountFilesUnder(const std::wstring& root, const ScanOptions& options, const std::function<bool()>& isCancelled);
 
 // Run one scan.
-//   Baseline:  walks root, saves the new baseline to baselineSavePath (not on cancel).
-//   FullScan:  walks root, compares with *comparison, then reports MISSING entries.
-//   FastScan:  scans installed programs from the registry, compares with *comparison.
+//   Baseline:  walks every root, saves the new baseline to baselineSavePath (not on cancel).
+//   FullScan:  walks every root, compares with *comparison, then reports as MISSING the
+//              baseline entries under those roots that were not found.
+//   FastScan:  scans installed programs from the registry (roots ignored), compares
+//              with *comparison.
 // csvPath may be empty (no CSV).
+ScanSummary RunScan(ScanMode mode, const std::vector<std::wstring>& roots, const std::wstring& csvPath,
+                    Baseline* comparison, const std::wstring& baselineSavePath,
+                    const ScanOptions& options, const ScanCallbacks& callbacks);
+
+// One root ("" for Fast Scan).
 ScanSummary RunScan(ScanMode mode, const std::wstring& root, const std::wstring& csvPath,
                     Baseline* comparison, const std::wstring& baselineSavePath,
                     const ScanOptions& options, const ScanCallbacks& callbacks);
+
+// "C:\A; D:\B\" -> { "C:\A", "D:\B" }: trimmed, trailing backslashes dropped, no duplicates.
+std::vector<std::wstring> SplitScanRoots(const std::wstring& text);
 
 std::wstring ScanModeName(ScanMode mode);
 

@@ -28,6 +28,7 @@ std::wstring CliUsageText()
         L"  --audit                     Check this PC's security settings\n"
         L"  --baseline-scan <folder>    Record every program under <folder> as the known-good baseline\n"
         L"  --full <folder>             Compare everything under <folder> with the baseline\n"
+        L"                              (several folders: \"C:\\Program Files;D:\\Tools\")\n"
         L"  --fast                      Compare installed programs with the baseline\n"
         L"  --diff <older> <newer>      Compare two baseline files\n"
         L"  --make-samples <folder>     Write the harmless demo files and a demo baseline\n"
@@ -245,14 +246,29 @@ int RunCli(const CliOptions& o, const CliEnvironment& env)
         }
     };
 
-    if (!o.baselineScanRoot.empty()) {
-        std::wstring root = AbsolutePath(o.baselineScanRoot);
-        if (!DirectoryExists(root)) {
-            Error(env, L"folder not found: " + root);
-            return 2;
+    // "--full C:\A;D:\B" scans both folders in one run.
+    auto resolveRoots = [&](const std::wstring& text, std::vector<std::wstring>& roots) -> bool {
+        roots.clear();
+        for (const std::wstring& r : SplitScanRoots(text)) {
+            std::wstring full = AbsolutePath(r);
+            if (!DirectoryExists(full)) {
+                Error(env, L"folder not found: " + full);
+                return false;
+            }
+            roots.push_back(full);
         }
-        ScanSummary s = RunScan(ScanMode::Baseline, root, o.csvPath, nullptr, baselinePath, scanOptions, callbacks);
-        finishScan(s, L"Baseline of " + root);
+        if (roots.empty()) {
+            Error(env, L"no folder given");
+            return false;
+        }
+        return true;
+    };
+
+    if (!o.baselineScanRoot.empty()) {
+        std::vector<std::wstring> roots;
+        if (!resolveRoots(o.baselineScanRoot, roots)) return 2;
+        ScanSummary s = RunScan(ScanMode::Baseline, roots, o.csvPath, nullptr, baselinePath, scanOptions, callbacks);
+        finishScan(s, L"Baseline of " + JoinW(roots, L"; "));
         if (s.baselineSaved) Say(env, o, L"Baseline saved: " + baselinePath + L" (" + std::to_wstring(s.baselineEntries) + L" files)\n");
         else {
             Error(env, L"the baseline was not saved");
@@ -272,13 +288,10 @@ int RunCli(const CliOptions& o, const CliEnvironment& env)
             finishScan(s, L"Fast Scan of installed programs");
         }
         else {
-            std::wstring root = AbsolutePath(o.fullScanRoot);
-            if (!DirectoryExists(root)) {
-                Error(env, L"folder not found: " + root);
-                return 2;
-            }
-            ScanSummary s = RunScan(ScanMode::FullScan, root, o.csvPath, &baseline, L"", scanOptions, callbacks);
-            finishScan(s, L"Full Scan of " + root);
+            std::vector<std::wstring> roots;
+            if (!resolveRoots(o.fullScanRoot, roots)) return 2;
+            ScanSummary s = RunScan(ScanMode::FullScan, roots, o.csvPath, &baseline, L"", scanOptions, callbacks);
+            finishScan(s, L"Full Scan of " + JoinW(roots, L"; "));
         }
     }
     else if (!o.diffOlder.empty()) {

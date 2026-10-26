@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include "AppState.h"
 #include "ScanCore.h"
 #include "ScanTypes.h"
@@ -16,7 +17,7 @@
 
 struct ScanRequest {
     ScanMode     mode = ScanMode::FullScan;
-    std::wstring root;              // folder for Baseline and Full; ignored for Fast
+    std::vector<std::wstring> roots;   // folders for Baseline and Full; ignored for Fast
     std::wstring csvPath;           // may be empty (no CSV)
     std::wstring baselinePath;      // Baseline: where to save. Full/Fast: the file loaded into currentBaseline
     ScanOptions  options;

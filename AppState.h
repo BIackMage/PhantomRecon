@@ -60,6 +60,7 @@ struct ScanProgress {
     std::atomic<int>  filesProcessed{0};
     std::atomic<int>  executablesFound{0};
     std::atomic<int>  totalFiles{0};          // 0 until the pre-count finishes
+    std::atomic<unsigned long long> walkStartTick{0};   // GetTickCount64 when the pre-count ended
     std::atomic<bool> cancelRequested{false};
     std::atomic<bool> running{false};
 

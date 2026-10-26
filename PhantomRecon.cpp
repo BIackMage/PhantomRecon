@@ -86,7 +86,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
     LoadStringW(hInstance, IDS_APP_TITLE, app.title, MAX_LOADSTRING);
     LoadStringW(hInstance, IDC_PHANTOMRECON, app.windowClass, MAX_LOADSTRING);
     InitGuiCommonControls();
-    RegisterMainWindowClass(app);
+    if (!RegisterMainWindowClass(app)) DebugLog(L"RegisterMainWindowClass failed, error " + std::to_wstring(GetLastError()));
     RegisterAiSidebarClass(hInstance);
 
     if (!CreateMainWindow(app, nCmdShow)) {
@@ -135,7 +135,11 @@ BOOL CreateMainWindow(AppState& app, int nCmdShow)
     // &app travels in lpCreateParams and lands in GWLP_USERDATA at WM_NCCREATE.
     HWND hWnd = CreateWindowExW(WS_EX_CONTROLPARENT, app.windowClass, app.title, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
         CW_USEDEFAULT, 0, 1240, 820, nullptr, nullptr, app.hInstance, &app);
-    if (!hWnd) return FALSE;
+    if (!hWnd) {
+        DebugLog(L"CreateMainWindow failed, error " + std::to_wstring(GetLastError()));
+        return FALSE;
+    }
+    DebugLog(L"Main window created");
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
     PostMessageW(hWnd, WM_APP_STARTUP, 0, 0);
@@ -155,6 +159,7 @@ static LRESULT OnGetMinMaxInfo(LPARAM lParam)
 
 static void OnCreate(AppState& app, HWND hWnd)
 {
+    DebugLog(L"WM_CREATE");
     CreateMainControls(app, hWnd);
     CreateAiSidebar(hWnd, app.hInstance, app.aiSidebar, app.worker);
     if (app.aiSidebar.hPanel) {

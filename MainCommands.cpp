@@ -9,6 +9,7 @@
 #include "ScanEngine.h"
 #include "ScheduledScan.h"
 #include "SettingsDialog.h"
+#include "TextUtils.h"
 #include "Theme.h"
 #include "resource.h"
 
@@ -31,17 +32,28 @@ static std::wstring PromptForCsvPath(AppState& app, HWND hWnd, const std::wstrin
         DefaultReportPath(app, stem, L".csv"));
 }
 
-// The folder to scan: the default from Settings, or ask.
-static std::wstring ChooseScanFolder(AppState& app, HWND hWnd, const wchar_t* title)
+// The folders to scan: the default from Settings (one or more, ';' separated), or ask.
+// The picker allows several folders with Ctrl or Shift.
+static std::vector<std::wstring> ChooseScanFolders(AppState& app, HWND hWnd, const wchar_t* title)
 {
-    std::wstring start = app.settings.defaultScanFolder;
-    if (!start.empty() && DirectoryExists(start)) {
-        std::wstring text = L"Scan this folder?\n\n" + start + L"\n\nChoose No to pick a different folder.";
-        int answer = MessageBoxW(hWnd, text.c_str(), title, MB_YESNOCANCEL | MB_ICONQUESTION);
-        if (answer == IDYES) return start;
-        if (answer == IDCANCEL) return L"";
+    std::vector<std::wstring> defaults;
+    for (const std::wstring& f : SplitScanRoots(app.settings.defaultScanFolder)) {
+        if (DirectoryExists(f)) defaults.push_back(f);
     }
-    return BrowseForFolder(hWnd, title, start);
+    if (!defaults.empty()) {
+        std::wstring text = std::wstring(defaults.size() == 1 ? L"Scan this folder?\n\n" : L"Scan these folders?\n\n") +
+                            JoinW(defaults, L"\n") + L"\n\nChoose No to pick different folders.";
+        int answer = MessageBoxW(hWnd, text.c_str(), title, MB_YESNOCANCEL | MB_ICONQUESTION);
+        if (answer == IDYES) return defaults;
+        if (answer == IDCANCEL) return {};
+    }
+    return BrowseForFolders(hWnd, title, defaults.empty() ? L"" : defaults[0]);
+}
+
+static std::wstring DescribeRoots(const std::vector<std::wstring>& roots)
+{
+    if (roots.size() == 1) return roots[0];
+    return std::to_wstring(roots.size()) + L" folders (" + JoinW(roots, L"; ") + L")";
 }
 
 // ---------------------------------------------------------------------------
@@ -252,16 +264,16 @@ static void CmdCompareBaselines(AppState& app, HWND hWnd)
 // ---------------------------------------------------------------------------
 // Scans menu
 // ---------------------------------------------------------------------------
-static void StartScan(AppState& app, ScanMode mode, const std::wstring& root, const std::wstring& csvPath)
+static void StartScan(AppState& app, ScanMode mode, const std::vector<std::wstring>& roots, const std::wstring& csvPath)
 {
     ScanRequest req;
     req.mode = mode;
-    req.root = root;
+    req.roots = roots;
     req.csvPath = csvPath;
     req.baselinePath = app.baselineFilePath;
     req.options = ScanOptionsFromSettings(app.settings);
-    if (mode == ScanMode::Baseline) req.title = L"Baseline of " + root;
-    else if (mode == ScanMode::FullScan) req.title = L"Full Scan of " + root;
+    if (mode == ScanMode::Baseline) req.title = L"Baseline of " + DescribeRoots(roots);
+    else if (mode == ScanMode::FullScan) req.title = L"Full Scan of " + DescribeRoots(roots);
     else req.title = L"Fast Scan of installed programs";
     EnableWindow(app.controls.cancelButton, TRUE);
     StartScanInBackground(app, req);
@@ -277,22 +289,22 @@ static void CmdBaselineScan(AppState& app, HWND hWnd)
     if (FileExists(app.baselineFilePath)) text += L"\n\nThe existing baseline there will be replaced when the scan finishes.";
     if (MessageBoxW(hWnd, text.c_str(), L"Take Baseline", MB_OKCANCEL | MB_ICONINFORMATION) != IDOK) return;
 
-    std::wstring folder = ChooseScanFolder(app, hWnd, L"Folder to record in the baseline");
-    if (folder.empty()) return;
+    std::vector<std::wstring> folders = ChooseScanFolders(app, hWnd, L"Folders to record in the baseline");
+    if (folders.empty()) return;
     std::wstring csv = PromptForCsvPath(app, hWnd, L"baseline-scan");
     if (csv.empty()) return;
-    StartScan(app, ScanMode::Baseline, folder, csv);
+    StartScan(app, ScanMode::Baseline, folders, csv);
 }
 
 static void CmdFullScan(AppState& app, HWND hWnd)
 {
     if (RefuseWhileScanning(app, hWnd, L"start another scan")) return;
     if (!LoadBaselineForComparison(app, hWnd, L"Full Scan")) return;
-    std::wstring folder = ChooseScanFolder(app, hWnd, L"Folder to compare with the baseline");
-    if (folder.empty()) return;
+    std::vector<std::wstring> folders = ChooseScanFolders(app, hWnd, L"Folders to compare with the baseline");
+    if (folders.empty()) return;
     std::wstring csv = PromptForCsvPath(app, hWnd, L"full-scan");
     if (csv.empty()) return;
-    StartScan(app, ScanMode::FullScan, folder, csv);
+    StartScan(app, ScanMode::FullScan, folders, csv);
 }
 
 static void CmdFastScan(AppState& app, HWND hWnd)
@@ -301,7 +313,7 @@ static void CmdFastScan(AppState& app, HWND hWnd)
     if (!LoadBaselineForComparison(app, hWnd, L"Fast Scan")) return;
     std::wstring csv = PromptForCsvPath(app, hWnd, L"fast-scan");
     if (csv.empty()) return;
-    StartScan(app, ScanMode::FastScan, L"", csv);
+    StartScan(app, ScanMode::FastScan, {}, csv);
 }
 
 static void CmdCancelScan(AppState& app, HWND)

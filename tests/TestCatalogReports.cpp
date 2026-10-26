@@ -332,6 +332,17 @@ TEST(DetailText_RowAndFinding)
     std::wstring crlf = ToWindowsLineEnds(L"a\nb\r\nc");
     CHECK_EQ(crlf, std::wstring(L"a\r\nb\r\nc"));
 
+    // Time left: nothing until there is enough to judge, then rounded steps.
+    CHECK_EQ(TimeLeftText(10, 100, 1000, 9000), std::wstring(L""));          // fewer than 20 files
+    CHECK_EQ(TimeLeftText(50, 100, 1000, 2000), std::wstring(L""));          // under 3 seconds
+    CHECK_EQ(TimeLeftText(100, 100, 1000, 9000), std::wstring(L""));         // done
+    CHECK_EQ(TimeLeftText(50, 100, 0, 9000), std::wstring(L""));             // no start time
+    CHECK_EQ(TimeLeftText(50, 100, 1000, 21000), std::wstring(L"About 20 seconds left"));
+    CHECK_EQ(TimeLeftText(50, 100, 1000, 4000), std::wstring(L"About 5 seconds left"));
+    CHECK_EQ(TimeLeftText(20, 100, 1000, 61000), std::wstring(L"About 4 minutes left"));
+    CHECK_EQ(TimeLeftText(20, 1000, 1000, 61000), std::wstring(L"About 49 minutes left"));   // 2,940 s
+    CHECK_EQ(TimeLeftText(20, 10000, 1000, 61000), std::wstring(L"About 8 hours left"));
+
     const CheckInfo& info = GetCheckCatalog().front();
     std::wstring notRun = BuildFindingDetailText(info, nullptr);
     CHECK(notRun.find(L"not run yet") != std::wstring::npos);

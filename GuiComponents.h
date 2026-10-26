@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <string>
+#include <vector>
 #include "ResultsModel.h"
 
 // ---------------------------------------------------------------------------
@@ -55,6 +56,8 @@ const wchar_t* StatusFilterName(StatusFilter filter);
 // filter uses the OPENFILENAME format: L"Name (*.x)\0*.x\0".
 // ---------------------------------------------------------------------------
 std::wstring BrowseForFolder(HWND hParent, const wchar_t* title, const std::wstring& startFolder);
+// The same picker with Ctrl and Shift selection. Empty when cancelled.
+std::vector<std::wstring> BrowseForFolders(HWND hParent, const wchar_t* title, const std::wstring& startFolder);
 std::wstring BrowseForOpenFile(HWND hParent, const wchar_t* title, const wchar_t* filter);
 std::wstring BrowseForSaveFile(HWND hParent, const wchar_t* title, const wchar_t* filter,
                                const wchar_t* defaultExtension, const std::wstring& suggestedPath);

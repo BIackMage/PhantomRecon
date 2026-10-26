@@ -31,3 +31,7 @@ std::wstring BuildAuditFindingsText(const std::vector<SecurityCheckResult>& resu
 
 // Windows edit controls need "\r\n".
 std::wstring ToWindowsLineEnds(const std::wstring& text);
+
+// "About 4 minutes left" from progress so far (ticks in milliseconds). "" until at
+// least 20 files and 3 seconds have passed, or when there is nothing left.
+std::wstring TimeLeftText(int processed, int total, unsigned long long startTick, unsigned long long nowTick);

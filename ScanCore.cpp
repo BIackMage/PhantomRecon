@@ -441,10 +441,22 @@ static void WalkDirectory(ScanContext& ctx, const std::wstring& root)
     }
 }
 
+// Lowercase folder with exactly one trailing backslash, for prefix tests.
+static std::wstring FolderPrefix(const std::wstring& folder)
+{
+    std::wstring p = ToLowerW(AbsolutePath(folder));
+    if (p.empty() || p.back() != L'\\') p += L'\\';
+    return p;
+}
+
 // limitToDirs: when not empty, only baseline entries whose folder is in this set
 // (lowercase, no trailing slash) are considered. Fast Scan uses it so that files
 // outside the program folders it looked at are not reported as missing.
-static void ReportMissing(ScanContext& ctx, const std::vector<std::wstring>& limitToDirs)
+// rootPrefixes: when not empty, only entries under one of these folders count.
+// Full Scan uses it: a baseline of C:\ compared with a scan of D:\Tools must not
+// call everything on C:\ missing.
+static void ReportMissing(ScanContext& ctx, const std::vector<std::wstring>& limitToDirs,
+                          const std::vector<std::wstring>& rootPrefixes)
 {
     if (!ctx.comparison) return;
     for (const BaselineEntry* entry : ctx.comparison->GetUnseenEntries()) {
@@ -452,6 +464,17 @@ static void ReportMissing(ScanContext& ctx, const std::vector<std::wstring>& lim
         if (!limitToDirs.empty()) {
             std::wstring dir = ToLowerW(DirectoryOf(entry->path));
             if (!std::binary_search(limitToDirs.begin(), limitToDirs.end(), dir)) continue;
+        }
+        if (!rootPrefixes.empty()) {
+            std::wstring lower = ToLowerW(entry->path);
+            bool inside = false;
+            for (const std::wstring& prefix : rootPrefixes) {
+                if (lower.compare(0, prefix.size(), prefix) == 0) {
+                    inside = true;
+                    break;
+                }
+            }
+            if (!inside) continue;
         }
         ScanRow row;
         row.entry = *entry;
@@ -471,13 +494,38 @@ static std::wstring NowIso()
     return buf;
 }
 
+std::vector<std::wstring> SplitScanRoots(const std::wstring& text)
+{
+    std::vector<std::wstring> roots;
+    for (const std::wstring& part : SplitW(text, L';')) {
+        std::wstring r = TrimW(part);
+        while (r.size() > 3 && r.back() == L'\\') r.pop_back();
+        if (r.empty()) continue;
+        bool duplicate = false;
+        for (const std::wstring& existing : roots) {
+            if (EqualsI(existing, r)) duplicate = true;
+        }
+        if (!duplicate) roots.push_back(r);
+    }
+    return roots;
+}
+
 ScanSummary RunScan(ScanMode mode, const std::wstring& root, const std::wstring& csvPath,
+                    Baseline* comparison, const std::wstring& baselineSavePath,
+                    const ScanOptions& options, const ScanCallbacks& callbacks)
+{
+    std::vector<std::wstring> roots;
+    if (!root.empty()) roots.push_back(root);
+    return RunScan(mode, roots, csvPath, comparison, baselineSavePath, options, callbacks);
+}
+
+ScanSummary RunScan(ScanMode mode, const std::vector<std::wstring>& roots, const std::wstring& csvPath,
                     Baseline* comparison, const std::wstring& baselineSavePath,
                     const ScanOptions& options, const ScanCallbacks& callbacks)
 {
     ScanSummary summary;
     summary.mode = mode;
-    summary.root = root;
+    summary.root = JoinW(roots, L"; ");
     summary.csvPath = csvPath;
     summary.baselinePath = baselineSavePath;
     summary.startedAt = NowIso();
@@ -520,11 +568,16 @@ ScanSummary RunScan(ScanMode mode, const std::wstring& root, const std::wstring&
     else {
         if (options.precount) {
             if (callbacks.onPhase) callbacks.onPhase(L"Counting files...");
-            summary.totalFiles = CountFilesUnder(root, options, callbacks.isCancelled);
+            for (const std::wstring& root : roots) {
+                summary.totalFiles += CountFilesUnder(root, options, callbacks.isCancelled);
+            }
             if (callbacks.onTotal) callbacks.onTotal(summary.totalFiles);
         }
         if (callbacks.onPhase) callbacks.onPhase(ScanModeName(mode) + L" Running...");
-        WalkDirectory(ctx, root);
+        for (const std::wstring& root : roots) {
+            if (Cancelled(ctx)) break;
+            WalkDirectory(ctx, root);
+        }
     }
 
     summary.cancelled = Cancelled(ctx);
@@ -547,10 +600,12 @@ ScanSummary RunScan(ScanMode mode, const std::wstring& root, const std::wstring&
         // would be false, so only a complete scan runs the sweep. Fast Scan sweeps only
         // the program folders it scanned, because the baseline usually covers far more.
         if (mode == ScanMode::FullScan) {
-            ReportMissing(ctx, {});
+            std::vector<std::wstring> prefixes;
+            for (const std::wstring& root : roots) prefixes.push_back(FolderPrefix(root));
+            ReportMissing(ctx, {}, prefixes);
         }
         else if (!fastScanDirs.empty()) {
-            ReportMissing(ctx, fastScanDirs);
+            ReportMissing(ctx, fastScanDirs, {});
         }
     }
 

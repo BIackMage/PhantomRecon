@@ -272,10 +272,12 @@ is generated into [docs/FINDINGS.md](docs/FINDINGS.md).
           remove it, and the tool does not recover credentials
     - [x] Report the source file path
     - [x] Applicable to domain-joined machines with access to SYSVOL (N/A otherwise)
-- [x] DLL search order `dll.hijack` - partly:
-    - [ ] Enumerate DLL search paths for each running process
+- [x] DLL search order `dll.hijack`:
+    - [x] Each running program with SYSTEM or administrator rights: its own folder (the
+          first place searched) and the non-KnownDLL imports a copy there would replace
     - [x] Writable directories on the system PATH, which privileged programs fall back to
-    - [ ] Known applications that load DLLs from the current directory
+    - [ ] Known applications that load DLLs from the current directory - needs a list of
+          vulnerable applications that the tool cannot keep current offline
     - [x] Service program folders writable by normal users
 - [x] Scheduled task analysis `persist.tasks`:
     - [x] Enumerate all scheduled tasks via the COM Task Scheduler API, nested folders included
@@ -356,13 +358,14 @@ is generated into [docs/FINDINGS.md](docs/FINDINGS.md).
     - [x] Folder picker per scan (modern IFileOpenDialog folder picker)
     - [x] Confirmation warning for Baseline before the scan starts
     - [x] Output CSV path selector per scan, defaulting to the reports folder
-    - [ ] Multi-drive selection in one scan (one root folder per run; run one scan per drive)
+    - [x] Several folders or drives in one scan (multi-select picker; `--full "C:\;D:\"`);
+          MISSING only counts baseline files under the folders scanned
     - [x] Baseline file path selector: File > Settings, or File > Open Baseline for the session
 - [x] Progress bar - determinate:
     - [x] Files are counted first (respecting exclusions), then the bar shows real progress
     - [x] Percentage completion in the operation info panel
     - [x] Time taken shown when the scan ends
-    - [ ] Estimated time remaining while it runs
+    - [x] Estimated time remaining while it runs
 - [x] Results viewer (virtual list over `ResultsModel`, any number of rows):
     - [x] Columns: file, status, score, signature, packing, size, developer, version,
           ATT&CK, SHA-256, full path

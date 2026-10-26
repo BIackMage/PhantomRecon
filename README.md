@@ -39,9 +39,9 @@ honest. [docs/FINDINGS.md](docs/FINDINGS.md) lists every check with its fix.
 
 ### File watch: baseline, then compare
 
-- **Take Baseline** records every program and script in a folder: hashes, signature,
-  version, and about forty more facts per file.
-- **Full Scan** compares a folder with the baseline. **Fast Scan** does the same for
+- **Take Baseline** records every program and script in one or more folders: hashes,
+  signature, version, and about forty more facts per file.
+- **Full Scan** compares folders with the baseline. **Fast Scan** does the same for
   installed programs only.
 - Every file comes back as MATCH, NEW, CHANGED or MISSING. Files changed by a signed
   Microsoft update show as UPDATED, and new files on your own known-good list as KNOWN,

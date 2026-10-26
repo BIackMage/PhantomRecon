@@ -202,6 +202,8 @@ void RefreshOperationLabel(AppState& app)
     ss << L"Files looked at: " << processed;
     if (total > 0) ss << L" of " << total << L" (" << (std::min)(100, processed * 100 / total) << L"%)";
     ss << L"\nPrograms and scripts analysed: " << app.progress.executablesFound.load() << L"\n";
+    std::wstring left = TimeLeftText(processed, total, app.progress.walkStartTick.load(), GetTickCount64());
+    if (app.progress.running && !left.empty()) ss << left << L"\n";
     if (!filePath.empty()) ss << L"Now: " << filePath << L"\n";
     if (!app.baselineFilePath.empty()) {
         ss << L"\nActive baseline: " << FileNameOf(app.baselineFilePath);

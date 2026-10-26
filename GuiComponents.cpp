@@ -214,18 +214,21 @@ void FillFilterCombo(HWND hCombo)
 // ---------------------------------------------------------------------------
 // Dialogs
 // ---------------------------------------------------------------------------
-std::wstring BrowseForFolder(HWND hParent, const wchar_t* title, const std::wstring& startFolder)
+// Shared folder picker. multiple adds Ctrl and Shift selection.
+static std::vector<std::wstring> PickFolders(HWND hParent, const wchar_t* title, const std::wstring& startFolder, bool multiple)
 {
-    std::wstring result;
+    std::vector<std::wstring> result;
     IFileOpenDialog* dialog = nullptr;
     HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog));
     if (FAILED(hr) || !dialog) {
-        DebugLog(L"BrowseForFolder: could not create the folder dialog, hr=" + std::to_wstring(hr));
+        DebugLog(L"PickFolders: could not create the folder dialog, hr=" + std::to_wstring(hr));
         return result;
     }
     DWORD options = 0;
     dialog->GetOptions(&options);
-    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+    options |= FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
+    if (multiple) options |= FOS_ALLOWMULTISELECT;
+    dialog->SetOptions(options);
     if (title) dialog->SetTitle(title);
     if (!startFolder.empty() && DirectoryExists(startFolder)) {
         IShellItem* start = nullptr;
@@ -235,19 +238,39 @@ std::wstring BrowseForFolder(HWND hParent, const wchar_t* title, const std::wstr
         }
     }
     if (SUCCEEDED(dialog->Show(hParent))) {
-        IShellItem* item = nullptr;
-        if (SUCCEEDED(dialog->GetResult(&item)) && item) {
-            PWSTR path = nullptr;
-            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
-                result = path;
-                CoTaskMemFree(path);
+        IShellItemArray* items = nullptr;
+        if (SUCCEEDED(dialog->GetResults(&items)) && items) {
+            DWORD count = 0;
+            items->GetCount(&count);
+            for (DWORD i = 0; i < count; ++i) {
+                IShellItem* item = nullptr;
+                if (SUCCEEDED(items->GetItemAt(i, &item)) && item) {
+                    PWSTR path = nullptr;
+                    if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+                        result.push_back(path);
+                        CoTaskMemFree(path);
+                    }
+                    item->Release();
+                }
             }
-            item->Release();
+            items->Release();
         }
     }
     dialog->Release();
-    DebugLog(result.empty() ? L"Folder selection cancelled" : L"Folder selected: " + result);
+    DebugLog(result.empty() ? L"Folder selection cancelled"
+                            : L"Folder(s) selected: " + std::to_wstring(result.size()) + L", first " + result[0]);
     return result;
+}
+
+std::wstring BrowseForFolder(HWND hParent, const wchar_t* title, const std::wstring& startFolder)
+{
+    std::vector<std::wstring> picked = PickFolders(hParent, title, startFolder, false);
+    return picked.empty() ? L"" : picked[0];
+}
+
+std::vector<std::wstring> BrowseForFolders(HWND hParent, const wchar_t* title, const std::wstring& startFolder)
+{
+    return PickFolders(hParent, title, startFolder, true);
 }
 
 std::wstring BrowseForOpenFile(HWND hParent, const wchar_t* title, const wchar_t* filter)

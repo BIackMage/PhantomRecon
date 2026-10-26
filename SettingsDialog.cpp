@@ -286,7 +286,7 @@ static void BuildScanningTab(Builder b, const AppSettings& s, int left, int top,
         ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL, 84);
     y += 92;
 
-    b.Label(L"Folder to scan by default (empty: ask every time):", left, y, width);
+    b.Label(L"Folders to scan by default, separated by ; (empty: ask every time):", left, y, width);
     y += 20;
     b.Edit(s.defaultScanFolder, left, y, fieldW, IDC_SCANFOLDER);
     b.Button(L"Browse...", left + fieldW + 8, y - 1, browseW, IDC_SCANFOLDER_BROWSE);

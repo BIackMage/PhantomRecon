@@ -225,6 +225,23 @@ std::wstring BuildAuditFindingsText(const std::vector<SecurityCheckResult>& resu
     return out.str();
 }
 
+std::wstring TimeLeftText(int processed, int total, unsigned long long startTick, unsigned long long nowTick)
+{
+    if (total <= 0 || processed < 20 || processed >= total || startTick == 0 || nowTick <= startTick) return L"";
+    unsigned long long elapsed = nowTick - startTick;
+    if (elapsed < 3000) return L"";
+    unsigned long long leftMs = elapsed * static_cast<unsigned long long>(total - processed) /
+                                static_cast<unsigned long long>(processed);
+    unsigned long long seconds = leftMs / 1000;
+    if (seconds < 60) {
+        unsigned long long rounded = seconds < 5 ? 5 : (seconds + 4) / 5 * 5;   // steps of 5 so it does not flicker
+        return L"About " + std::to_wstring(rounded) + L" seconds left";
+    }
+    unsigned long long minutes = (seconds + 30) / 60;
+    if (minutes < 120) return L"About " + std::to_wstring(minutes) + (minutes == 1 ? L" minute left" : L" minutes left");
+    return L"About " + std::to_wstring((minutes + 30) / 60) + L" hours left";
+}
+
 std::wstring ToWindowsLineEnds(const std::wstring& text)
 {
     std::wstring out;

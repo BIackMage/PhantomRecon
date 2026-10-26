@@ -45,8 +45,8 @@ reason).
 | 2.15 | Revocation checking | **Done.** Off, Windows cache only (default), or online; answers cached for a day. Never online in portable mode. |
 | 2.16 | Known-good lists | **Done.** Windows catalog signatures, UPDATED for Microsoft-signed changes, KNOWN for hashes in `known_good_sha256.txt` (any hash list works, an NSRL subset included). |
 | 2.17 | Baseline diff | **Done.** File > Compare Two Baselines, or `--diff`. |
-| 2.18 | Fuzzy hashes | **Partly.** Import hash and ssdeep are done and feed CHANGED details ("small patch" against "replaced"). TLSH is not: a correct implementation needs its reference tables, and a homemade one would produce hashes no other tool can compare with. |
-| 2.19 | DLL search order | **Partly.** Service folders and system PATH folders that normal users can write to are found. Walking each running program's own search order is not done. |
+| 2.18 | Fuzzy hashes | **Partly.** Import hash and ssdeep are done and feed CHANGED details ("small patch" against "replaced"). TLSH is not: its value is comparing with hashes other tools made, and without the reference implementation to test against, matching output cannot be proven here. |
+| 2.19 | DLL search order | **Done.** The first folder Windows searches is the program's own: service folders, the folders of programs running right now as SYSTEM or administrator (with the DLLs each loads that a copy there would replace, KnownDLLs excluded), and system PATH folders that normal users can write to. Reads the program file and the process's rights, never its memory. |
 | 2.20 | Group Policy Preference passwords | **Done.** Reports the file location only. |
 
 ## 3. Output and interoperability
@@ -63,9 +63,9 @@ reason).
 | # | Idea | Status |
 |---|------|--------|
 | 4.1 | Headless command line | **Done.** `PhantomReconCli.exe`, exit codes 0, 1 and 2. |
-| 4.2 | Determinate progress | **Done.** Files are counted first; the bar and the label show the percentage. |
+| 4.2 | Determinate progress | **Done.** Files are counted first; the bar and the label show the percentage and the time left. |
 | 4.3 | Results list: sort, filter, detail | **Done.** Click a header to sort, a filter list, a search box, a detail window, a right-click menu. Handles any number of rows. |
-| 4.4 | Scan settings | **Done.** Exclusions, default folder, baseline file, reports folder, revocation, Fast Scan depth, fuzzy hashing. |
+| 4.4 | Scan settings | **Done.** Exclusions, default folders, baseline file, reports folder, revocation, Fast Scan depth, fuzzy hashing. A baseline or Full Scan can cover several folders at once. |
 | 4.5 | Light theme and system theme | **Done.** Follow Windows, dark or light; follows Windows live when it changes. |
 
 ## 5. Engineering
@@ -90,9 +90,7 @@ reason).
 
 ## Left to do, in order
 
-1. Walk each running program's DLL search order (rest of 2.19).
-2. Code-sign the releases if a free signing service for open-source projects accepts a
+1. Code-sign the releases if a free signing service for open-source projects accepts a
    noncommercial license (rest of 3.4).
-3. TLSH, if a correct, compatible implementation can be added without outside libraries
-   (rest of 2.18).
-4. Anything people ask for in issues, inside the defensive scope.
+2. TLSH, once the output can be tested against the reference implementation (rest of 2.18).
+3. Anything people ask for in issues, inside the defensive scope.

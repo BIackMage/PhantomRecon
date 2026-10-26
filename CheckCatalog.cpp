@@ -291,8 +291,9 @@ If Group Policy sets it, change the policy too: Administrative Templates > Windo
         { L"T1574.001" }, { L"4.1" }, L"",
         L"When a program loads a DLL by name, Windows searches its own folder first, then system folders, then every folder in "
         L"the system PATH. If a normal user can write to one of those folders, they can drop a DLL with the expected name and "
-        L"it runs inside the program. For a service running as SYSTEM that is privilege escalation. This check covers service "
-        L"program folders and system PATH folders. It does not test each application for missing DLLs.",
+        L"it runs inside the program with the program's rights. This check covers the folders of services, the folders of "
+        L"programs running right now as SYSTEM or administrator (with the DLLs each one loads that a copy there would "
+        L"replace), and system PATH folders. Run it as administrator so it can see every running program.",
         LR"~(Save permissions, then remove write access for normal users on each folder listed (elevated PowerShell):
   icacls "C:\the\folder" /save acl-backup.txt
   icacls "C:\the\folder" /inheritance:d

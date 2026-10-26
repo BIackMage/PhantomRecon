@@ -115,6 +115,7 @@ void StartScanInBackground(AppState& app, const ScanRequest& request)
     progress.filesProcessed = 0;
     progress.executablesFound = 0;
     progress.totalFiles = 0;
+    progress.walkStartTick = 0;
     progress.progressPosted = false;
     progress.rowsPosted = false;
     {
@@ -149,6 +150,7 @@ void StartScanInBackground(AppState& app, const ScanRequest& request)
         callbacks.isCancelled = [appPtr]() { return appPtr->progress.cancelRequested.load(); };
         callbacks.onTotal = [appPtr](int total) {
             appPtr->progress.totalFiles = total;
+            appPtr->progress.walkStartTick = GetTickCount64();   // the time-left estimate starts after counting
             NotifyProgress(*appPtr);
         };
         callbacks.onPhase = [appPtr](const std::wstring& phase) {
@@ -169,7 +171,7 @@ void StartScanInBackground(AppState& app, const ScanRequest& request)
         std::wstring savePath = req.mode == ScanMode::Baseline ? req.baselinePath : L"";
 
         ScanFinishedPayload* payload = new ScanFinishedPayload();
-        payload->summary = RunScan(req.mode, req.root, req.csvPath, comparison, savePath, req.options, callbacks);
+        payload->summary = RunScan(req.mode, req.roots, req.csvPath, comparison, savePath, req.options, callbacks);
         payload->summary.baselinePath = req.baselinePath;
         payload->finalState = payload->summary.finalState;
         payload->title = req.title;

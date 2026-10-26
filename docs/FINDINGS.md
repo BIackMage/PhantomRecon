@@ -554,7 +554,7 @@ When this policy is on in both HKLM and HKCU, any user can install any .msi pack
 - MITRE ATT&CK: T1574.001 DLL Search Order Hijacking
 - CIS Controls v8: 4.1
 
-When a program loads a DLL by name, Windows searches its own folder first, then system folders, then every folder in the system PATH. If a normal user can write to one of those folders, they can drop a DLL with the expected name and it runs inside the program. For a service running as SYSTEM that is privilege escalation. This check covers service program folders and system PATH folders. It does not test each application for missing DLLs.
+When a program loads a DLL by name, Windows searches its own folder first, then system folders, then every folder in the system PATH. If a normal user can write to one of those folders, they can drop a DLL with the expected name and it runs inside the program with the program's rights. This check covers the folders of services, the folders of programs running right now as SYSTEM or administrator (with the DLLs each one loads that a copy there would replace), and system PATH folders. Run it as administrator so it can see every running program.
 
 **How to fix**
 

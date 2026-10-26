@@ -347,6 +347,49 @@ TEST(Scan_ExclusionsAndCancel)
     CHECK_EQ(cc.missing, 0);
 }
 
+TEST(Scan_SeveralRootsAndMissingScope)
+{
+    std::wstring a = tf::TestDir() + L"pack";
+    std::wstring b = tf::TestDir() + L"pack2";   // shares a prefix with "pack" on purpose
+    REQUIRE(CreateSamplePack(a).ok);
+    REQUIRE(EnsureDirectory(b));
+    std::vector<uint8_t> image = BuildSamplePe(SamplePeSpec());
+    std::wstring extra = b + L"\\other_tool.exe";
+    REQUIRE(WriteBinaryFile(extra, image.data(), image.size()));
+
+    ScanOptions options;
+    options.revocation = RevocationMode::Off;
+    ScanCallbacks none;
+    std::wstring basePath = tf::TestDir() + L"two.prbl";
+    ScanSummary s = RunScan(ScanMode::Baseline, std::vector<std::wstring>{ a, b }, L"", nullptr, basePath, options, none);
+    REQUIRE(s.baselineSaved);
+    CHECK_EQ(s.baselineEntries, static_cast<size_t>(8));   // 7 in the pack after its changes, 1 in pack2
+    CHECK(s.root.find(L"pack2") != std::wstring::npos);
+
+    REQUIRE(DeleteFileW(extra.c_str()));
+    Baseline base;
+    REQUIRE(base.LoadFromFile(basePath));
+
+    // Scanning only the pack: the file gone from pack2 is outside the scan, so not MISSING.
+    ScanSummary onlyA = RunScan(ScanMode::FullScan, a, L"", &base, L"", options, none);
+    CHECK_EQ(onlyA.missing, 0);
+    CHECK_EQ(onlyA.added, 0);
+    CHECK_EQ(onlyA.changed, 0);
+    CHECK_EQ(onlyA.match, 7);
+
+    // Scanning both: now it is MISSING.
+    ScanSummary both = RunScan(ScanMode::FullScan, std::vector<std::wstring>{ a, b }, L"", &base, L"", options, none);
+    CHECK_EQ(both.missing, 1);
+    CHECK_EQ(both.match, 7);
+
+    std::vector<std::wstring> roots = SplitScanRoots(L" C:\\A\\ ; D:\\B;;c:\\a;E:\\ ");
+    REQUIRE(roots.size() == 3);
+    CHECK_EQ(roots[0], std::wstring(L"C:\\A"));
+    CHECK_EQ(roots[1], std::wstring(L"D:\\B"));
+    CHECK_EQ(roots[2], std::wstring(L"E:\\"));   // a drive root keeps its backslash
+    CHECK(SplitScanRoots(L" ; ").empty());
+}
+
 TEST(Csv_RoundTripAwkwardText)
 {
     ScanRow r;

@@ -182,7 +182,7 @@ void CreateSamplePackInFolder(AppState& app, HWND hWnd, const std::wstring& fold
 
     ScanRequest req;
     req.mode = ScanMode::FullScan;
-    req.root = pack.folder;
+    req.roots = { pack.folder };
     req.csvPath = JoinPath(pack.folder, L"sample-scan.csv");
     req.baselinePath = pack.baselinePath;
     req.options = ScanOptionsFromSettings(app.settings);

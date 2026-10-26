@@ -8,12 +8,92 @@
 #include "SystemInfo.h"
 #include "TextUtils.h"
 
+#include "CheckHelpers.h"
+#include "PeFile.h"
+
 #include <windows.h>
+#include <tlhelp32.h>
 #include <set>
 #include <sstream>
 
 // ---------------------------------------------------------------------------
-// DLL search order: service folders and system PATH folders writable by users
+// Running programs with more rights than a normal user
+// ---------------------------------------------------------------------------
+struct PrivilegedProgram {
+    std::wstring image;
+    std::wstring name;
+    bool         system = false;   // runs as LocalSystem; otherwise elevated administrator
+};
+
+// Lowercase DLL names Windows always loads from System32 (KnownDLLs), which a
+// planted copy in a program folder cannot replace.
+static std::set<std::wstring> KnownDlls()
+{
+    std::set<std::wstring> out;
+    for (const RegValue& v : RegEnumValues(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\KnownDLLs")) {
+        if (!v.text.empty()) out.insert(ToLowerW(v.text));
+    }
+    return out;
+}
+
+// Programs running as SYSTEM or elevated. Only the image name and the token are
+// read (PROCESS_QUERY_LIMITED_INFORMATION and TOKEN_QUERY); never memory.
+static std::vector<PrivilegedProgram> PrivilegedPrograms(int& notChecked)
+{
+    std::vector<PrivilegedProgram> out;
+    std::set<std::wstring> seen;
+    notChecked = 0;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return out;
+    PROCESSENTRY32W pe = {};
+    pe.dwSize = sizeof(pe);
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            if (pe.th32ProcessID <= 4 || pe.th32ProcessID == GetCurrentProcessId()) continue;
+            HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
+            if (!h) {
+                notChecked++;
+                continue;
+            }
+            wchar_t path[MAX_PATH * 2] = {};
+            DWORD size = MAX_PATH * 2;
+            bool havePath = QueryFullProcessImageNameW(h, 0, path, &size) != FALSE;
+            HANDLE token = NULL;
+            bool system = false, elevated = false, tokenRead = false;
+            if (OpenProcessToken(h, TOKEN_QUERY, &token)) {
+                BYTE buffer[256] = {};
+                DWORD len = 0;
+                if (GetTokenInformation(token, TokenUser, buffer, sizeof(buffer), &len)) {
+                    system = IsWellKnownSid(reinterpret_cast<TOKEN_USER*>(buffer)->User.Sid, WinLocalSystemSid) != FALSE;
+                    tokenRead = true;
+                }
+                TOKEN_ELEVATION elevation = {};
+                if (GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &len)) {
+                    elevated = elevation.TokenIsElevated != 0;
+                    tokenRead = true;
+                }
+                CloseHandle(token);
+            }
+            CloseHandle(h);
+            if (!tokenRead) {
+                notChecked++;
+                continue;
+            }
+            if (!havePath || !(system || elevated)) continue;
+            std::wstring image = path;
+            if (!seen.insert(ToLowerW(image)).second) continue;
+            out.push_back({ image, pe.szExeFile, system });
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// DLL search order: the first folder Windows looks in for a program's DLLs is
+// the program's own folder. Service folders, folders of programs running as
+// SYSTEM or administrator, and system PATH folders that normal users can write
+// to all let a planted DLL run with those rights.
 // ---------------------------------------------------------------------------
 SecurityCheckResult CheckDllSearchPaths()
 {
@@ -54,14 +134,53 @@ SecurityCheckResult CheckDllSearchPaths()
         }
     }
 
-    if (serviceFolders + pathFolders > 0) {
+    // Running programs with administrator or SYSTEM rights: their own folder is the
+    // first place Windows looks for each DLL they load that is not a KnownDLL.
+    int notChecked = 0;
+    int programFolders = 0;
+    std::set<std::wstring> known = KnownDlls();
+    CappedList programLines(40);
+    for (const PrivilegedProgram& p : PrivilegedPrograms(notChecked)) {
+        if (IsPackagedAppPath(p.image) || IsUnderWindowsDirectory(p.image)) continue;
+        std::wstring dir = DirectoryOf(p.image);
+        std::wstring key = ToLowerW(dir);
+        if (dir.empty() || !seen.insert(key).second) continue;   // already reported as a service folder
+        std::wstring who;
+        if (!LowPrivilegeWritable(dir, true, &who)) continue;
+
+        std::vector<std::wstring> plantable;
+        PeInfo pe = ParsePeFile(ToExtendedPath(p.image));
+        std::set<std::wstring> dllNames;
+        for (const PeImport& imp : pe.imports) dllNames.insert(ToLowerW(std::wstring(imp.dll.begin(), imp.dll.end())));
+        for (const std::wstring& dll : dllNames) {
+            if (known.count(dll) || dll.rfind(L"api-ms-win-", 0) == 0 || dll.rfind(L"ext-ms-", 0) == 0) continue;
+            plantable.push_back(dll);
+        }
+        programFolders++;
+        std::wstring line = L"  Program folder " + dir + L" (" + p.name + L", running as " +
+            (p.system ? L"SYSTEM" : L"an administrator") + L") is writable by " + who + L"\n";
+        if (!plantable.empty()) {
+            if (plantable.size() > 6) plantable.resize(6);
+            line += L"      DLLs it loads that a copy in that folder would replace: " + JoinW(plantable, L", ") + L"\n";
+        }
+        programLines.Add(line);
+    }
+    details << programLines.Text();
+
+    int total = serviceFolders + pathFolders + programFolders;
+    std::wstring coverage = notChecked > 0
+        ? L"\n" + std::to_wstring(notChecked) + L" running program(s) could not be checked" +
+          (IsProcessElevated() ? L"." : L"; run as administrator to include them.")
+        : L"";
+    if (total > 0) {
         result.status = CHECK_FAIL;
-        result.detail = std::to_wstring(serviceFolders + pathFolders) + L" folder(s) let normal users plant DLLs that "
-            L"privileged programs may load:\n" + details.str();
+        result.detail = std::to_wstring(total) + L" folder(s) let normal users plant DLLs that "
+            L"privileged programs may load:\n" + details.str() + coverage;
     }
     else {
         result.status = CHECK_PASS;
-        result.detail = L"No service folder or system PATH folder is writable by normal users.";
+        result.detail = L"No service folder, folder of a program running with administrator or SYSTEM rights, or system "
+                        L"PATH folder is writable by normal users." + coverage;
     }
     return result;
 }
