@@ -14,6 +14,11 @@
 
 bool RegKeyExists(HKEY root, const std::wstring& subKey, REGSAM view = 0);
 
+// The Win32 result of opening the key for reading: ERROR_SUCCESS, ERROR_FILE_NOT_FOUND
+// (no such key) or ERROR_ACCESS_DENIED (exists, but this account may not read it).
+LONG RegOpenStatus(HKEY root, const std::wstring& subKey, REGSAM view = 0);
+
+// REG_DWORD, or the low 32 bits of a REG_QWORD. False when missing or another type.
 bool RegReadDword(HKEY root, const std::wstring& subKey, const std::wstring& valueName,
                   DWORD& out, REGSAM view = 0);
 

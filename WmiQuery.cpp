@@ -32,7 +32,7 @@ ComScope::~ComScope()
     if (m_uninit) CoUninitialize();
 }
 
-static std::wstring VariantToText(const VARIANT& v)
+std::wstring WmiVariantToText(const VARIANT& v)
 {
     if (v.vt == VT_NULL || v.vt == VT_EMPTY) return L"";
 
@@ -44,6 +44,10 @@ static std::wstring VariantToText(const VARIANT& v)
         SafeArrayGetLBound(sa, 1, &lower);
         SafeArrayGetUBound(sa, 1, &upper);
         VARTYPE elementType = static_cast<VARTYPE>(v.vt & ~VT_ARRAY);
+        // The raw read below writes one element into the 8-byte value slot of a
+        // VARIANT. Anything wider (DECIMAL, records) would not land where the
+        // VARIANT expects it, so those elements are left out.
+        const UINT elementSize = SafeArrayGetElemsize(sa);
         std::wstring out;
         for (LONG i = lower; i <= upper; ++i) {
             VARIANT element;
@@ -58,13 +62,21 @@ static std::wstring VariantToText(const VARIANT& v)
                     element.bstrVal = b;
                 }
             }
+            else if (elementSize <= sizeof(element.llVal) && elementType != VT_DECIMAL && elementType != VT_RECORD) {
+                // Numeric or interface element, read raw into the matching VARIANT slot.
+                // For VT_UNKNOWN / VT_DISPATCH, SafeArrayGetElement hands back its own
+                // AddRef'd copy, so the VariantClear below releases that copy and the
+                // array keeps its reference (tests check the count).
+                if (SUCCEEDED(SafeArrayGetElement(sa, &i, &element.llVal))) {
+                    element.vt = elementType;
+                }
+            }
             else {
-                // Numeric element: read raw into the matching VARIANT slot
-                element.vt = elementType;
-                SafeArrayGetElement(sa, &i, &element.llVal);
+                DebugLog(L"Array element type " + std::to_wstring(elementType) + L" (" + std::to_wstring(elementSize) +
+                         L" bytes) is not converted to text");
             }
             if (!out.empty()) out += L"\n";
-            out += VariantToText(element);
+            out += WmiVariantToText(element);
             VariantClear(&element);
         }
         return out;
@@ -89,6 +101,31 @@ static std::wstring HrText(HRESULT hr)
     wchar_t buf[32];
     swprintf_s(buf, L"0x%08X", static_cast<unsigned int>(hr));
     return buf;
+}
+
+bool WmiAcceptNextResult(long hr, unsigned long returned, const std::wstring& wql, WmiResult& result)
+{
+    if (FAILED(hr)) {
+        result.ok = result.rows.size() > 0;
+        result.hresult = hr;
+        result.error = L"Enumeration failed (" + HrText(hr) + L")";
+        DebugLog(result.error + L": " + wql);
+        return false;
+    }
+    if (hr == WBEM_S_TIMEDOUT) {
+        // A success code, but no row came back in time. The answer is incomplete,
+        // so it must not read as "no rows, all fine" (a check would then PASS on
+        // missing data). Rows already read stay in the result for the evidence.
+        result.ok = false;
+        result.timedOut = true;
+        result.hresult = hr;
+        result.error = L"Query timed out after " + std::to_wstring(kWmiRowTimeoutMs / 1000) + L" seconds with " +
+                       std::to_wstring(result.rows.size()) + L" row(s) read: " + wql;
+        DebugLog(result.error);
+        return false;
+    }
+    // WBEM_S_NO_ERROR with a row, or WBEM_S_FALSE / no row at the normal end.
+    return returned > 0;
 }
 
 WmiResult WmiQuery(const std::wstring& wmiNamespace, const std::wstring& wql,
@@ -146,14 +183,12 @@ WmiResult WmiQuery(const std::wstring& wmiNamespace, const std::wstring& wql,
     while (true) {
         IWbemClassObject* obj = NULL;
         ULONG returned = 0;
-        hr = enumerator->Next(15000, 1, &obj, &returned);
-        if (FAILED(hr)) {
-            result.ok = result.rows.size() > 0;
-            result.hresult = hr;
-            result.error = L"Enumeration failed (" + HrText(hr) + L")";
+        hr = enumerator->Next(kWmiRowTimeoutMs, 1, &obj, &returned);
+        if (!WmiAcceptNextResult(hr, returned, wql, result)) {
+            if (obj) obj->Release();
             break;
         }
-        if (returned == 0) break;
+        if (!obj) break;
 
         WmiRow row;
         for (const std::wstring& prop : properties) {
@@ -161,7 +196,7 @@ WmiResult WmiQuery(const std::wstring& wmiNamespace, const std::wstring& wql,
             VariantInit(&v);
             if (SUCCEEDED(obj->Get(prop.c_str(), 0, &v, NULL, NULL))) {
                 if (v.vt != VT_NULL && v.vt != VT_EMPTY) {
-                    row[prop] = VariantToText(v);
+                    row[prop] = WmiVariantToText(v);
                 }
             }
             VariantClear(&v);

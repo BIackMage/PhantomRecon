@@ -99,6 +99,14 @@ static const std::map<std::wstring, CheckFn>& CheckFunctions()
     return functions;
 }
 
+std::vector<std::wstring> GetCheckFunctionIds()
+{
+    std::vector<std::wstring> ids;
+    for (const auto& entry : CheckFunctions()) ids.push_back(entry.first);
+    DebugLog(std::to_wstring(ids.size()) + L" check functions registered");
+    return ids;
+}
+
 const std::vector<RegisteredCheck>& GetRegisteredChecks()
 {
     // Report order follows the catalog, so every check has catalog text and

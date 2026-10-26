@@ -38,9 +38,12 @@ TEST(Catalog_EveryCheckHasCodeAndText)
         CHECK(ids.insert(info.id).second);   // ids are unique
         if (registered.find(info.id) == registered.end()) tf::Fail(__FILE__, __LINE__, "no check function for " + tf::Narrow(info.id));
     }
-    for (const RegisteredCheck& c : checks) {
-        if (!FindCheckInfo(c.id)) tf::Fail(__FILE__, __LINE__, "no catalog row for " + tf::Narrow(c.id));
+    // GetRegisteredChecks is built from the catalog, so the other direction needs
+    // the raw list of check functions.
+    for (const std::wstring& id : GetCheckFunctionIds()) {
+        if (!FindCheckInfo(id)) tf::Fail(__FILE__, __LINE__, "no catalog row for " + tf::Narrow(id));
     }
+    CHECK_EQ(GetCheckFunctionIds().size(), catalog.size());
     CHECK_EQ(checks.size(), catalog.size());
 
     // The memory-reading check was removed on purpose and must not come back.

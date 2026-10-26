@@ -371,13 +371,17 @@ LSA protection runs lsass.exe, the process that holds login secrets, as a protec
 
 **How to fix**
 
-    Elevated PowerShell, then reboot:
-      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name RunAsPPL -Value 1 -Type DWord
+    Windows 11 22H2 and later, elevated PowerShell, then reboot:
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name RunAsPPL -Value 2 -Type DWord
+    Value 2 turns protection on without the UEFI lock, so the undo below works.
+    Value 1 (older Windows 10, and the CIS "UEFI Lock" setting) also stores the setting in a UEFI variable on PCs with Secure Boot. After that, deleting the registry value no longer turns protection off; only Microsoft's LSA Protected Process Opt-out tool (LSAPPLConfig.efi) does. Use value 1 only if you want that lock.
     Some old smart card drivers and plug-ins fail to load with it. Events 3065 and 3066 in Microsoft-Windows-CodeIntegrity/Operational show anything blocked.
 
 **How to undo**
 
-    Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name RunAsPPL   (then reboot)
+    For RunAsPPL=2 (elevated PowerShell, then reboot):
+      Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name RunAsPPL
+    If RunAsPPL was 1 on a PC with Secure Boot, the UEFI variable keeps protection on after that. Remove it with Microsoft's LSA Protected Process Opt-out tool (LSAPPLConfig.efi), following "Configure added LSA protection" on Microsoft Learn.
 
 ### Credential Guard
 
@@ -516,15 +520,17 @@ These services run a program file that ordinary users are allowed to overwrite. 
 
 **How to fix**
 
-    Save the current permissions, then remove write access for Users, Authenticated Users and Everyone (elevated PowerShell):
+    Save the current permissions, then cut the group the evidence names down to read and run (elevated PowerShell):
       icacls "C:\path\to\service.exe" /save acl-backup.txt
       icacls "C:\path\to\service.exe" /inheritance:d
-      icacls "C:\path\to\service.exe" /remove:g "*S-1-5-32-545" "*S-1-5-11" "*S-1-1-0"
+      icacls "C:\path\to\service.exe" /grant:r "*S-1-5-11:(RX)"
+    /grant:r replaces everything that group was granted with read and run, so the service and its users can still start the program. Use the SID of the group the evidence names: *S-1-5-11 Authenticated Users, *S-1-5-32-545 Users, *S-1-1-0 Everyone, *S-1-5-4 INTERACTIVE. Run the audit again; repeat for any other group it then names.
     Then update or reinstall the program so the vendor sets correct permissions.
 
 **How to undo**
 
-    icacls "C:\path\to" /restore acl-backup.txt
+    Restore the saved permissions (elevated PowerShell; the backup holds the file name, so name its folder):
+      icacls "C:\path\to" /restore acl-backup.txt
 
 ### AlwaysInstallElevated
 
@@ -558,15 +564,18 @@ When a program loads a DLL by name, Windows searches its own folder first, then 
 
 **How to fix**
 
-    Save permissions, then remove write access for normal users on each folder listed (elevated PowerShell):
+    Save permissions, then cut the group the evidence names down to read and run on each folder listed (elevated PowerShell):
       icacls "C:\the\folder" /save acl-backup.txt
       icacls "C:\the\folder" /inheritance:d
-      icacls "C:\the\folder" /remove:g "*S-1-5-32-545" "*S-1-5-11" "*S-1-1-0"
+      icacls "C:\the\folder" /grant:r "*S-1-5-11:(OI)(CI)(RX)"
+    /grant:r replaces everything that group was granted with read and run for the folder and everything in it, so the programs there keep working for normal users. Use the SID of the group the evidence names: *S-1-5-11 Authenticated Users, *S-1-5-32-545 Users, *S-1-1-0 Everyone, *S-1-5-4 INTERACTIVE. Run the audit again; repeat for any other group it then names.
+    If the evidence names your own account, the folder is one of yours (AppData, Downloads): move the program to C:\Program Files or take the folder out of PATH instead of changing permissions.
     For PATH folders you do not need, remove them in System Properties > Environment Variables > System variables > Path.
 
 **How to undo**
 
-    icacls "C:\the" /restore acl-backup.txt
+    Restore the saved permissions (elevated PowerShell; the backup holds the folder name, so name its parent):
+      icacls "C:\the" /restore acl-backup.txt
 
 ### Leftover Windows setup files
 

@@ -2,6 +2,7 @@
 #include "SecurityCheckModules.h"
 
 #include "AppPaths.h"
+#include "AuditRules.h"
 #include "RegUtil.h"
 #include "ServiceUtil.h"
 #include "SystemInfo.h"
@@ -22,6 +23,11 @@
 #pragma comment(lib, "propsys.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib")
+
+static void DebugLog(const std::wstring& msg)
+{
+    OutputDebugStringW((L"[SecurityChecksHardening] " + msg + L"\n").c_str());
+}
 
 // ---------------------------------------------------------------------------
 // Optional features (SMB1, PowerShell 2.0, .NET 3.5), read once per minute
@@ -172,9 +178,33 @@ SecurityCheckResult CheckTpm()
         }
         return result;
     }
-    if (rc == TBS_E_TPM_NOT_FOUND || rc == TBS_E_SERVICE_NOT_RUNNING) {
+    TbsOutcome outcome = ClassifyTbsResult(rc);
+    if (outcome == TbsOutcome::NoTpm) {
         result.status = CHECK_FAIL;
         result.detail = L"No TPM was found, or it is switched off in the firmware.";
+        return result;
+    }
+    if (outcome == TbsOutcome::ServiceUnavailable) {
+        // TPM Base Services is stopped or disabled, so it cannot say whether a TPM
+        // exists. The TPM driver's device count can.
+        DWORD count = 0;
+        int devices = RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\TPM\\Enum", L"Count", count)
+            ? static_cast<int>(count) : -1;
+        result.status = TpmStatusWithoutTbs(devices);
+        wchar_t code[16];
+        swprintf_s(code, L"0x%08X", static_cast<unsigned int>(rc));
+        if (devices > 0) {
+            result.detail = L"Windows sees a TPM device, but TPM Base Services is not running (TBS " + std::wstring(code) +
+                L"), so its version and state cannot be read. Programs that use the TPM through it will fail.";
+        }
+        else if (devices == 0) {
+            result.detail = L"No TPM device is present, and TPM Base Services is not running (TBS " + std::wstring(code) +
+                L"). The TPM may be switched off in the firmware.";
+        }
+        else {
+            result.detail = L"TPM Base Services is not running (TBS " + std::wstring(code) +
+                L"), so it cannot be told whether a TPM is present.";
+        }
         return result;
     }
     wchar_t buf[64];
@@ -227,8 +257,10 @@ SecurityCheckResult CheckUac()
         consent == 3 ? L"ask for credentials" :
         consent == 4 ? L"ask for consent" :
         consent == 5 ? L"ask for consent for non-Windows programs (default)" : L"unknown";
+    // Modes 1 and 2 always use the secure desktop, whatever PromptOnSecureDesktop says.
+    bool onSecureDesktop = UacUsesSecureDesktop(consent, secureDesktop);
     std::wstring details = L"EnableLUA=" + std::to_wstring(lua) + L", admin prompt: " + consentText +
-        L", secure desktop: " + (secureDesktop ? L"yes" : L"no");
+        L", secure desktop: " + (onSecureDesktop ? L"yes" : L"no");
 
     if (lua == 0) {
         result.status = CHECK_FAIL;
@@ -238,7 +270,7 @@ SecurityCheckResult CheckUac()
         result.status = CHECK_FAIL;
         result.detail = L"UAC elevates administrators without asking.\n" + details;
     }
-    else if (!secureDesktop) {
+    else if (!onSecureDesktop) {
         result.status = CHECK_WARNING;
         result.detail = L"UAC prompts appear on the normal desktop, where other programs can interfere with them.\n" + details;
     }
@@ -403,7 +435,8 @@ SecurityCheckResult CheckLsaProtection()
     RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Lsa", L"RunAsPPLBoot", pplBoot);
     if (set && (ppl == 1 || ppl == 2)) {
         result.status = CHECK_PASS;
-        result.detail = L"LSA protection is on (RunAsPPL=" + std::to_wstring(ppl) + (ppl == 1 ? L", locked by UEFI)." : L", without UEFI lock).");
+        result.detail = L"LSA protection is on (RunAsPPL=" + std::to_wstring(ppl) +
+            (ppl == 1 ? L", locked in a UEFI variable when Secure Boot is on)." : L", without UEFI lock).");
     }
     else if (pplBoot == 2) {
         result.status = CHECK_PASS;
@@ -466,19 +499,28 @@ SecurityCheckResult CheckSmbV1()
 SecurityCheckResult CheckRemoteDesktop()
 {
     SecurityCheckResult result = MakeCheckResult(L"net.rdp");
-    DWORD deny = 1;
-    RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Terminal Server", L"fDenyTSConnections", deny);
-    if (deny == 1) {
+    // Group Policy (Policies\...\Terminal Services) overrides the local settings.
+    const wchar_t* policy = L"SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services";
+    const wchar_t* tcp = L"SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp";
+    RdpFacts facts;
+    facts.policyDeny.set = RegReadDword(HKEY_LOCAL_MACHINE, policy, L"fDenyTSConnections", facts.policyDeny.value);
+    facts.localDeny.set = RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Terminal Server",
+        L"fDenyTSConnections", facts.localDeny.value);
+    facts.policyNla.set = RegReadDword(HKEY_LOCAL_MACHINE, policy, L"UserAuthentication", facts.policyNla.value);
+    facts.localNla.set = RegReadDword(HKEY_LOCAL_MACHINE, tcp, L"UserAuthentication", facts.localNla.value);
+    RdpState rdp = EffectiveRdp(facts);
+
+    if (!rdp.enabled) {
         result.status = CHECK_PASS;
-        result.detail = L"Remote Desktop is off.";
+        result.detail = rdp.enabledByPolicy ? L"Remote Desktop is off (set by Group Policy)." : L"Remote Desktop is off.";
         return result;
     }
-    const wchar_t* tcp = L"SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp";
-    DWORD nla = 0, port = 3389;
-    RegReadDword(HKEY_LOCAL_MACHINE, tcp, L"UserAuthentication", nla);
+    DWORD port = 3389;
     RegReadDword(HKEY_LOCAL_MACHINE, tcp, L"PortNumber", port);
-    std::wstring details = L"Port " + std::to_wstring(port) + L", Network Level Authentication " + (nla == 1 ? L"required" : L"NOT required");
-    if (nla != 1) {
+    std::wstring details = L"Port " + std::to_wstring(port) + L", Network Level Authentication " +
+        (rdp.nlaRequired ? L"required" : L"NOT required") + (rdp.nlaByPolicy ? L" (Group Policy)" : L"");
+    if (rdp.enabledByPolicy) details += L"\nRemote Desktop is allowed by Group Policy, so the Settings switch cannot turn it off.";
+    if (!rdp.nlaRequired) {
         result.status = CHECK_FAIL;
         result.detail = L"Remote Desktop is on without Network Level Authentication.\n" + details;
     }
@@ -501,23 +543,40 @@ SecurityCheckResult CheckWinRm()
         result.detail = L"The WinRM service is not installed.";
         return result;
     }
-    std::vector<std::wstring> listeners = RegEnumSubKeys(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WSMAN\\Listener");
-    std::wstring details = L"Service " + ServiceStateName(s.state) + L", start type " + ServiceStartTypeName(s.startType) +
-        L", " + std::to_wstring(listeners.size()) + L" listener(s)";
-    for (const std::wstring& l : listeners) details += L"\n  " + l;
+    // The listener key is readable only by administrators. Without that right the
+    // listeners are unknown, which must not read as "no listeners".
+    const wchar_t* listenerKey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WSMAN\\Listener";
+    LONG open = RegOpenStatus(HKEY_LOCAL_MACHINE, listenerKey);
+    std::vector<std::wstring> listeners = RegEnumSubKeys(HKEY_LOCAL_MACHINE, listenerKey);
+    int listenerCount = open == ERROR_SUCCESS ? static_cast<int>(listeners.size()) : (open == ERROR_FILE_NOT_FOUND ? 0 : -1);
+    DWORD autoConfig = 0;
+    bool policyListeners = RegReadDword(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows\\WinRM\\Service",
+        L"AllowAutoConfig", autoConfig) && autoConfig == 1;
+    bool running = s.state == SERVICE_RUNNING;
+    bool autoStart = s.startType == SERVICE_AUTO_START;
 
-    if (s.state == SERVICE_RUNNING && !listeners.empty()) {
-        result.status = CHECK_WARNING;
-        result.detail = L"WinRM is running and accepting remote connections.\n" + details;
-    }
-    else if (s.startType == SERVICE_AUTO_START && !listeners.empty()) {
-        result.status = CHECK_WARNING;
-        result.detail = L"WinRM starts automatically and has listeners configured.\n" + details;
-    }
-    else {
-        result.status = CHECK_PASS;
+    std::wstring details = L"Service " + ServiceStateName(s.state) + L", start type " + ServiceStartTypeName(s.startType) + L", ";
+    details += listenerCount >= 0 ? std::to_wstring(listenerCount) + L" listener(s)"
+                                  : std::wstring(L"listeners unknown (only administrators can read them)");
+    for (const std::wstring& l : listeners) details += L"\n  " + l;
+    if (policyListeners) details += L"\nGroup Policy creates listeners (AllowAutoConfig=1).";
+
+    result.status = WinRmStatus(running, autoStart, listenerCount, policyListeners);
+    if (result.status == CHECK_PASS) {
         result.detail = L"WinRM is not accepting remote connections.\n" + details;
     }
+    else if (listenerCount < 0 && !policyListeners) {
+        result.detail = std::wstring(running ? L"WinRM is running" : L"WinRM starts automatically") +
+            L", and its listeners cannot be read without administrator rights. Run Phantom Recon as administrator to see "
+            L"whether it accepts remote connections.\n" + details;
+    }
+    else if (running) {
+        result.detail = L"WinRM is running and accepting remote connections.\n" + details;
+    }
+    else {
+        result.detail = L"WinRM starts automatically and has listeners configured.\n" + details;
+    }
+    DebugLog(L"WinRM: " + result.status + L", listeners " + std::to_wstring(listenerCount));
     return result;
 }
 

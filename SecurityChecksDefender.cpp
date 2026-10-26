@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "SecurityCheckModules.h"
 
+#include "AuditRules.h"
 #include "RegUtil.h"
 #include "SystemInfo.h"
 #include "TextUtils.h"
@@ -10,6 +11,11 @@
 #include <mutex>
 #include <sstream>
 
+static void DebugLog(const std::wstring& msg)
+{
+    OutputDebugStringW((L"[SecurityChecksDefender] " + msg + L"\n").c_str());
+}
+
 // ---------------------------------------------------------------------------
 // One read of Defender's state, shared by every Defender check in an audit.
 // Cached for 60 seconds (process-wide singleton, see CLAUDE.md).
@@ -17,11 +23,13 @@
 struct DefenderSnapshot {
     bool         statusOk = false;      // MSFT_MpComputerStatus answered
     bool         prefsOk = false;       // MSFT_MpPreference answered
-    std::wstring error;
+    std::wstring error;                 // why the status could not be read
+    std::wstring prefsError;            // why the preferences could not be read
     WmiRow       status;
     WmiRow       prefs;
     std::vector<std::wstring> otherAntivirus;   // from Security Center
-    bool         defenderPassive = false;
+    bool         securityCenterOk = false;      // ROOT\SecurityCenter2 answered (not on servers)
+    bool         otherAntivirusOn = false;      // one of otherAntivirus is switched on
 };
 
 struct DefenderCache {
@@ -41,11 +49,9 @@ static DefenderSnapshot ReadDefender()
     if (status.ok && !status.rows.empty()) {
         s.statusOk = true;
         s.status = status.rows[0];
-        std::wstring mode = s.status[L"AMRunningMode"];
-        s.defenderPassive = ContainsI(mode, L"Passive") || ContainsI(mode, L"EDR Block");
     }
     else {
-        s.error = status.error;
+        s.error = status.ok ? L"MSFT_MpComputerStatus returned no rows" : status.error;
     }
 
     WmiResult prefs = WmiQuery(L"ROOT\\Microsoft\\Windows\\Defender",
@@ -57,21 +63,30 @@ static DefenderSnapshot ReadDefender()
         s.prefsOk = true;
         s.prefs = prefs.rows[0];
     }
+    else {
+        s.prefsError = prefs.ok ? L"MSFT_MpPreference returned no rows" : prefs.error;
+    }
 
     WmiResult av = WmiQuery(L"ROOT\\SecurityCenter2", L"SELECT displayName, productState FROM AntiVirusProduct",
         { L"displayName", L"productState" });
     if (av.ok) {
+        s.securityCenterOk = true;
         for (const WmiRow& row : av.rows) {
             auto it = row.find(L"displayName");
             if (it == row.end()) continue;
             if (ContainsI(it->second, L"Windows Defender") || ContainsI(it->second, L"Microsoft Defender")) continue;
-            // productState bits 12-15: 0x1 = on. Only list products that are switched on.
             auto st = row.find(L"productState");
             unsigned long state = st != row.end() ? std::wcstoul(st->second.c_str(), nullptr, 10) : 0;
-            bool on = ((state >> 12) & 0xF) == 0x1;
+            bool on = SecurityCenterProductOn(state);
+            if (on) s.otherAntivirusOn = true;
             s.otherAntivirus.push_back(it->second + (on ? L" (on)" : L" (off)"));
         }
     }
+    auto modeIt = s.status.find(L"AMRunningMode");
+    DebugLog(L"Defender status " + std::wstring(s.statusOk ? L"read" : L"unreadable") + L", mode \"" +
+             (modeIt != s.status.end() ? modeIt->second : std::wstring()) + L"\", Security Center " +
+             (s.securityCenterOk ? L"answered" : L"unavailable") + L", other antivirus on: " +
+             (s.otherAntivirusOn ? L"yes" : L"no"));
     return s;
 }
 
@@ -105,48 +120,74 @@ static std::wstring Value(const WmiRow& row, const wchar_t* key)
     return it == row.end() ? L"" : it->second;
 }
 
-static bool OtherAvActive(const DefenderSnapshot& d)
+static DefenderFacts FactsOf(const DefenderSnapshot& d)
 {
-    for (const std::wstring& av : d.otherAntivirus) {
-        if (EndsWithI(av, L"(on)")) return true;
-    }
-    return false;
+    DebugLog(L"Building Defender facts from the cached snapshot");
+    DefenderFacts f;
+    f.statusOk = d.statusOk;
+    f.runningMode = d.statusOk ? Value(d.status, L"AMRunningMode") : L"";
+    f.securityCenterOk = d.securityCenterOk;
+    f.otherProductOn = d.otherAntivirusOn;
+    return f;
 }
 
-// When another antivirus product is active, Defender checks report on that
-// product's presence instead of failing.
-static bool ReportThirdParty(SecurityCheckResult& result, const DefenderSnapshot& d)
+// Why Defender is not the one to judge, in plain words, for the evidence.
+static std::wstring NotPrimaryReason(const DefenderSnapshot& d)
 {
-    if ((!d.statusOk || d.defenderPassive) && OtherAvActive(d)) {
-        result.status = CHECK_NA;
-        result.detail = L"Microsoft Defender is not the active antivirus. Active product(s): " + JoinW(d.otherAntivirus, L", ") +
-            L". Check the same setting in that product.";
-        return true;
+    DefenderFacts facts = FactsOf(d);
+    std::wstring products = d.otherAntivirus.empty() ? std::wstring(L"none") : JoinW(d.otherAntivirus, L", ");
+    DebugLog(L"Explaining why Defender is not judged; products: " + products);
+    switch (ClassifyDefender(facts)) {
+    case DefenderSituation::OtherProduct:
+        return L"Microsoft Defender is not the active antivirus" +
+            (d.statusOk ? L" (running mode: " + facts.runningMode + L")" : std::wstring()) +
+            L". Active product(s): " + products + L".";
+    case DefenderSituation::PassiveNoProduct:
+        return L"Microsoft Defender is not the main antivirus (running mode: " + facts.runningMode + L"), and " +
+            (d.securityCenterOk ? L"Security Center lists no other antivirus that is on (listed: " + products + L")."
+                                : std::wstring(L"this Windows edition has no Security Center to name the product in charge (servers do not)."));
+    case DefenderSituation::Unreadable:
+        return L"Microsoft Defender's status could not be read (" + d.error + L"). " +
+            (d.securityCenterOk ? L"Security Center lists no other antivirus that is on (listed: " + products + L")."
+                                : std::wstring(L"There is no Security Center to ask either (servers do not have one)."));
+    default:
+        return L"";
     }
-    return false;
 }
 
-static bool ReportUnavailable(SecurityCheckResult& result, const DefenderSnapshot& d)
+// Every Defender setting check except real-time protection: when Defender is not
+// the product in charge, or cannot be read, its settings are not judged.
+static bool ReportNotJudged(SecurityCheckResult& result, const DefenderSnapshot& d)
 {
-    if (!d.statusOk) {
-        result.status = CHECK_ERROR;
-        result.detail = L"Microsoft Defender status could not be read: " + d.error;
-        if (!d.otherAntivirus.empty()) result.detail += L" Security Center lists: " + JoinW(d.otherAntivirus, L", ");
-        return true;
-    }
-    return false;
+    std::wstring status = DefenderSettingStatus(FactsOf(d));
+    if (status.empty()) return false;
+    DebugLog(result.id + L": Defender not judged, " + status);
+    result.status = status;
+    result.detail = NotPrimaryReason(d) + L" This setting is not judged; check the same setting in the product that protects this PC.";
+    return true;
+}
+
+// Preferences are a second query; if only that one fails the setting cannot be judged.
+static bool ReportPrefsUnavailable(SecurityCheckResult& result, const DefenderSnapshot& d)
+{
+    if (d.prefsOk) return false;
+    DebugLog(result.id + L": preferences unreadable: " + d.prefsError);
+    result.status = CHECK_NA;
+    result.detail = L"Microsoft Defender's preferences could not be read (" + d.prefsError + L"), so this setting is not judged.";
+    return true;
 }
 
 SecurityCheckResult CheckDefenderRealtime()
 {
     SecurityCheckResult result = MakeCheckResult(L"def.realtime");
     DefenderSnapshot d = GetDefender();
-    if (ReportThirdParty(result, d)) {
-        result.status = CHECK_PASS;   // another product is on: real-time protection is present
-        return result;
-    }
-    if (ReportUnavailable(result, d)) {
-        if (d.otherAntivirus.empty()) result.status = CHECK_FAIL;
+    std::wstring gate = DefenderRealtimeStatus(FactsOf(d));
+    if (!gate.empty()) {
+        result.status = gate;
+        result.detail = NotPrimaryReason(d);
+        if (gate == CHECK_PASS) result.detail += L" Real-time protection comes from that product.";
+        else if (gate == CHECK_FAIL) result.detail += L" No antivirus is known to be protecting this PC in real time.";
+        else result.detail += L" Make sure an antivirus product is on and up to date.";
         return result;
     }
     std::wstringstream details;
@@ -166,8 +207,7 @@ SecurityCheckResult CheckDefenderTamper()
 {
     SecurityCheckResult result = MakeCheckResult(L"def.tamper");
     DefenderSnapshot d = GetDefender();
-    if (ReportThirdParty(result, d)) return result;
-    if (ReportUnavailable(result, d)) return result;
+    if (ReportNotJudged(result, d)) return result;
 
     if (HasValue(d.status, L"IsTamperProtected")) {
         bool on = IsTrue(d.status, L"IsTamperProtected");
@@ -192,13 +232,8 @@ SecurityCheckResult CheckDefenderCloud()
 {
     SecurityCheckResult result = MakeCheckResult(L"def.cloud");
     DefenderSnapshot d = GetDefender();
-    if (ReportThirdParty(result, d)) return result;
-    if (ReportUnavailable(result, d)) return result;
-    if (!d.prefsOk) {
-        result.status = CHECK_ERROR;
-        result.detail = L"Defender preferences could not be read.";
-        return result;
-    }
+    if (ReportNotJudged(result, d)) return result;
+    if (ReportPrefsUnavailable(result, d)) return result;
     int maps = _wtoi(Value(d.prefs, L"MAPSReporting").c_str());
     int submit = _wtoi(Value(d.prefs, L"SubmitSamplesConsent").c_str());
     const wchar_t* mapsText = maps == 0 ? L"Off" : maps == 1 ? L"Basic" : L"Advanced";
@@ -220,8 +255,7 @@ SecurityCheckResult CheckDefenderSignatures()
 {
     SecurityCheckResult result = MakeCheckResult(L"def.signatures");
     DefenderSnapshot d = GetDefender();
-    if (ReportThirdParty(result, d)) return result;
-    if (ReportUnavailable(result, d)) return result;
+    if (ReportNotJudged(result, d)) return result;
 
     std::wstring ageText = Value(d.status, L"AntivirusSignatureAge");
     int age = _wtoi(ageText.c_str());
@@ -237,13 +271,8 @@ SecurityCheckResult CheckDefenderExclusions()
 {
     SecurityCheckResult result = MakeCheckResult(L"def.exclusions");
     DefenderSnapshot d = GetDefender();
-    if (ReportThirdParty(result, d)) return result;
-    if (ReportUnavailable(result, d)) return result;
-    if (!d.prefsOk) {
-        result.status = CHECK_ERROR;
-        result.detail = L"Defender preferences could not be read.";
-        return result;
-    }
+    if (ReportNotJudged(result, d)) return result;
+    if (ReportPrefsUnavailable(result, d)) return result;
 
     std::wstringstream details;
     int count = 0;
@@ -285,13 +314,8 @@ SecurityCheckResult CheckDefenderAsr()
 {
     SecurityCheckResult result = MakeCheckResult(L"def.asr");
     DefenderSnapshot d = GetDefender();
-    if (ReportThirdParty(result, d)) return result;
-    if (ReportUnavailable(result, d)) return result;
-    if (!d.prefsOk) {
-        result.status = CHECK_ERROR;
-        result.detail = L"Defender preferences could not be read.";
-        return result;
-    }
+    if (ReportNotJudged(result, d)) return result;
+    if (ReportPrefsUnavailable(result, d)) return result;
 
     std::vector<std::wstring> ids = SplitW(Value(d.prefs, L"AttackSurfaceReductionRules_Ids"), L'\n');
     std::vector<std::wstring> actions = SplitW(Value(d.prefs, L"AttackSurfaceReductionRules_Actions"), L'\n');
@@ -349,25 +373,9 @@ SecurityCheckResult CheckControlledFolderAccess()
 {
     SecurityCheckResult result = MakeCheckResult(L"def.cfa");
     DefenderSnapshot d = GetDefender();
-    if (ReportThirdParty(result, d)) return result;
-    if (ReportUnavailable(result, d)) return result;
-    if (!d.prefsOk) {
-        result.status = CHECK_ERROR;
-        result.detail = L"Defender preferences could not be read.";
-        return result;
-    }
+    if (ReportNotJudged(result, d)) return result;
+    if (ReportPrefsUnavailable(result, d)) return result;
     int cfa = _wtoi(Value(d.prefs, L"EnableControlledFolderAccess").c_str());
-    if (cfa == 1) {
-        result.status = CHECK_PASS;
-        result.detail = L"Controlled folder access is on.";
-    }
-    else if (cfa == 2) {
-        result.status = CHECK_INFO;
-        result.detail = L"Controlled folder access is in audit mode: it records what it would block.";
-    }
-    else {
-        result.status = CHECK_WARNING;
-        result.detail = L"Controlled folder access is off.";
-    }
+    result.status = ControlledFolderAccessStatus(cfa, &result.detail);
     return result;
 }
