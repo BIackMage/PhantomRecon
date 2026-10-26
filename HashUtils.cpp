@@ -2,49 +2,103 @@
 #include "HashUtils.h"
 
 #include <bcrypt.h>
-#include <wincrypt.h>
 #include <vector>
-#include <sstream>
-#include <iomanip>
 
 #pragma comment(lib, "bcrypt.lib")
-#pragma comment(lib, "advapi32.lib")
 
 // ---------------------------------------------------------------------------
 // Debug logging
 // ---------------------------------------------------------------------------
-static void DebugLog(const wchar_t* msg)
+static void DebugLog(const std::wstring& msg)
 {
-    OutputDebugStringW(L"[HashUtils] ");
-    OutputDebugStringW(msg);
-    OutputDebugStringW(L"\n");
+    OutputDebugStringW((L"[HashUtils] " + msg + L"\n").c_str());
 }
 
-// ---------------------------------------------------------------------------
-// ComputeFileMD5Hex: CryptoAPI MD5, 64 KB reads, lowercase hex out.
-// MD5 is kept only because the .prbl baseline format and older CSVs carry it.
-// ---------------------------------------------------------------------------
-std::wstring ComputeFileMD5Hex(const std::wstring& filePath)
+static std::wstring ToHex(const std::vector<BYTE>& bytes)
 {
-    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ,
-        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    static const wchar_t* digits = L"0123456789abcdef";
+    std::wstring out;
+    out.reserve(bytes.size() * 2);
+    for (BYTE b : bytes) {
+        out += digits[b >> 4];
+        out += digits[b & 0x0F];
+    }
+    return out;
+}
+
+// One BCrypt hash object. Feed() as often as needed, then Finish().
+class BCryptHasher {
+public:
+    explicit BCryptHasher(LPCWSTR algorithm)
+    {
+        if (!BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&m_alg, algorithm, NULL, 0))) {
+            DebugLog(L"BCryptOpenAlgorithmProvider failed");
+            m_alg = NULL;
+            return;
+        }
+        DWORD objectSize = 0;
+        DWORD hashSize = 0;
+        DWORD got = 0;
+        if (!BCRYPT_SUCCESS(BCryptGetProperty(m_alg, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PBYTE>(&objectSize), sizeof(DWORD), &got, 0)) ||
+            !BCRYPT_SUCCESS(BCryptGetProperty(m_alg, BCRYPT_HASH_LENGTH, reinterpret_cast<PBYTE>(&hashSize), sizeof(DWORD), &got, 0))) {
+            DebugLog(L"BCryptGetProperty failed");
+            return;
+        }
+        m_object.resize(objectSize);
+        m_digest.resize(hashSize);
+        if (!BCRYPT_SUCCESS(BCryptCreateHash(m_alg, &m_hash, m_object.data(), objectSize, NULL, 0, 0))) {
+            DebugLog(L"BCryptCreateHash failed");
+            m_hash = NULL;
+        }
+    }
+
+    ~BCryptHasher()
+    {
+        if (m_hash) BCryptDestroyHash(m_hash);
+        if (m_alg) BCryptCloseAlgorithmProvider(m_alg, 0);
+    }
+
+    BCryptHasher(const BCryptHasher&) = delete;
+    BCryptHasher& operator=(const BCryptHasher&) = delete;
+
+    bool Ok() const { return m_hash != NULL; }
+
+    bool Feed(const void* data, size_t size)
+    {
+        const BYTE* p = static_cast<const BYTE*>(data);
+        while (size > 0) {
+            ULONG chunk = size > 0x40000000 ? 0x40000000 : static_cast<ULONG>(size);
+            if (!BCRYPT_SUCCESS(BCryptHashData(m_hash, const_cast<PUCHAR>(p), chunk, 0))) return false;
+            p += chunk;
+            size -= chunk;
+        }
+        return true;
+    }
+
+    std::wstring Finish()
+    {
+        if (!BCRYPT_SUCCESS(BCryptFinishHash(m_hash, m_digest.data(), static_cast<ULONG>(m_digest.size()), 0))) {
+            return L"";
+        }
+        return ToHex(m_digest);
+    }
+
+private:
+    BCRYPT_ALG_HANDLE  m_alg = NULL;
+    BCRYPT_HASH_HANDLE m_hash = NULL;
+    std::vector<BYTE>  m_object;
+    std::vector<BYTE>  m_digest;
+};
+
+static std::wstring HashFile(const std::wstring& filePath, LPCWSTR algorithm)
+{
+    BCryptHasher hasher(algorithm);
+    if (!hasher.Ok()) return L"";
+
+    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
-        DebugLog((L"MD5: failed to open file: " + filePath).c_str());
-        return L"";
-    }
-
-    HCRYPTPROV hProv = 0;
-    if (!CryptAcquireContextW(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
-        DebugLog(L"MD5: CryptAcquireContext failed");
-        CloseHandle(hFile);
-        return L"";
-    }
-
-    HCRYPTHASH hHash = 0;
-    if (!CryptCreateHash(hProv, CALG_MD5, 0, 0, &hHash)) {
-        DebugLog(L"MD5: CryptCreateHash failed");
-        CryptReleaseContext(hProv, 0);
-        CloseHandle(hFile);
+        DebugLog(L"Cannot open for hashing: " + filePath);
         return L"";
     }
 
@@ -52,133 +106,40 @@ std::wstring ComputeFileMD5Hex(const std::wstring& filePath)
     DWORD bytesRead = 0;
     bool ok = true;
     while (ReadFile(hFile, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, NULL) && bytesRead > 0) {
-        if (!CryptHashData(hHash, buffer.data(), bytesRead, 0)) {
-            DebugLog(L"MD5: CryptHashData failed");
+        if (!hasher.Feed(buffer.data(), bytesRead)) {
             ok = false;
             break;
         }
     }
     CloseHandle(hFile);
-
-    std::wstring result;
-    if (ok) {
-        BYTE digest[16] = {};
-        DWORD digestSize = sizeof(digest);
-        if (CryptGetHashParam(hHash, HP_HASHVAL, digest, &digestSize, 0)) {
-            std::wstringstream ss;
-            ss << std::hex << std::setfill(L'0');
-            for (DWORD i = 0; i < digestSize; ++i) {
-                ss << std::setw(2) << static_cast<unsigned int>(digest[i]);
-            }
-            result = ss.str();
-        }
-        else {
-            DebugLog(L"MD5: CryptGetHashParam failed");
-        }
-    }
-
-    CryptDestroyHash(hHash);
-    CryptReleaseContext(hProv, 0);
-    return result;
+    if (!ok) return L"";
+    return hasher.Finish();
 }
 
-// ---------------------------------------------------------------------------
-// ComputeFileSHA256 — BCrypt-based SHA-256 file hashing
-// ---------------------------------------------------------------------------
+static std::wstring HashBuffer(const void* data, size_t size, LPCWSTR algorithm)
+{
+    BCryptHasher hasher(algorithm);
+    if (!hasher.Ok()) return L"";
+    if (size > 0 && !hasher.Feed(data, size)) return L"";
+    return hasher.Finish();
+}
+
 std::wstring ComputeFileSHA256(const std::wstring& filePath)
 {
-    OutputDebugStringW((L"[HashUtils] ComputeFileSHA256: " + filePath + L"\n").c_str());
+    return HashFile(filePath, BCRYPT_SHA256_ALGORITHM);
+}
 
-    BCRYPT_ALG_HANDLE hAlg = NULL;
-    BCRYPT_HASH_HANDLE hHash = NULL;
-    NTSTATUS status = 0;
-    std::wstring result;
+std::wstring ComputeFileMD5Hex(const std::wstring& filePath)
+{
+    return HashFile(filePath, BCRYPT_MD5_ALGORITHM);
+}
 
-    // Open the SHA-256 algorithm provider
-    status = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, NULL, 0);
-    if (!BCRYPT_SUCCESS(status)) {
-        DebugLog(L"BCryptOpenAlgorithmProvider failed");
-        return L"";
-    }
+std::wstring ComputeBufferMD5Hex(const void* data, size_t size)
+{
+    return HashBuffer(data, size, BCRYPT_MD5_ALGORITHM);
+}
 
-    // Query hash object size
-    DWORD hashObjectSize = 0;
-    DWORD dataSize = 0;
-    status = BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH,
-        reinterpret_cast<PBYTE>(&hashObjectSize), sizeof(DWORD), &dataSize, 0);
-    if (!BCRYPT_SUCCESS(status)) {
-        DebugLog(L"BCryptGetProperty OBJECT_LENGTH failed");
-        BCryptCloseAlgorithmProvider(hAlg, 0);
-        return L"";
-    }
-
-    // Query hash output size (should be 32 bytes for SHA-256)
-    DWORD hashSize = 0;
-    status = BCryptGetProperty(hAlg, BCRYPT_HASH_LENGTH,
-        reinterpret_cast<PBYTE>(&hashSize), sizeof(DWORD), &dataSize, 0);
-    if (!BCRYPT_SUCCESS(status)) {
-        DebugLog(L"BCryptGetProperty HASH_LENGTH failed");
-        BCryptCloseAlgorithmProvider(hAlg, 0);
-        return L"";
-    }
-
-    // Allocate hash object buffer
-    std::vector<BYTE> hashObject(hashObjectSize);
-    std::vector<BYTE> hashValue(hashSize);
-
-    // Create the hash object
-    status = BCryptCreateHash(hAlg, &hHash, hashObject.data(), hashObjectSize, NULL, 0, 0);
-    if (!BCRYPT_SUCCESS(status)) {
-        DebugLog(L"BCryptCreateHash failed");
-        BCryptCloseAlgorithmProvider(hAlg, 0);
-        return L"";
-    }
-
-    // Open the file
-    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ,
-        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile == INVALID_HANDLE_VALUE) {
-        DebugLog(L"Failed to open file for hashing");
-        BCryptDestroyHash(hHash);
-        BCryptCloseAlgorithmProvider(hAlg, 0);
-        return L"";
-    }
-
-    // Read file in chunks and feed to hash
-    BYTE readBuffer[8192];
-    DWORD bytesRead = 0;
-    while (ReadFile(hFile, readBuffer, sizeof(readBuffer), &bytesRead, NULL) && bytesRead > 0) {
-        status = BCryptHashData(hHash, readBuffer, bytesRead, 0);
-        if (!BCRYPT_SUCCESS(status)) {
-            DebugLog(L"BCryptHashData failed");
-            CloseHandle(hFile);
-            BCryptDestroyHash(hHash);
-            BCryptCloseAlgorithmProvider(hAlg, 0);
-            return L"";
-        }
-    }
-
-    CloseHandle(hFile);
-
-    // Finalize the hash
-    status = BCryptFinishHash(hHash, hashValue.data(), hashSize, 0);
-    if (!BCRYPT_SUCCESS(status)) {
-        DebugLog(L"BCryptFinishHash failed");
-        BCryptDestroyHash(hHash);
-        BCryptCloseAlgorithmProvider(hAlg, 0);
-        return L"";
-    }
-
-    // Convert to hex string
-    std::wstringstream ss;
-    for (DWORD i = 0; i < hashSize; i++) {
-        ss << std::hex << std::setfill(L'0') << std::setw(2) << hashValue[i];
-    }
-    result = ss.str();
-
-    // Cleanup
-    BCryptDestroyHash(hHash);
-    BCryptCloseAlgorithmProvider(hAlg, 0);
-
-    return result;
+std::wstring ComputeBufferSHA256Hex(const void* data, size_t size)
+{
+    return HashBuffer(data, size, BCRYPT_SHA256_ALGORITHM);
 }

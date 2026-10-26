@@ -1,716 +1,392 @@
 #include "pch.h"
 #include "SecurityChecks.h"
-#include "SecurityChecksExtra.h"
+
+#include "AppPaths.h"
+#include "CheckCatalog.h"
+#include "RegUtil.h"
+#include "ServiceUtil.h"
+#include "TextUtils.h"
+#include "WmiQuery.h"
 
 #include <windows.h>
-#include <sstream>
-#include <iostream>
-#include <fstream>
-#include <algorithm>
 #include <tlhelp32.h>
-#include <Shlwapi.h>
-#include <aclapi.h>
+#include <sstream>
 
-#pragma comment(lib, "advapi32.lib")
-#pragma comment(lib, "shlwapi.lib")
-
-
-// ---------------------------------------------------------------------------
-// Helper: read a DWORD from the registry. Returns false if key/value missing.
-// ---------------------------------------------------------------------------
-static bool ReadRegDword(HKEY hRoot, const wchar_t* subKey, const wchar_t* valueName, DWORD& outValue)
+static void DebugLog(const std::wstring& msg)
 {
-    HKEY hKey = NULL;
-    if (RegOpenKeyExW(hRoot, subKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
-        return false;
-
-    DWORD type = 0;
-    DWORD size = sizeof(DWORD);
-    LONG result = RegQueryValueExW(hKey, valueName, NULL, &type, reinterpret_cast<BYTE*>(&outValue), &size);
-    RegCloseKey(hKey);
-    return (result == ERROR_SUCCESS && type == REG_DWORD);
+    OutputDebugStringW((L"[SecurityChecks] " + msg + L"\n").c_str());
 }
 
-
-// ---------------------------------------------------------------------------
-// Helper: extract the executable path from a service ImagePath string.
-// Handles quoted paths and paths with arguments.
-// ---------------------------------------------------------------------------
-static std::wstring ExtractExePath(const std::wstring& imagePath)
+SecurityCheckResult MakeCheckResult(const std::wstring& id)
 {
-    if (imagePath.empty()) return L"";
-
-    std::wstring path = imagePath;
-
-    // If quoted, extract the quoted portion
-    if (path[0] == L'"') {
-        size_t endQuote = path.find(L'"', 1);
-        if (endQuote != std::wstring::npos) {
-            return path.substr(1, endQuote - 1);
-        }
-        return path.substr(1); // malformed, missing closing quote
-    }
-
-    // Not quoted: take everything up to the first space that precedes a valid extension,
-    // or if that fails, take up to the first .exe/.dll/.sys we find + the extension.
-    // Simple heuristic: find first ".exe" / ".sys" / ".dll" occurrence and cut there.
-    std::wstring lower = path;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
-
-    const wchar_t* exts[] = { L".exe", L".sys", L".dll" };
-    for (const wchar_t* ext : exts) {
-        size_t pos = lower.find(ext);
-        if (pos != std::wstring::npos) {
-            return path.substr(0, pos + wcslen(ext));
-        }
-    }
-
-    // Fallback: up to first space
-    size_t spacePos = path.find(L' ');
-    if (spacePos != std::wstring::npos)
-        return path.substr(0, spacePos);
-
-    return path;
+    SecurityCheckResult r;
+    r.id = id;
+    const CheckInfo* info = FindCheckInfo(id);
+    r.name = info ? info->title : id;
+    r.status = CHECK_INFO;
+    return r;
 }
 
-
 // ---------------------------------------------------------------------------
-// Check: Unquoted service paths
+// Unquoted service paths
 // ---------------------------------------------------------------------------
-
 SecurityCheckResult CheckUnquotedServicePaths()
 {
-    SecurityCheckResult result;
-    result.name = L"Unquoted Service Paths";
-    result.status = L"PASS";
-
-    SC_HANDLE hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_ENUMERATE_SERVICE);
-    if (!hSCM) {
-        result.status = L"ERROR";
-        result.detail = L"Could not open Service Control Manager (need admin?)";
+    SecurityCheckResult result = MakeCheckResult(L"svc.unquoted");
+    std::wstring error;
+    std::vector<ServiceInfo> services = EnumerateServices(&error);
+    if (services.empty() && !error.empty()) {
+        result.status = CHECK_ERROR;
+        result.detail = error;
         return result;
     }
 
-    DWORD bytesNeeded = 0;
-    DWORD serviceCount = 0;
-    DWORD resumeHandle = 0;
-
-    // First call to get required buffer size
-    EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO, SERVICE_WIN32,
-        SERVICE_STATE_ALL, NULL, 0, &bytesNeeded, &serviceCount, &resumeHandle, NULL);
-
-    std::vector<BYTE> buffer(bytesNeeded);
-    LPENUM_SERVICE_STATUS_PROCESSW pServices =
-        reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buffer.data());
-
-    if (!EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO, SERVICE_WIN32,
-        SERVICE_STATE_ALL, buffer.data(), bytesNeeded, &bytesNeeded,
-        &serviceCount, &resumeHandle, NULL))
-    {
-        CloseServiceHandle(hSCM);
-        result.status = L"ERROR";
-        result.detail = L"EnumServicesStatusEx failed: " + std::to_wstring(GetLastError());
-        return result;
-    }
-
-    int foundCount = 0;
     std::wstringstream details;
-
-    for (DWORD i = 0; i < serviceCount; i++) {
-        SC_HANDLE hService = OpenServiceW(hSCM, pServices[i].lpServiceName, SERVICE_QUERY_CONFIG);
-        if (!hService) continue;
-
-        DWORD configSize = 0;
-        QueryServiceConfigW(hService, NULL, 0, &configSize);
-
-        std::vector<BYTE> configBuf(configSize);
-        LPQUERY_SERVICE_CONFIGW pConfig =
-            reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(configBuf.data());
-
-        if (QueryServiceConfigW(hService, pConfig, configSize, &configSize) && pConfig->lpBinaryPathName) {
-            std::wstring imagePath = pConfig->lpBinaryPathName;
-
-            // Skip paths that start with a quote (already quoted)
-            // Skip kernel drivers (\SystemRoot, system32\drivers patterns)
-            if (!imagePath.empty() && imagePath[0] != L'"') {
-                // Check if the unquoted path has spaces before the exe
-                std::wstring exePath = ExtractExePath(imagePath);
-
-                if (exePath.find(L' ') != std::wstring::npos) {
-                    foundCount++;
-                    details << L"  [" << pServices[i].lpServiceName << L"] "
-                            << imagePath << L"\n";
-                }
-            }
+    int found = 0;
+    for (const ServiceInfo& s : services) {
+        std::wstring raw = TrimW(s.binaryPathRaw);
+        if (raw.empty() || raw[0] == L'"') continue;
+        // Only the program part matters: "C:\Program Files\x.exe -k" is unsafe,
+        // "C:\Windows\x.exe -k netsvcs" is not.
+        std::wstring lower = ToLowerW(raw);
+        size_t exeEnd = std::wstring::npos;
+        const wchar_t* exts[] = { L".exe", L".sys", L".dll" };
+        for (const wchar_t* ext : exts) {
+            size_t pos = lower.find(ext);
+            if (pos != std::wstring::npos && (exeEnd == std::wstring::npos || pos < exeEnd)) exeEnd = pos + wcslen(ext);
         }
+        std::wstring programPart = exeEnd != std::wstring::npos ? raw.substr(0, exeEnd) : raw;
+        if (programPart.find(L' ') == std::wstring::npos) continue;
+        if (StartsWithI(programPart, L"\\SystemRoot\\") || StartsWithI(programPart, L"system32\\")) continue;
 
-        CloseServiceHandle(hService);
+        found++;
+        details << L"  [" << s.name << L"] " << raw << L"\n";
     }
 
-    CloseServiceHandle(hSCM);
-
-    if (foundCount > 0) {
-        result.status = L"FAIL";
-        result.detail = std::to_wstring(foundCount) + L" service(s) with unquoted paths containing spaces:\n"
-            + details.str();
+    if (found > 0) {
+        result.status = CHECK_FAIL;
+        result.detail = std::to_wstring(found) + L" service(s) with an unquoted path containing spaces:\n" + details.str();
     }
     else {
-        result.detail = L"No unquoted service paths with spaces found.";
+        result.status = CHECK_PASS;
+        result.detail = L"No unquoted service paths with spaces found (" + std::to_wstring(services.size()) + L" services checked).";
     }
-
     return result;
 }
 
-
 // ---------------------------------------------------------------------------
-// Check: Writable service executables
+// Service programs writable by low-privilege users
 // ---------------------------------------------------------------------------
-
 SecurityCheckResult CheckWritableServiceExes()
 {
-    SecurityCheckResult result;
-    result.name = L"Writable Service Executables";
-    result.status = L"PASS";
-
-    SC_HANDLE hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_ENUMERATE_SERVICE);
-    if (!hSCM) {
-        result.status = L"ERROR";
-        result.detail = L"Could not open Service Control Manager";
+    SecurityCheckResult result = MakeCheckResult(L"svc.writable");
+    std::wstring error;
+    std::vector<ServiceInfo> services = EnumerateServices(&error);
+    if (services.empty() && !error.empty()) {
+        result.status = CHECK_ERROR;
+        result.detail = error;
         return result;
     }
 
-    DWORD bytesNeeded = 0;
-    DWORD serviceCount = 0;
-    DWORD resumeHandle = 0;
-
-    EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO, SERVICE_WIN32,
-        SERVICE_STATE_ALL, NULL, 0, &bytesNeeded, &serviceCount, &resumeHandle, NULL);
-
-    std::vector<BYTE> buffer(bytesNeeded);
-    LPENUM_SERVICE_STATUS_PROCESSW pServices =
-        reinterpret_cast<LPENUM_SERVICE_STATUS_PROCESSW>(buffer.data());
-
-    if (!EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO, SERVICE_WIN32,
-        SERVICE_STATE_ALL, buffer.data(), bytesNeeded, &bytesNeeded,
-        &serviceCount, &resumeHandle, NULL))
-    {
-        CloseServiceHandle(hSCM);
-        result.status = L"ERROR";
-        result.detail = L"EnumServicesStatusEx failed";
-        return result;
-    }
-
-    int foundCount = 0;
     std::wstringstream details;
-
-    for (DWORD i = 0; i < serviceCount; i++) {
-        SC_HANDLE hService = OpenServiceW(hSCM, pServices[i].lpServiceName, SERVICE_QUERY_CONFIG);
-        if (!hService) continue;
-
-        DWORD configSize = 0;
-        QueryServiceConfigW(hService, NULL, 0, &configSize);
-
-        std::vector<BYTE> configBuf(configSize);
-        LPQUERY_SERVICE_CONFIGW pConfig =
-            reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(configBuf.data());
-
-        if (QueryServiceConfigW(hService, pConfig, configSize, &configSize) && pConfig->lpBinaryPathName) {
-            std::wstring exePath = ExtractExePath(pConfig->lpBinaryPathName);
-
-            if (!exePath.empty() && PathFileExistsW(exePath.c_str())) {
-                // Try to open for write access — if it succeeds, it's writable
-                HANDLE hFile = CreateFileW(exePath.c_str(), GENERIC_WRITE,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
-                    FILE_ATTRIBUTE_NORMAL, NULL);
-
-                if (hFile != INVALID_HANDLE_VALUE) {
-                    CloseHandle(hFile);
-                    foundCount++;
-                    details << L"  [" << pServices[i].lpServiceName << L"] "
-                            << exePath << L"\n";
-                }
-            }
+    int found = 0;
+    for (const ServiceInfo& s : services) {
+        if (s.startType == SERVICE_DISABLED) continue;
+        if (s.exePath.empty() || !FileExists(s.exePath)) continue;
+        std::wstring who;
+        if (LowPrivilegeWritable(s.exePath, false, &who)) {
+            found++;
+            details << L"  [" << s.name << L"] " << s.exePath << L"  (writable by " << who
+                    << L", runs as " << (s.account.empty() ? L"LocalSystem" : s.account) << L")\n";
         }
-
-        CloseServiceHandle(hService);
     }
 
-    CloseServiceHandle(hSCM);
-
-    if (foundCount > 0) {
-        result.status = L"FAIL";
-        result.detail = std::to_wstring(foundCount) + L" service executable(s) writable by current user:\n"
-            + details.str();
+    if (found > 0) {
+        result.status = CHECK_FAIL;
+        result.detail = std::to_wstring(found) + L" service program(s) can be changed by normal users:\n" + details.str();
     }
     else {
-        result.detail = L"No writable service executables found.";
+        result.status = CHECK_PASS;
+        result.detail = L"No service program is writable by normal users.";
     }
-
     return result;
 }
 
-
 // ---------------------------------------------------------------------------
-// Check: AlwaysInstallElevated
+// AlwaysInstallElevated
 // ---------------------------------------------------------------------------
-
 SecurityCheckResult CheckAlwaysInstallElevated()
 {
-    SecurityCheckResult result;
-    result.name = L"AlwaysInstallElevated";
-    result.status = L"PASS";
+    SecurityCheckResult result = MakeCheckResult(L"msi.alwayselevated");
+    const wchar_t* key = L"SOFTWARE\\Policies\\Microsoft\\Windows\\Installer";
+    DWORD hklm = 0, hkcu = 0;
+    bool hklmFound = RegReadDword(HKEY_LOCAL_MACHINE, key, L"AlwaysInstallElevated", hklm);
+    bool hkcuFound = RegReadDword(HKEY_CURRENT_USER, key, L"AlwaysInstallElevated", hkcu);
 
-    DWORD hklmValue = 0;
-    DWORD hkcuValue = 0;
-    bool hklmFound = ReadRegDword(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Policies\\Microsoft\\Windows\\Installer", L"AlwaysInstallElevated", hklmValue);
-    bool hkcuFound = ReadRegDword(HKEY_CURRENT_USER,
-        L"SOFTWARE\\Policies\\Microsoft\\Windows\\Installer", L"AlwaysInstallElevated", hkcuValue);
-
-    // Both must be set to 1 for the vulnerability to be exploitable
-    if (hklmFound && hkcuFound && hklmValue == 1 && hkcuValue == 1) {
-        result.status = L"FAIL";
-        result.detail = L"HKLM and HKCU AlwaysInstallElevated both set to 1. "
-                        L"Any user can install MSI packages with SYSTEM privileges.";
+    if (hklmFound && hkcuFound && hklm == 1 && hkcu == 1) {
+        result.status = CHECK_FAIL;
+        result.detail = L"HKLM and HKCU AlwaysInstallElevated are both 1. Any user can install MSI packages as SYSTEM.";
     }
-    else if ((hklmFound && hklmValue == 1) || (hkcuFound && hkcuValue == 1)) {
-        result.status = L"WARNING";
-        result.detail = L"AlwaysInstallElevated set in one hive but not both. "
-                        L"HKLM=" + std::to_wstring(hklmFound ? hklmValue : 0) +
-                        L" HKCU=" + std::to_wstring(hkcuFound ? hkcuValue : 0);
+    else if ((hklmFound && hklm == 1) || (hkcuFound && hkcu == 1)) {
+        result.status = CHECK_WARNING;
+        result.detail = L"AlwaysInstallElevated is set in one hive but not both (HKLM=" +
+            std::to_wstring(hklmFound ? hklm : 0) + L", HKCU=" + std::to_wstring(hkcuFound ? hkcu : 0) +
+            L"). Not exploitable yet; one more change makes it so.";
     }
     else {
-        result.detail = L"AlwaysInstallElevated not set (good).";
+        result.status = CHECK_PASS;
+        result.detail = L"AlwaysInstallElevated is not set.";
     }
-
     return result;
 }
 
-
 // ---------------------------------------------------------------------------
-// Check: Unattended install files
+// Unattended install files
 // ---------------------------------------------------------------------------
-
 SecurityCheckResult CheckUnattendedInstallFiles()
 {
-    SecurityCheckResult result;
-    result.name = L"Unattended Install Files";
-    result.status = L"PASS";
-
-    // Common paths where unattended / sysprep files may contain cleartext credentials
-    const wchar_t* searchPaths[] = {
-        L"C:\\unattend.xml",
-        L"C:\\unattend.txt",
-        L"C:\\Windows\\Panther\\unattend.xml",
-        L"C:\\Windows\\Panther\\Unattend\\unattend.xml",
-        L"C:\\Windows\\Panther\\unattended.xml",
-        L"C:\\Windows\\System32\\sysprep\\sysprep.xml",
-        L"C:\\Windows\\System32\\sysprep\\sysprep.inf",
-        L"C:\\Windows\\System32\\sysprep\\unattend.xml",
-        L"C:\\Windows\\system32\\sysprep.inf",
-        L"C:\\Windows\\inf\\autoUnattend.xml",
-        L"C:\\Windows\\Setup\\Scripts\\unattend.xml",
+    SecurityCheckResult result = MakeCheckResult(L"files.unattend");
+    std::wstring windir = ExpandEnvironment(L"%SystemRoot%");
+    std::wstring sysdrive = ExpandEnvironment(L"%SystemDrive%");
+    const std::vector<std::wstring> paths = {
+        sysdrive + L"\\unattend.xml",
+        sysdrive + L"\\unattend.txt",
+        sysdrive + L"\\autounattend.xml",
+        windir + L"\\Panther\\unattend.xml",
+        windir + L"\\Panther\\Unattend\\unattend.xml",
+        windir + L"\\Panther\\unattended.xml",
+        windir + L"\\Panther\\autounattend.xml",
+        windir + L"\\System32\\sysprep\\sysprep.xml",
+        windir + L"\\System32\\sysprep\\sysprep.inf",
+        windir + L"\\System32\\sysprep\\unattend.xml",
+        windir + L"\\System32\\sysprep\\Panther\\unattend.xml",
+        windir + L"\\system32\\sysprep.inf",
+        windir + L"\\inf\\autoUnattend.xml",
+        windir + L"\\Setup\\Scripts\\unattend.xml",
     };
 
-    int foundCount = 0;
     std::wstringstream details;
-
-    for (const wchar_t* path : searchPaths) {
-        if (PathFileExistsW(path)) {
-            foundCount++;
-            details << L"  " << path << L"\n";
+    int found = 0;
+    for (const std::wstring& p : paths) {
+        if (FileExists(p)) {
+            found++;
+            details << L"  " << p << L"\n";
         }
     }
-
-    if (foundCount > 0) {
-        result.status = L"WARNING";
-        result.detail = std::to_wstring(foundCount)
-            + L" unattended install file(s) found (may contain credentials):\n"
-            + details.str();
+    if (found > 0) {
+        result.status = CHECK_WARNING;
+        result.detail = std::to_wstring(found) + L" setup answer file(s) found (may contain passwords):\n" + details.str();
     }
     else {
-        result.detail = L"No unattended install files found.";
+        result.status = CHECK_PASS;
+        result.detail = L"No setup answer files found in the usual places.";
     }
-
     return result;
 }
 
-
 // ---------------------------------------------------------------------------
-// Check: Credential Guard (LsaIso.exe)
+// Credential Guard
 // ---------------------------------------------------------------------------
-
 SecurityCheckResult CheckCredentialGuard()
 {
-    SecurityCheckResult result;
-    result.name = L"Credential Guard (LsaIso)";
-    result.status = L"WARNING";
+    SecurityCheckResult result = MakeCheckResult(L"lsa.credguard");
 
-    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnapshot == INVALID_HANDLE_VALUE) {
-        result.status = L"ERROR";
-        result.detail = L"Could not enumerate processes.";
-        return result;
+    // Preferred: ask Device Guard which security services are running
+    // (SecurityServicesRunning: 1 = Credential Guard, 2 = memory integrity / HVCI).
+    WmiResult wmi = WmiQuery(L"ROOT\\Microsoft\\Windows\\DeviceGuard",
+        L"SELECT SecurityServicesRunning, VirtualizationBasedSecurityStatus FROM Win32_DeviceGuard",
+        { L"SecurityServicesRunning", L"VirtualizationBasedSecurityStatus" });
+    bool wmiKnows = false;
+    bool running = false;
+    std::wstring vbsStatus;
+    if (wmi.ok && !wmi.rows.empty()) {
+        wmiKnows = true;
+        std::wstring services = wmi.rows[0][L"SecurityServicesRunning"];
+        for (const std::wstring& v : SplitW(services, L'\n')) {
+            if (v == L"1") running = true;   // 1 = Credential Guard
+        }
+        vbsStatus = wmi.rows[0][L"VirtualizationBasedSecurityStatus"];
     }
 
-    PROCESSENTRY32W pe = {};
-    pe.dwSize = sizeof(PROCESSENTRY32W);
-
-    bool found = false;
-    if (Process32FirstW(hSnapshot, &pe)) {
-        do {
-            std::wstring exeName = pe.szExeFile;
-            // Case-insensitive compare
-            std::transform(exeName.begin(), exeName.end(), exeName.begin(), ::towlower);
-            if (exeName == L"lsaiso.exe") {
-                found = true;
-                break;
-            }
-        } while (Process32NextW(hSnapshot, &pe));
+    // Fallback and confirmation: LsaIso.exe is the Credential Guard process.
+    bool lsaIso = false;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32W pe = {};
+        pe.dwSize = sizeof(pe);
+        if (Process32FirstW(snap, &pe)) {
+            do {
+                if (_wcsicmp(pe.szExeFile, L"lsaiso.exe") == 0) {
+                    lsaIso = true;
+                    break;
+                }
+            } while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
     }
 
-    CloseHandle(hSnapshot);
-
-    if (found) {
-        result.status = L"PASS";
-        result.detail = L"LsaIso.exe is running — Credential Guard is active. "
-                        L"Protects against credential-dumping tools (e.g. Mimikatz).";
+    if (running || lsaIso) {
+        result.status = CHECK_PASS;
+        result.detail = L"Credential Guard is running" + std::wstring(lsaIso ? L" (LsaIso.exe present)." : L".");
     }
     else {
-        result.detail = L"LsaIso.exe NOT found — Credential Guard is not active. "
-                        L"System may be vulnerable to credential-dumping attacks.";
+        result.status = CHECK_WARNING;
+        result.detail = L"Credential Guard is not running.";
+        if (wmiKnows) {
+            const wchar_t* vbs = vbsStatus == L"2" ? L"running" : vbsStatus == L"1" ? L"enabled but not running" : L"off";
+            result.detail += std::wstring(L" Virtualization-based security is ") + vbs + L".";
+        }
     }
-
     return result;
 }
 
-
 // ---------------------------------------------------------------------------
-// Check: LLMNR
+// LLMNR
 // ---------------------------------------------------------------------------
-
 SecurityCheckResult CheckLLMNR()
 {
-    SecurityCheckResult result;
-    result.name = L"LLMNR";
-
+    SecurityCheckResult result = MakeCheckResult(L"net.llmnr");
     DWORD value = 0;
-    bool found = ReadRegDword(HKEY_LOCAL_MACHINE,
-        L"SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient",
-        L"EnableMulticast", value);
-
+    bool found = RegReadDword(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Microsoft\\Windows NT\\DNSClient", L"EnableMulticast", value);
     if (found && value == 0) {
-        result.status = L"PASS";
-        result.detail = L"LLMNR is disabled via group policy (EnableMulticast=0).";
+        result.status = CHECK_PASS;
+        result.detail = L"LLMNR is turned off by policy (EnableMulticast=0).";
     }
     else if (found) {
-        result.status = L"FAIL";
-        result.detail = L"LLMNR is explicitly enabled (EnableMulticast="
-            + std::to_wstring(value) + L"). Vulnerable to poisoning attacks.";
+        result.status = CHECK_FAIL;
+        result.detail = L"LLMNR is explicitly on (EnableMulticast=" + std::to_wstring(value) + L").";
     }
     else {
-        result.status = L"FAIL";
-        result.detail = L"LLMNR policy not configured (defaults to enabled). "
-                        L"Vulnerable to LLMNR poisoning / relay attacks.";
+        result.status = CHECK_FAIL;
+        result.detail = L"LLMNR policy is not set, so LLMNR is on (the Windows default).";
     }
-
     return result;
 }
 
-
 // ---------------------------------------------------------------------------
-// Check: NBT-NS (NetBIOS Name Service)
+// NBT-NS
 // ---------------------------------------------------------------------------
-
 SecurityCheckResult CheckNBTNS()
 {
-    SecurityCheckResult result;
-    result.name = L"NetBIOS (NBT-NS)";
-    result.status = L"PASS";
-
-    // NBT-NS is configured per network adapter under:
-    // HKLM\SYSTEM\CurrentControlSet\Services\NetBT\Parameters\Interfaces\Tcpip_{GUID}
-    //   NetbiosOptions: 0=default(DHCP), 1=enabled, 2=disabled
-
-    HKEY hInterfacesKey = NULL;
-    LONG openResult = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-        L"SYSTEM\\CurrentControlSet\\Services\\NetBT\\Parameters\\Interfaces",
-        0, KEY_READ, &hInterfacesKey);
-
-    if (openResult != ERROR_SUCCESS) {
-        result.status = L"ERROR";
-        result.detail = L"Could not read NetBT interfaces registry key.";
+    SecurityCheckResult result = MakeCheckResult(L"net.nbtns");
+    const std::wstring base = L"SYSTEM\\CurrentControlSet\\Services\\NetBT\\Parameters\\Interfaces";
+    std::vector<std::wstring> adapters = RegEnumSubKeys(HKEY_LOCAL_MACHINE, base);
+    if (adapters.empty()) {
+        if (!RegKeyExists(HKEY_LOCAL_MACHINE, base)) {
+            result.status = CHECK_PASS;
+            result.detail = L"NetBIOS over TCP/IP is not installed.";
+        }
+        else {
+            result.status = CHECK_PASS;
+            result.detail = L"No network adapters are bound to NetBIOS.";
+        }
         return result;
     }
 
-    int enabledCount = 0;
-    int disabledCount = 0;
-    int totalAdapters = 0;
+    int enabled = 0;
     std::wstringstream details;
-
-    wchar_t subKeyName[256];
-    DWORD subKeyNameLen = 256;
-    DWORD index = 0;
-
-    while (RegEnumKeyExW(hInterfacesKey, index, subKeyName, &subKeyNameLen,
-        NULL, NULL, NULL, NULL) == ERROR_SUCCESS)
-    {
-        totalAdapters++;
-        std::wstring fullPath = std::wstring(L"SYSTEM\\CurrentControlSet\\Services\\NetBT\\Parameters\\Interfaces\\") + subKeyName;
-
-        DWORD nbOption = 0;
-        bool found = ReadRegDword(HKEY_LOCAL_MACHINE, fullPath.c_str(), L"NetbiosOptions", nbOption);
-
-        if (found && nbOption == 2) {
-            disabledCount++;
+    for (const std::wstring& adapter : adapters) {
+        DWORD option = 0;
+        bool found = RegReadDword(HKEY_LOCAL_MACHINE, base + L"\\" + adapter, L"NetbiosOptions", option);
+        if (!(found && option == 2)) {
+            enabled++;
+            details << L"  " << adapter << L" (NetbiosOptions=" << (found ? std::to_wstring(option) : L"not set") << L")\n";
         }
-        else {
-            enabledCount++;
-            details << L"  " << subKeyName << L" (NetbiosOptions="
-                    << (found ? std::to_wstring(nbOption) : L"not set") << L")\n";
-        }
-
-        subKeyNameLen = 256;
-        index++;
     }
-
-    RegCloseKey(hInterfacesKey);
-
-    if (enabledCount > 0) {
-        result.status = L"FAIL";
-        result.detail = std::to_wstring(enabledCount) + L"/" + std::to_wstring(totalAdapters)
-            + L" adapter(s) have NBT-NS enabled (vulnerable to poisoning):\n" + details.str();
+    if (enabled > 0) {
+        result.status = CHECK_FAIL;
+        result.detail = std::to_wstring(enabled) + L" of " + std::to_wstring(adapters.size()) +
+            L" adapter(s) have NetBIOS name lookups on:\n" + details.str();
     }
     else {
-        result.detail = L"NBT-NS disabled on all " + std::to_wstring(totalAdapters) + L" adapter(s).";
+        result.status = CHECK_PASS;
+        result.detail = L"NetBIOS is off on all " + std::to_wstring(adapters.size()) + L" adapter(s).";
     }
-
     return result;
 }
 
-
 // ---------------------------------------------------------------------------
-// Check: mDNS
+// mDNS
 // ---------------------------------------------------------------------------
-
 SecurityCheckResult CheckMDNS()
 {
-    SecurityCheckResult result;
-    result.name = L"mDNS";
-
+    SecurityCheckResult result = MakeCheckResult(L"net.mdns");
     DWORD value = 0;
-    bool found = ReadRegDword(HKEY_LOCAL_MACHINE,
-        L"SYSTEM\\CurrentControlSet\\Services\\Dnscache\\Parameters",
-        L"EnableMDNS", value);
-
+    bool found = RegReadDword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\Dnscache\\Parameters", L"EnableMDNS", value);
     if (found && value == 0) {
-        result.status = L"PASS";
-        result.detail = L"mDNS is disabled (EnableMDNS=0).";
+        result.status = CHECK_PASS;
+        result.detail = L"mDNS is off (EnableMDNS=0).";
     }
     else if (found) {
-        result.status = L"FAIL";
-        result.detail = L"mDNS is enabled (EnableMDNS=" + std::to_wstring(value)
-            + L"). May be vulnerable to poisoning.";
+        result.status = CHECK_FAIL;
+        result.detail = L"mDNS is on (EnableMDNS=" + std::to_wstring(value) + L").";
     }
     else {
-        result.status = L"FAIL";
-        result.detail = L"mDNS setting not configured (defaults to enabled on Win10+). "
-                        L"May be vulnerable to multicast DNS poisoning.";
+        result.status = CHECK_FAIL;
+        result.detail = L"mDNS is not configured, so it is on (the Windows 10 and 11 default).";
     }
-
     return result;
 }
 
-
 // ---------------------------------------------------------------------------
-// Check: SMB Signing (client-side)
+// SMB signing (client)
 // ---------------------------------------------------------------------------
-
 SecurityCheckResult CheckSMBSigning()
 {
-    SecurityCheckResult result;
-    result.name = L"SMB Signing (Client)";
-
-    DWORD value = 0;
-    bool found = ReadRegDword(HKEY_LOCAL_MACHINE,
-        L"SYSTEM\\CurrentControlSet\\Services\\LanmanWorkstation\\Parameters",
-        L"RequireSecuritySignature", value);
-
-    if (found && value == 1) {
-        result.status = L"PASS";
-        result.detail = L"SMB signing is required on the client (RequireSecuritySignature=1). "
-                        L"Protects against relay attacks.";
-    }
-    else {
-        result.status = L"FAIL";
-
-        DWORD enableValue = 0;
-        bool enableFound = ReadRegDword(HKEY_LOCAL_MACHINE,
-            L"SYSTEM\\CurrentControlSet\\Services\\LanmanWorkstation\\Parameters",
-            L"EnableSecuritySignature", enableValue);
-
-        if (enableFound && enableValue == 1) {
-            result.detail = L"SMB signing is enabled but NOT required (client will sign if server requests). "
-                            L"Vulnerable to downgrade / relay attacks.";
-        }
-        else {
-            result.detail = L"SMB signing is not required on the client. "
-                            L"Vulnerable to NTLM relay attacks.";
-        }
-    }
-
-    return result;
-}
-
-
-// ---------------------------------------------------------------------------
-// Check: Proxy Auto-Detect (WPAD)
-// ---------------------------------------------------------------------------
-
-SecurityCheckResult CheckProxyAutoDetect()
-{
-    SecurityCheckResult result;
-    result.name = L"Proxy Auto-Detect (WPAD)";
-
-    // Internet Settings -> Connections -> DefaultConnectionSettings
-    // Byte 8 (offset 8) contains flags:
-    //   bit 0x08 = auto-detect enabled
-    // Also check the simpler ProxyEnable / AutoDetect values
-    HKEY hKey = NULL;
-    LONG openResult = RegOpenKeyExW(HKEY_CURRENT_USER,
-        L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-        0, KEY_READ, &hKey);
-
-    if (openResult != ERROR_SUCCESS) {
-        result.status = L"ERROR";
-        result.detail = L"Could not read Internet Settings registry key.";
+    SecurityCheckResult result = MakeCheckResult(L"net.smbsigning");
+    const wchar_t* key = L"SYSTEM\\CurrentControlSet\\Services\\LanmanWorkstation\\Parameters";
+    DWORD required = 0;
+    bool found = RegReadDword(HKEY_LOCAL_MACHINE, key, L"RequireSecuritySignature", required);
+    if (found && required == 1) {
+        result.status = CHECK_PASS;
+        result.detail = L"The SMB client requires signing (RequireSecuritySignature=1).";
         return result;
     }
-
-    // Check the WinHTTP auto-proxy settings via the Connections subkey
-    HKEY hConnKey = NULL;
-    bool autoDetectOn = false;
-
-    if (RegOpenKeyExW(HKEY_CURRENT_USER,
-        L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Connections",
-        0, KEY_READ, &hConnKey) == ERROR_SUCCESS)
-    {
-        BYTE connSettings[256] = {};
-        DWORD connSize = sizeof(connSettings);
-        DWORD connType = 0;
-
-        if (RegQueryValueExW(hConnKey, L"DefaultConnectionSettings", NULL, &connType,
-            connSettings, &connSize) == ERROR_SUCCESS && connSize > 8)
-        {
-            // Byte at index 8 has the flags
-            if (connSettings[8] & 0x08) {
-                autoDetectOn = true;
-            }
-        }
-
-        RegCloseKey(hConnKey);
-    }
-
-    RegCloseKey(hKey);
-
-    if (autoDetectOn) {
-        result.status = L"FAIL";
-        result.detail = L"Proxy auto-detect (WPAD) is enabled. "
-                        L"Vulnerable to WPAD poisoning attacks on the local network. "
-                        L"Recommend disabling auto-detect and configuring proxy explicitly.";
+    result.status = CHECK_FAIL;
+    DWORD enabled = 0;
+    if (RegReadDword(HKEY_LOCAL_MACHINE, key, L"EnableSecuritySignature", enabled) && enabled == 1) {
+        result.detail = L"The SMB client signs when the server asks, but does not require it. A relay can strip it.";
     }
     else {
-        result.status = L"PASS";
-        result.detail = L"Proxy auto-detect (WPAD) is not enabled.";
+        result.detail = L"The SMB client does not require signing.";
     }
-
     return result;
 }
 
-
 // ---------------------------------------------------------------------------
-// Run all checks
+// WPAD
 // ---------------------------------------------------------------------------
-
-std::vector<SecurityCheckResult> RunAllSecurityChecks()
+SecurityCheckResult CheckProxyAutoDetect()
 {
-    std::vector<SecurityCheckResult> results;
-
-    results.push_back(CheckUnquotedServicePaths());
-    results.push_back(CheckWritableServiceExes());
-    results.push_back(CheckAlwaysInstallElevated());
-    results.push_back(CheckUnattendedInstallFiles());
-    results.push_back(CheckCredentialGuard());
-    results.push_back(CheckLLMNR());
-    results.push_back(CheckNBTNS());
-    results.push_back(CheckMDNS());
-    results.push_back(CheckSMBSigning());
-    results.push_back(CheckProxyAutoDetect());
-
-    // Phase 1.5 additional checks
-    results.push_back(CheckStartupPrograms());
-    results.push_back(CheckScheduledTasks());
-    results.push_back(CheckPowerShellPolicy());
-    results.push_back(CheckWindowsFirewall());
-    results.push_back(CheckAuditPolicy());
-    results.push_back(CheckWindowsUpdateStatus());
-
-    return results;
-}
-
-
-// ---------------------------------------------------------------------------
-// Compact UI summary
-// ---------------------------------------------------------------------------
-
-std::wstring GetSecuritySummary(const std::vector<SecurityCheckResult>& results)
-{
-    int passCount = 0;
-    int failCount = 0;
-    int warnCount = 0;
-    int errCount = 0;
-
-    std::wstringstream ss;
-    ss << L"--- Security Audit ---\n";
-
-    for (const auto& r : results) {
-        std::wstring icon;
-        if (r.status == L"PASS")         { icon = L"[OK]  "; passCount++; }
-        else if (r.status == L"FAIL")    { icon = L"[FAIL]"; failCount++; }
-        else if (r.status == L"WARNING") { icon = L"[WARN]"; warnCount++; }
-        else                             { icon = L"[ERR] "; errCount++;  }
-
-        ss << icon << L" " << r.name << L"\n";
+    SecurityCheckResult result = MakeCheckResult(L"net.wpad");
+    std::vector<BYTE> settings;
+    bool autoDetect = false;
+    bool known = RegReadBinary(HKEY_CURRENT_USER,
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Connections",
+        L"DefaultConnectionSettings", settings);
+    if (known && settings.size() > 8) {
+        autoDetect = (settings[8] & 0x08) != 0;
     }
+    DWORD policyOff = 0;
+    bool servicePolicy = RegReadDword(HKEY_LOCAL_MACHINE,
+        L"SYSTEM\\CurrentControlSet\\Services\\WinHttpAutoProxySvc", L"Start", policyOff) && policyOff == 4;
 
-    ss << L"\nTotal: " << passCount << L" pass, "
-       << failCount << L" fail, "
-       << warnCount << L" warn, "
-       << errCount << L" err";
-
-    return ss.str();
-}
-
-
-// ---------------------------------------------------------------------------
-// Full report to file
-// ---------------------------------------------------------------------------
-
-void WriteSecurityReport(const std::wstring& outputPath,
-                         const std::vector<SecurityCheckResult>& results)
-{
-    std::wofstream file(outputPath);
-    if (!file.is_open()) return;
-
-    file << L"=== Phantom Recon Security Audit Report ===" << std::endl;
-    file << L"=========================================" << std::endl << std::endl;
-
-    for (const auto& r : results) {
-        file << L"CHECK: " << r.name << std::endl;
-        file << L"STATUS: " << r.status << std::endl;
-        file << L"DETAIL: " << r.detail << std::endl;
-        file << L"-----------------------------------------" << std::endl;
+    if (!known) {
+        result.status = CHECK_PASS;
+        result.detail = L"No saved connection settings; automatic proxy detection has never been configured for this user.";
     }
-
-    file.close();
+    else if (autoDetect && !servicePolicy) {
+        result.status = CHECK_FAIL;
+        result.detail = L"Automatically detect settings is on for this user.";
+    }
+    else if (autoDetect && servicePolicy) {
+        result.status = CHECK_WARNING;
+        result.detail = L"Automatically detect settings is on, but the WinHTTP auto-proxy service is disabled.";
+    }
+    else {
+        result.status = CHECK_PASS;
+        result.detail = L"Automatic proxy detection is off.";
+    }
+    DebugLog(L"WPAD: " + result.status);
+    return result;
 }

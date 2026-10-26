@@ -29,7 +29,7 @@ public:
     // Given a list of installed programs, find all executable files (.exe, .dll, etc.)
     // in their install locations. Returns a deduplicated list of full file paths.
     static std::vector<std::wstring> GetExecutablePathsFromPrograms(
-        const std::vector<InstalledProgram>& programs);
+        const std::vector<InstalledProgram>& programs, int maxDepth = 3);
 
 private:
     // Enumerate subkeys under a single registry path

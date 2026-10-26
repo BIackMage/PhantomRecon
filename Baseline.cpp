@@ -1,12 +1,20 @@
 #include "pch.h"
 #include "Baseline.h"
+
+#include "FileAnalysis.h"
+#include "FuzzyHash.h"
+#include "TextUtils.h"
+
 #include <fstream>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <wincrypt.h>
 #include <ctime>
 #include <sstream>
 #include <iomanip>
+
+#pragma comment(lib, "advapi32.lib")
 
 // Static member initialization
 const char Baseline::BASELINE_MAGIC[4] = { 'P', 'R', 'B', 'L' };
@@ -177,15 +185,56 @@ void Baseline::ResetSeenFlags()
 }
 
 // ---------------------------------------------------------------------------
-// Count
+// Count / Clear / AllEntries
 // ---------------------------------------------------------------------------
 size_t Baseline::Count() const
 {
     return m_entries.size();
 }
 
+void Baseline::Clear()
+{
+    m_entries.clear();
+    m_creationTime = 0;
+    m_loadedVersion = 0;
+}
+
+std::vector<const BaselineEntry*> Baseline::AllEntries() const
+{
+    std::vector<const BaselineEntry*> out;
+    out.reserve(m_entries.size());
+    for (const auto& pair : m_entries) out.push_back(&pair.second.data);
+    return out;
+}
+
+bool IsMicrosoftSignedEntry(const BaselineEntry& entry)
+{
+    if (entry.signature.rfind(L"Signed (Valid)", 0) != 0) return false;
+    // signature column is "Signed (Valid) (Signer Name)" for embedded signatures
+    size_t open = entry.signature.find(L"(", 14);
+    if (open != std::wstring::npos) {
+        std::wstring signer = entry.signature.substr(open + 1);
+        if (!signer.empty() && signer.back() == L')') signer.pop_back();
+        if (IsMicrosoftSignerName(signer)) return true;
+    }
+    return IsMicrosoftSignerName(entry.catalogSigner);
+}
+
+std::wstring BaselineStatusName(BaselineStatus status)
+{
+    switch (status) {
+    case BaselineStatus::Match:   return L"MATCH";
+    case BaselineStatus::New:     return L"NEW";
+    case BaselineStatus::Changed: return L"CHANGED";
+    case BaselineStatus::Missing: return L"MISSING";
+    case BaselineStatus::Updated: return L"UPDATED";
+    case BaselineStatus::Known:   return L"KNOWN";
+    default:                      return L"UNKNOWN";
+    }
+}
+
 // ---------------------------------------------------------------------------
-// CompareEntry — compare a current scan result against baseline
+// CompareEntry: compare a current scan result against the baseline
 // ---------------------------------------------------------------------------
 ComparisonResult Baseline::CompareEntry(const BaselineEntry& current) const
 {
@@ -194,9 +243,19 @@ ComparisonResult Baseline::CompareEntry(const BaselineEntry& current) const
 
     const BaselineEntry* baseline = FindEntry(current.path);
     if (!baseline) {
-        result.status = BaselineStatus::New;
-        result.changeDetails = L"New file (not in baseline)";
         result.riskDelta = current.malwareScore;
+        if (current.knownGood) {
+            result.status = BaselineStatus::Known;
+            result.changeDetails = L"New file; hash is on the local known-good list";
+        }
+        else if (IsMicrosoftSignedEntry(current)) {
+            result.status = BaselineStatus::Known;
+            result.changeDetails = L"New file; validly signed by Microsoft";
+        }
+        else {
+            result.status = BaselineStatus::New;
+            result.changeDetails = L"New file (not in baseline)";
+        }
         return result;
     }
 
@@ -220,7 +279,14 @@ ComparisonResult Baseline::CompareEntry(const BaselineEntry& current) const
         changes += ss.str();
     }
 
-    if (current.signature != baseline->signature) {
+    // Baselines written before v3 recorded catalog-signed Windows files as
+    // "Unsigned" because the catalog lookup did not exist yet. If the content is
+    // identical and only that label moved to a catalog signature, it is not a change.
+    bool sameContent = current.md5 == baseline->md5 &&
+        (current.sha256.empty() || baseline->sha256.empty() || current.sha256 == baseline->sha256);
+    bool legacyCatalogRelabel = sameContent && baseline->signature == L"Unsigned" &&
+        current.signatureType == L"Catalog" && baseline->imphash.empty() && baseline->revocation.empty();
+    if (current.signature != baseline->signature && !legacyCatalogRelabel) {
         if (!changes.empty()) changes += L"; ";
         changes += L"Signature changed";
     }
@@ -255,9 +321,46 @@ ComparisonResult Baseline::CompareEntry(const BaselineEntry& current) const
         changes += ss.str();
     }
 
+    // v3 fields: only compared when both sides recorded them, so a v2 baseline
+    // does not report every file as changed after an upgrade.
+    bool baselineHasV3 = !baseline->imphash.empty() || !baseline->ssdeep.empty() || !baseline->revocation.empty();
+    if (baselineHasV3) {
+        if (baseline->zoneId >= 0 && current.zoneId < 0) {
+            if (!changes.empty()) changes += L"; ";
+            changes += L"Mark of the Web removed (was zone " + std::to_wstring(baseline->zoneId) + L")";
+        }
+        if (baseline->altStreams != current.altStreams && !current.altStreams.empty()) {
+            if (!changes.empty()) changes += L"; ";
+            changes += L"Alternate data streams changed";
+        }
+        if (!baseline->imphash.empty() && !current.imphash.empty() && baseline->imphash != current.imphash) {
+            if (!changes.empty()) changes += L"; ";
+            changes += L"Import table changed";
+        }
+        if (current.revocation == L"REVOKED" && baseline->revocation != L"REVOKED") {
+            if (!changes.empty()) changes += L"; ";
+            changes += L"Signing certificate now revoked";
+        }
+    }
+
+    bool contentChanged = (current.md5 != baseline->md5) ||
+        (!current.sha256.empty() && !baseline->sha256.empty() && current.sha256 != baseline->sha256);
+    if (contentChanged && !baseline->ssdeep.empty() && !current.ssdeep.empty()) {
+        int similarity = CompareFuzzyHashes(baseline->ssdeep, current.ssdeep);
+        if (!changes.empty()) changes += L"; ";
+        if (similarity >= 50) changes += L"Content " + std::to_wstring(similarity) + L"% similar (small edit or patch)";
+        else if (similarity > 0) changes += L"Content " + std::to_wstring(similarity) + L"% similar";
+        else changes += L"Content replaced entirely (fuzzy hashes unrelated)";
+    }
+
     if (changes.empty()) {
         result.status = BaselineStatus::Match;
         result.changeDetails = L"No changes";
+    }
+    else if (contentChanged && IsMicrosoftSignedEntry(current) && IsMicrosoftSignedEntry(*baseline)) {
+        // Both the old and new file are validly Microsoft-signed: a Windows update.
+        result.status = BaselineStatus::Updated;
+        result.changeDetails = L"Updated by a Microsoft-signed file; " + changes;
     }
     else {
         result.status = BaselineStatus::Changed;
@@ -266,6 +369,38 @@ ComparisonResult Baseline::CompareEntry(const BaselineEntry& current) const
 
     result.riskDelta = current.malwareScore - baseline->malwareScore;
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// DiffBaselines
+// ---------------------------------------------------------------------------
+std::vector<ScanRow> DiffBaselines(const Baseline& older, const Baseline& newer, bool includeMatches)
+{
+    std::vector<ScanRow> rows;
+    for (const BaselineEntry* entry : newer.AllEntries()) {
+        ComparisonResult cmp = older.CompareEntry(*entry);
+        if (cmp.status == BaselineStatus::Match && !includeMatches) continue;
+        ScanRow row;
+        row.entry = *entry;
+        row.status = BaselineStatusName(cmp.status);
+        row.changeDetails = cmp.changeDetails;
+        row.riskDelta = cmp.riskDelta;
+        rows.push_back(row);
+    }
+    for (const BaselineEntry* entry : older.AllEntries()) {
+        if (newer.FindEntry(entry->path)) continue;
+        ScanRow row;
+        row.entry = *entry;
+        row.status = L"MISSING";
+        row.changeDetails = L"In the older baseline only";
+        row.riskDelta = -entry->malwareScore;
+        rows.push_back(row);
+    }
+    std::sort(rows.begin(), rows.end(), [](const ScanRow& a, const ScanRow& b) {
+        if (a.status != b.status) return a.status < b.status;
+        return ToLowerW(a.entry.path) < ToLowerW(b.entry.path);
+    });
+    return rows;
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +555,76 @@ static void SerializeEntry(std::vector<BYTE>& buffer, const BaselineEntry& e)
     Baseline::WriteString(buffer, e.packIndicators);
 }
 
+template <typename T>
+static void WritePod(std::vector<BYTE>& buffer, const T& value)
+{
+    const BYTE* p = reinterpret_cast<const BYTE*>(&value);
+    buffer.insert(buffer.end(), p, p + sizeof(T));
+}
+
+template <typename T>
+static bool ReadPod(const std::vector<BYTE>& buffer, size_t& offset, T& value)
+{
+    if (offset + sizeof(T) > buffer.size()) return false;
+    std::memcpy(&value, buffer.data() + offset, sizeof(T));
+    offset += sizeof(T);
+    return true;
+}
+
+// v3 block, appended after the v2 fields of each entry.
+static void SerializeEntryV3(std::vector<BYTE>& buffer, const BaselineEntry& e)
+{
+    Baseline::WriteString(buffer, e.catalogSigner);
+    Baseline::WriteString(buffer, e.revocation);
+    Baseline::WriteString(buffer, e.imphash);
+    Baseline::WriteString(buffer, e.ssdeep);
+    WritePod(buffer, static_cast<int32_t>(e.zoneId));
+    Baseline::WriteString(buffer, e.zoneHostUrl);
+    Baseline::WriteString(buffer, e.zoneReferrerUrl);
+    Baseline::WriteString(buffer, e.altStreams);
+    Baseline::WriteString(buffer, e.originWarnings);
+    WritePod(buffer, e.peTimestamp);
+    Baseline::WriteString(buffer, e.peAnomalies);
+    WritePod(buffer, e.overlaySize);
+    WritePod(buffer, e.overlayEntropy);
+    WritePod(buffer, static_cast<int32_t>(e.tlsCallbacks));
+    Baseline::WriteString(buffer, e.pdbPath);
+    WritePod(buffer, e.scriptScore);
+    Baseline::WriteString(buffer, e.scriptIndicators);
+    Baseline::WriteString(buffer, e.attackIds);
+    WritePod(buffer, static_cast<uint8_t>(e.knownGood ? 1 : 0));
+}
+
+static bool DeserializeEntryV3(const std::vector<BYTE>& buffer, size_t& offset, BaselineEntry& e)
+{
+    int32_t zone = -1;
+    int32_t tls = 0;
+    uint8_t known = 0;
+    if (!Baseline::ReadString(buffer, offset, e.catalogSigner)) return false;
+    if (!Baseline::ReadString(buffer, offset, e.revocation)) return false;
+    if (!Baseline::ReadString(buffer, offset, e.imphash)) return false;
+    if (!Baseline::ReadString(buffer, offset, e.ssdeep)) return false;
+    if (!ReadPod(buffer, offset, zone)) return false;
+    if (!Baseline::ReadString(buffer, offset, e.zoneHostUrl)) return false;
+    if (!Baseline::ReadString(buffer, offset, e.zoneReferrerUrl)) return false;
+    if (!Baseline::ReadString(buffer, offset, e.altStreams)) return false;
+    if (!Baseline::ReadString(buffer, offset, e.originWarnings)) return false;
+    if (!ReadPod(buffer, offset, e.peTimestamp)) return false;
+    if (!Baseline::ReadString(buffer, offset, e.peAnomalies)) return false;
+    if (!ReadPod(buffer, offset, e.overlaySize)) return false;
+    if (!ReadPod(buffer, offset, e.overlayEntropy)) return false;
+    if (!ReadPod(buffer, offset, tls)) return false;
+    if (!Baseline::ReadString(buffer, offset, e.pdbPath)) return false;
+    if (!ReadPod(buffer, offset, e.scriptScore)) return false;
+    if (!Baseline::ReadString(buffer, offset, e.scriptIndicators)) return false;
+    if (!Baseline::ReadString(buffer, offset, e.attackIds)) return false;
+    if (!ReadPod(buffer, offset, known)) return false;
+    e.zoneId = zone;
+    e.tlsCallbacks = tls;
+    e.knownGood = known != 0;
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Helper: deserialize one BaselineEntry from buffer at offset
 // ---------------------------------------------------------------------------
@@ -483,6 +688,9 @@ static bool DeserializeEntry(const std::vector<BYTE>& buffer, size_t& offset, Ba
     if (!Baseline::ReadString(buffer, offset, e.sigWarnings)) return false;
     if (!Baseline::ReadString(buffer, offset, e.packIndicators)) return false;
 
+    if (version >= 3) {
+        if (!DeserializeEntryV3(buffer, offset, e)) return false;
+    }
     return true;
 }
 
@@ -491,7 +699,13 @@ static bool DeserializeEntry(const std::vector<BYTE>& buffer, size_t& offset, Ba
 // ---------------------------------------------------------------------------
 bool Baseline::SaveToFile(const std::wstring& filePath) const
 {
-    DebugLog(L"SaveToFile: writing to " + filePath);
+    return SaveToFile(filePath, BASELINE_VERSION);
+}
+
+bool Baseline::SaveToFile(const std::wstring& filePath, uint32_t version) const
+{
+    DebugLog(L"SaveToFile: writing v" + std::to_wstring(version) + L" to " + filePath);
+    if (version < 1 || version > BASELINE_VERSION) return false;
 
     std::vector<BYTE> buffer;
     buffer.reserve(1024 * 1024); // pre-allocate 1MB
@@ -500,7 +714,7 @@ bool Baseline::SaveToFile(const std::wstring& filePath) const
     buffer.insert(buffer.end(), BASELINE_MAGIC, BASELINE_MAGIC + 4);
 
     // Version (uint32)
-    const BYTE* verBytes = reinterpret_cast<const BYTE*>(&BASELINE_VERSION);
+    const BYTE* verBytes = reinterpret_cast<const BYTE*>(&version);
     buffer.insert(buffer.end(), verBytes, verBytes + sizeof(uint32_t));
 
     // Entry count (uint64)
@@ -524,7 +738,27 @@ bool Baseline::SaveToFile(const std::wstring& filePath) const
 
     // Serialize all entries
     for (const auto& pair : m_entries) {
-        SerializeEntry(buffer, pair.second.data);
+        if (version >= 2) {
+            SerializeEntry(buffer, pair.second.data);
+        }
+        else {
+            // v1 had no SHA-256 field: write v2 layout then cut the SHA-256 string back out.
+            std::vector<BYTE> one;
+            BaselineEntry copy = pair.second.data;
+            copy.sha256.clear();
+            SerializeEntry(one, copy);
+            // path, int64 size, md5, then an empty sha256 (4 zero bytes) to drop
+            size_t offset = 0;
+            std::wstring skip;
+            Baseline::ReadString(one, offset, skip);
+            offset += sizeof(int64_t);
+            Baseline::ReadString(one, offset, skip);
+            one.erase(one.begin() + static_cast<std::ptrdiff_t>(offset), one.begin() + static_cast<std::ptrdiff_t>(offset + sizeof(uint32_t)));
+            buffer.insert(buffer.end(), one.begin(), one.end());
+        }
+        if (version >= 3) {
+            SerializeEntryV3(buffer, pair.second.data);
+        }
     }
 
     // Compute MD5 of everything so far
@@ -538,17 +772,26 @@ bool Baseline::SaveToFile(const std::wstring& filePath) const
     buffer.insert(buffer.end(), md5Hash, md5Hash + 16);
 
     // Write to file
-    std::ofstream file(filePath, std::ios::binary | std::ios::trunc);
-    if (!file.is_open()) {
-        DebugLog(L"SaveToFile: failed to open file for writing");
-        return false;
+    // Write to a temporary file, then move it over the target, so a crash or a
+    // full disk never leaves a half-written baseline behind.
+    std::wstring tempPath = filePath + L".tmp";
+    {
+        std::ofstream file(tempPath, std::ios::binary | std::ios::trunc);
+        if (!file.is_open()) {
+            DebugLog(L"SaveToFile: failed to open file for writing");
+            return false;
+        }
+        file.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
+        file.close();
+        if (file.fail()) {
+            DebugLog(L"SaveToFile: write failed");
+            DeleteFileW(tempPath.c_str());
+            return false;
+        }
     }
-
-    file.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-    file.close();
-
-    if (file.fail()) {
-        DebugLog(L"SaveToFile: write failed");
+    if (!MoveFileExW(tempPath.c_str(), filePath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DebugLog(L"SaveToFile: could not replace target (error " + std::to_wstring(GetLastError()) + L")");
+        DeleteFileW(tempPath.c_str());
         return false;
     }
 
@@ -642,6 +885,11 @@ bool Baseline::LoadFromFile(const std::wstring& filePath)
 
     // Deserialize entries
     m_entries.clear();
+    m_loadedVersion = version;
+    if (entryCount > 50000000ULL) {
+        DebugLog(L"LoadFromFile: implausible entry count");
+        return false;
+    }
     m_entries.reserve(static_cast<size_t>(entryCount));
 
     for (uint64_t i = 0; i < entryCount; i++) {

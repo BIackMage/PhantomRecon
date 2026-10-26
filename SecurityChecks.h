@@ -1,53 +1,74 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <vector>
 
-// Individual security check result
+// ---------------------------------------------------------------------------
+// Security check results and the audit runner.
+//
+// Every check has a stable id (for example "net.llmnr"). Title, severity,
+// ATT&CK and CIS mappings, plain explanation and fix text live in the check
+// catalog (CheckCatalog.cpp), keyed by that id. A check function only decides
+// status and writes the evidence into detail.
+// ---------------------------------------------------------------------------
+
+// Status strings. Kept as text because every report prints them verbatim.
+#define CHECK_PASS    L"PASS"
+#define CHECK_FAIL    L"FAIL"
+#define CHECK_WARNING L"WARNING"
+#define CHECK_INFO    L"INFO"
+#define CHECK_ERROR   L"ERROR"
+#define CHECK_NA      L"N/A"
+
 struct SecurityCheckResult {
-    std::wstring name;       // short name (e.g. "Unquoted Service Paths")
-    std::wstring status;     // "PASS", "FAIL", "WARNING", "INFO", "ERROR"
-    std::wstring detail;     // human-readable detail / list of findings
+    std::wstring id;         // catalog id, e.g. "net.llmnr"
+    std::wstring name;       // display title (from the catalog)
+    std::wstring status;     // one of the CHECK_* strings
+    std::wstring detail;     // human-readable evidence
 };
 
-// Run all security checks and return a vector of results.
+class Baseline;
+
+// What the audit is allowed to use. Every field is optional.
+struct AuditContext {
+    std::wstring baselinePath;     // active baseline, for cross-checking processes and persistence
+    std::wstring snapshotPath;     // where the persistence snapshot is kept between runs
+    std::function<void(int done, int total, const std::wstring& title)> onProgress;
+    std::function<bool()> isCancelled;
+
+    // Filled by RunAllSecurityChecks from baselinePath (loaded once, shared by checks).
+    const Baseline* baseline = nullptr;
+};
+
+// A result with id and title filled from the catalog and status INFO.
+SecurityCheckResult MakeCheckResult(const std::wstring& id);
+
+// The registry of checks: every check the audit runs, in report order.
+struct RegisteredCheck {
+    std::wstring id;
+    std::function<SecurityCheckResult(const AuditContext&)> run;
+};
+const std::vector<RegisteredCheck>& GetRegisteredChecks();
+
+// Run every registered check. Exceptions inside a check become an ERROR result.
+std::vector<SecurityCheckResult> RunAllSecurityChecks(const AuditContext& context);
 std::vector<SecurityCheckResult> RunAllSecurityChecks();
 
-// Produce a compact multi-line summary suitable for a UI label.
+// Compact multi-line summary for the UI panel.
 std::wstring GetSecuritySummary(const std::vector<SecurityCheckResult>& results);
 
-// Write a full security audit report to a text file.
-void WriteSecurityReport(const std::wstring& outputPath,
-                         const std::vector<SecurityCheckResult>& results);
+// Full plain-text report (UTF-8) with explanation and fix for every finding.
+bool WriteSecurityReport(const std::wstring& outputPath, const std::vector<SecurityCheckResult>& results);
 
-// --- Individual checks (also usable standalone) ---
-
-// Services whose ImagePath contains spaces and is not quoted
+// --- Core checks (SecurityChecks.cpp) ---
 SecurityCheckResult CheckUnquotedServicePaths();
-
-// Service executables that the current user can write to
 SecurityCheckResult CheckWritableServiceExes();
-
-// HKLM + HKCU AlwaysInstallElevated registry keys
 SecurityCheckResult CheckAlwaysInstallElevated();
-
-// Common unattended-install / sysprep files that may contain credentials
 SecurityCheckResult CheckUnattendedInstallFiles();
-
-// Whether Credential Guard (LsaIso.exe) is running
 SecurityCheckResult CheckCredentialGuard();
-
-// LLMNR enabled/disabled via group policy
 SecurityCheckResult CheckLLMNR();
-
-// NetBIOS over TCP/IP (NBT-NS) status per adapter
 SecurityCheckResult CheckNBTNS();
-
-// mDNS enabled/disabled
 SecurityCheckResult CheckMDNS();
-
-// SMB signing required on the client side
 SecurityCheckResult CheckSMBSigning();
-
-// WPAD / proxy auto-detect
 SecurityCheckResult CheckProxyAutoDetect();

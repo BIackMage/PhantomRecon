@@ -1,50 +1,80 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <windows.h>
 
-// Detailed signature analysis result
-struct SignatureInfo {
-    std::wstring status;           // "Signed (Valid)", "Unsigned", "Signed (Hash Mismatch)", etc.
-    std::wstring signerName;       // "Microsoft Corporation", "N/A", etc.
-    std::wstring issuerName;       // Issuing CA name
-    std::wstring rootCA;           // Root CA in the chain
-    std::wstring thumbprint;       // Certificate SHA1 thumbprint (hex)
-    std::wstring serialNumber;     // Certificate serial number
-    std::wstring signatureType;    // "Embedded" or "Catalog"
-    std::wstring validFrom;        // Certificate validity start
-    std::wstring validTo;          // Certificate validity end
-    bool isEmbedded;               // true = embedded Authenticode, false = catalog-signed or unsigned
-    bool chainTrusted;             // true if chain resolves to a trusted root CA
-    bool hashValid;                // true if the file hash matches the signature hash
-    std::vector<std::wstring> warnings;  // suspicious indicators
+// ---------------------------------------------------------------------------
+// FileAnalysis: signatures, certificate chains, revocation, version info,
+// attributes, permissions, size and entropy for one file.
+// ---------------------------------------------------------------------------
+
+// How hard to try when checking whether a signing certificate was revoked.
+enum class RevocationMode {
+    Off = 0,        // never check
+    CacheOnly = 1,  // use only what Windows already has cached (no network); offline-safe default
+    Online = 2,     // allow Windows to download CRLs / OCSP answers (never used in portable mode)
 };
 
-// Full signature analysis — checks embedded vs catalog, chain trust,
-// hash integrity, certificate details, and flags suspicious patterns.
-SignatureInfo AnalyzeFileSignature(const std::wstring& filePath);
+// Detailed signature analysis result
+struct SignatureInfo {
+    std::wstring status;           // "Signed (Valid)", "Unsigned", "Signed (HASH MISMATCH)", ...
+    std::wstring signerName;       // embedded signer, or "N/A"
+    std::wstring issuerName;       // issuing CA name
+    std::wstring rootCA;           // root CA in the chain
+    std::wstring thumbprint;       // signer certificate SHA-1 thumbprint (hex with colons)
+    std::wstring serialNumber;
+    std::wstring signatureType;    // "Embedded", "Catalog" or "None"
+    std::wstring validFrom;
+    std::wstring validTo;
+    std::wstring catalogFile;      // security catalog that covers the file (catalog-signed only)
+    std::wstring catalogSigner;    // who signed that catalog
+    std::wstring revocation;       // "Not checked", "Good", "REVOKED", "Unknown (offline)", "Unknown (...)"
+    bool isEmbedded = false;
+    bool chainTrusted = false;
+    bool hashValid = false;
+    std::vector<std::wstring> warnings;  // "CODE: detail"
+};
 
-// Simple status string (backwards-compatible with the old GetFileSignatureStatus)
+// Full signature analysis. Unsigned files are also checked against the Windows
+// security catalogs, so Windows' own catalog-signed files report as signed.
+SignatureInfo AnalyzeFileSignature(const std::wstring& filePath, RevocationMode revocation = RevocationMode::Off);
+
+// Cached, cheap summary for checks that only need "who signed this and is it valid".
+struct SignatureSummary {
+    std::wstring status;      // as SignatureInfo::status
+    std::wstring signer;      // embedded signer, else catalog signer, else ""
+    bool         valid = false;
+    bool         microsoft = false;   // valid and signed by Microsoft
+};
+SignatureSummary GetSignatureSummary(const std::wstring& filePath);
+
+// True when the signer name belongs to Microsoft.
+bool IsMicrosoftSignerName(const std::wstring& signer);
+
+// Write the revocation cache to disk (called at the end of a scan).
+void SaveRevocationCache();
+
+// Simple status string (backwards-compatible)
 std::wstring GetFileSignatureStatus(const std::wstring& filePath);
 
-// Extract the signer name from the Authenticode signature (e.g. "Microsoft Corporation")
-// Returns "N/A" if no signature is present.
+// Signer name, "N/A" when unsigned
 std::wstring GetFileSignerName(const std::wstring& filePath);
 
-// File version string from the VS_FIXEDFILEINFO resource (e.g. "10.0.19041.1")
-// Returns "N/A" if no version resource exists.
+// File version "10.0.19041.1", "N/A" when absent
 std::wstring GetFileVersion(const std::wstring& filePath);
 
-// CompanyName from the StringFileInfo version resource
-// Returns "Unknown" if not available.
+// CompanyName, "Unknown" when absent
 std::wstring GetFileDeveloper(const std::wstring& filePath);
 
-// File attribute checks
+// ProductName, "" when absent
+std::wstring GetFileProductName(const std::wstring& filePath);
+
 std::wstring GetFileReadOnly(const std::wstring& filePath);
 std::wstring GetFileHidden(const std::wstring& filePath);
 
-// DACL permissions summary (owner + access entries)
+// Owner and allow / deny ACE count
 std::wstring GetFilePermissions(const std::wstring& filePath);
 
 // File size in bytes, or -1 if the file cannot be read.
@@ -52,3 +82,6 @@ int64_t GetFileSizeBytes(const std::wstring& filePath);
 
 // Shannon entropy of the whole file in bits per byte (0.0 to 8.0). 0.0 if unreadable.
 double CalculateFileEntropy(const std::wstring& filePath);
+
+// Entropy of a buffer (bits per byte).
+double CalculateBufferEntropy(const uint8_t* data, size_t length);

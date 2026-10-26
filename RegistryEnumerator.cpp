@@ -219,8 +219,10 @@ void RegistryEnumerator::FindExecutablesInDirectory(const std::wstring& director
 // GetExecutablePathsFromPrograms — extract executables from install locations
 // ---------------------------------------------------------------------------
 std::vector<std::wstring> RegistryEnumerator::GetExecutablePathsFromPrograms(
-    const std::vector<InstalledProgram>& programs)
+    const std::vector<InstalledProgram>& programs, int maxDepth)
 {
+    if (maxDepth < 1) maxDepth = 1;
+    if (maxDepth > 10) maxDepth = 10;
     DebugLog(L"Resolving executable paths from installed programs");
 
     // Use a set for deduplication (case-insensitive)
@@ -247,7 +249,7 @@ std::vector<std::wstring> RegistryEnumerator::GetExecutablePathsFromPrograms(
             DWORD attrs = GetFileAttributesW(location.c_str());
             if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
                 std::vector<std::wstring> exes;
-                FindExecutablesInDirectory(location, exes, 3);
+                FindExecutablesInDirectory(location, exes, maxDepth);
                 for (auto& e : exes) {
                     uniquePaths.insert(std::move(e));
                 }
