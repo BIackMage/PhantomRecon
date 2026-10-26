@@ -8,7 +8,7 @@ you what is new, changed or missing.
 
 It runs entirely on the PC. No account, no cloud, no agent, no service, no install.
 Nothing is sent anywhere unless you turn on the optional AI panel and point it at a
-server yourself.
+server yourself, or set certificate revocation checks to Online in Settings.
 
 It is a defensive tool. It looks at the PC it runs on and changes nothing. Every fix is
 shown for you to run yourself, with the command to undo it.
@@ -166,7 +166,8 @@ All next to the program unless you choose another folder in **File > Settings**:
 ## Build from source
 
 Requirements: Visual Studio 2022 or later with "Desktop development with C++" (v143
-tools) and a Windows 10 or 11 SDK. No other libraries.
+tools) and the Windows SDK 10.0.22621.0 (or add `/p:WindowsTargetPlatformVersion=<version>`
+for another installed SDK). No other libraries.
 
 ```powershell
 msbuild PhantomRecon.sln /p:Configuration=Release /p:Platform=x64

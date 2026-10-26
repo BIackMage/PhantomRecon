@@ -36,7 +36,9 @@ change that drifts from this is rejected, however useful it looks.
    `PostPayload()` so a failed post frees it.
 
 3. **No detached threads.** Every thread starts through `BackgroundWorker::Run` on
-   `AppState::worker`. `wWinMain` joins the worker after the message loop ends.
+   `AppState::worker`. `wWinMain` joins the worker after the message loop ends, with a
+   3-second limit (`JoinAllFor`): a job still stuck after that (an AI server that never
+   answers) does not keep an invisible process alive, the process ends instead.
 
 4. **Typed data, named fields.** A scan fact is a named field on `BaselineEntry`
    (`ScanTypes.h`). A finding is a `SecurityCheckResult` with a catalog id. Never pass
@@ -69,7 +71,9 @@ mutex-guarded strings), queue rows in `progress.pendingRows`, and post
 it posts `WM_APP_SCAN_FINISHED` with the `ScanSummary`. The audit runs the same way from
 `AuditController.cpp` (`WM_APP_AUDIT_PROGRESS`, `WM_APP_AUDIT_FINISHED`). AI requests post
 `WM_APP_AI_RESPONSE` to the panel. The settings test posts `WM_APP_STATUS_TEXT` to the
-dialog. `WM_CLOSE` sets both cancel flags; `wWinMain` joins the worker.
+dialog. `WM_CLOSE` sets both cancel flags; `wWinMain` joins the worker (at most 3 s, see
+rule 3). A payload whose window is destroyed before it is handled is freed by the
+tracking in `AppMessages.cpp`.
 
 ## Module map
 

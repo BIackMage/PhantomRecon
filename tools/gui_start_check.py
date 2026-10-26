@@ -30,7 +30,13 @@ import time
 from release_common import DEFAULT_EXE_DIR, configure_console, log
 
 WM_CLOSE = 0x0010
+WM_COMMAND = 0x0111
+IDOK = 1
 DIALOG_CLASS = "#32770"
+# Dialogs the program shows on purpose at startup. A fresh checkout has no settings
+# file, so the first start always opens Getting Started; it is closed with its own
+# Close button (IDOK) like a user would, and every other dialog still fails the check.
+EXPECTED_DIALOGS = {"Getting Started with Phantom Recon"}
 KNOWN_EXIT_CODES = {
     0xC0000135: "a DLL the program needs is missing (STATUS_DLL_NOT_FOUND)",
     0xC000007B: "a DLL is for the wrong architecture (STATUS_INVALID_IMAGE_FORMAT)",
@@ -112,6 +118,16 @@ def check(exe: pathlib.Path, start_timeout: float, close_timeout: float, settle:
         if code is not None:
             raise StartCheckFailure(f"the program exited on its own after starting, exit code {describe_exit(code)}")
         windows = visible_windows(process.pid)
+        expected = [w for w in windows if w[1] == DIALOG_CLASS and w[2] in EXPECTED_DIALOGS]
+        for hwnd, _, title in expected:
+            log(f"closing the expected startup dialog {title!r} with its Close button")
+            _user32.PostMessageW(hwnd, WM_COMMAND, IDOK, 0)
+        if expected:
+            time.sleep(2.0)
+            code = process.poll()
+            if code is not None:
+                raise StartCheckFailure(f"the program exited after its startup dialog closed, exit code {describe_exit(code)}")
+            windows = visible_windows(process.pid)
         dialogs = [w for w in windows if w[1] == DIALOG_CLASS]
         if dialogs and not allow_dialog:
             raise StartCheckFailure("a dialog box is open: " + "; ".join(repr(w[2]) for w in dialogs))
