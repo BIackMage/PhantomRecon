@@ -861,11 +861,11 @@ Automatic proxy detection makes the PC look for proxy settings on the local netw
 - MITRE ATT&CK: T1562.001 Disable or Modify Tools
 - CIS Controls v8: 9.2
 
-The hosts file overrides DNS on this PC. Malware edits it to send security and update sites nowhere, or to send banking sites to a fake copy. Developers also use it for test setups, which is harmless.
+The hosts file overrides DNS on this PC. Malware edits it to send security and update sites nowhere, or to send banking sites to a fake copy. Developers also use it for test setups, which is harmless. Malware can also point Windows at a different hosts folder through the DataBasePath registry value; the evidence names the file that was read.
 
 **How to fix**
 
-    Open Notepad as administrator, open C:\Windows\System32\drivers\etc\hosts, and delete the lines you did not add. Then:
+    Open Notepad as administrator, open the hosts file named in the evidence (normally C:\Windows\System32\drivers\etc\hosts), and delete the lines you did not add. Then:
       ipconfig /flushdns
 
 **How to undo**
@@ -940,7 +940,7 @@ Windows has dozens of places where a program can register to start on its own: R
 - Severity: High
 - MITRE ATT&CK: T1053.005 Scheduled Task
 
-Scheduled tasks start programs at logon, at boot or on a timer. Malware uses them to come back after a reboot. Tasks that run a program from a user folder, run an encoded or downloading command, or point at a file that no longer exists deserve a look.
+Scheduled tasks start programs at logon, at boot or on a timer. Malware uses them to come back after a reboot. Tasks that run a program from a user folder, run an encoded or downloading command, or point at a file that no longer exists deserve a look. Tasks this account cannot read are listed by name; run as administrator to check what they run. A task file that Task Scheduler hides even from an administrator is a known way to hide a task.
 
 **How to fix**
 

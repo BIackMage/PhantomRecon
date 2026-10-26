@@ -444,8 +444,9 @@ If your organization relies on WPAD, use a fixed setup script address instead.)~
     add({ L"net.hosts", L"Hosts file redirects", CAT_NETWORK, Severity::Medium,
         { L"T1562.001" }, { L"9.2" }, L"",
         L"The hosts file overrides DNS on this PC. Malware edits it to send security and update sites nowhere, or to send banking "
-        L"sites to a fake copy. Developers also use it for test setups, which is harmless.",
-        LR"~(Open Notepad as administrator, open C:\Windows\System32\drivers\etc\hosts, and delete the lines you did not add. Then:
+        L"sites to a fake copy. Developers also use it for test setups, which is harmless. Malware can also point Windows at a "
+        L"different hosts folder through the DataBasePath registry value; the evidence names the file that was read.",
+        LR"~(Open Notepad as administrator, open the hosts file named in the evidence (normally C:\Windows\System32\drivers\etc\hosts), and delete the lines you did not add. Then:
   ipconfig /flushdns)~",
         LR"~(Add the lines back to the same file.)~" });
 
@@ -489,7 +490,8 @@ Import it to undo:
         { L"T1053.005" }, {}, L"",
         L"Scheduled tasks start programs at logon, at boot or on a timer. Malware uses them to come back after a reboot. Tasks "
         L"that run a program from a user folder, run an encoded or downloading command, or point at a file that no longer "
-        L"exists deserve a look.",
+        L"exists deserve a look. Tasks this account cannot read are listed by name; run as administrator to check what they "
+        L"run. A task file that Task Scheduler hides even from an administrator is a known way to hide a task.",
         LR"~(Open Task Scheduler (taskschd.msc), find the task by the path shown and check its Actions tab. If you do not recognise it: right-click > Export (keeps a copy), then right-click > Disable.
 Delete it once you are sure:
   Unregister-ScheduledTask -TaskPath '\folder\' -TaskName 'name' -Confirm:$false)~",

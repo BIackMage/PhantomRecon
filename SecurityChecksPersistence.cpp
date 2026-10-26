@@ -782,12 +782,24 @@ static std::wstring SnapshotKey(const PersistenceEntry& e)
     return NormalizeSnapshotKey(e.source + L"|" + e.name + L"|" + e.command);
 }
 
-static std::set<std::wstring> LoadSnapshot(const std::wstring& path, bool& existed)
+// Bump when the set of collected locations or the key format changes. A snapshot
+// written by an older version is not compared: it would mark every newly covered
+// entry (services, service DLLs, more add-ins) as NEW on the first audit after an upgrade.
+static const wchar_t* const kSnapshotFormat = L"# format 2";
+
+static std::set<std::wstring> LoadSnapshot(const std::wstring& path, bool& existed, bool& outdated)
 {
     std::set<std::wstring> keys;
     std::wstring text;
+    outdated = false;
     existed = ReadTextFile(path, text);
     if (!existed) return keys;
+    if (text.find(kSnapshotFormat) == std::wstring::npos) {
+        DebugLog(L"Snapshot from an older version, not compared: " + path);
+        existed = false;
+        outdated = true;
+        return keys;
+    }
     for (const std::wstring& line : SplitW(text, L'\n')) {
         std::wstring key = NormalizeSnapshotKey(line);   // also drops a CR left by an editor
         if (!key.empty() && key[0] != L'#') keys.insert(key);
@@ -798,6 +810,7 @@ static std::set<std::wstring> LoadSnapshot(const std::wstring& path, bool& exist
 static void SaveSnapshot(const std::wstring& path, const std::vector<PersistenceEntry>& entries)
 {
     std::wstring text = L"# Phantom Recon autostart snapshot. One entry per line.\n";
+    text += std::wstring(kSnapshotFormat) + L"\n";
     for (const PersistenceEntry& e : entries) text += SnapshotKey(e) + L"\n";
     WriteUtf8File(path, text);
 }
@@ -841,7 +854,8 @@ SecurityCheckResult CheckPersistence(const AuditContext& context)
 
     std::wstring snapshotPath = context.snapshotPath.empty() ? AppFilePath(L"phantom_recon_persistence.snapshot") : context.snapshotPath;
     bool hadSnapshot = false;
-    std::set<std::wstring> previous = LoadSnapshot(snapshotPath, hadSnapshot);
+    bool snapshotOutdated = false;
+    std::set<std::wstring> previous = LoadSnapshot(snapshotPath, hadSnapshot, snapshotOutdated);
     int newCount = 0;
     for (PersistenceEntry& e : entries) {
         if (hadSnapshot && previous.count(SnapshotKey(e)) == 0) {
@@ -895,6 +909,7 @@ SecurityCheckResult CheckPersistence(const AuditContext& context)
     std::wstringstream detail;
     detail << entries.size() << L" autostart entries in " << perSource.size() << L" kinds of location";
     if (hadSnapshot) detail << L"; " << newCount << L" new since the last audit";
+    else if (snapshotOutdated) detail << L"; the saved list came from an older version, so nothing is marked new this time";
     else detail << L"; first audit, so nothing is marked new yet";
     if (context.baseline) detail << L"; programs cross-checked against the baseline";
     detail << L".\n";
