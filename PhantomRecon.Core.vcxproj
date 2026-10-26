@@ -99,6 +99,8 @@
     <ClInclude Include="ScheduledScan.h" />
     <ClInclude Include="StartupRequest.h" />
     <ClInclude Include="WmiQuery.h" />
+    <ClInclude Include="AiConsent.h" />
+    <ClInclude Include="SettingsValues.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AppPaths.cpp" />
@@ -152,6 +154,8 @@
     <ClCompile Include="ScheduledScan.cpp" />
     <ClCompile Include="StartupRequest.cpp" />
     <ClCompile Include="WmiQuery.cpp" />
+    <ClCompile Include="AiConsent.cpp" />
+    <ClCompile Include="SettingsValues.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

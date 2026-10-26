@@ -2,8 +2,11 @@
 #include "ScanEngine.h"
 
 #include "GuiComponents.h"
+#include "StringConv.h"
 #include "TextUtils.h"
 
+#include <exception>
+#include <memory>
 #include <sstream>
 
 // ---------------------------------------------------------------------------
@@ -100,6 +103,26 @@ static void DescribeOutcome(const ScanRequest& request, ScanFinishedPayload& p)
     }
 }
 
+// The scan threw. Whatever rows arrived stay in the list; the summary is marked
+// partial and the user is told plainly. No baseline is written in this case:
+// RunScan saves only at the very end, through a temporary file.
+static void DescribeFailure(const ScanRequest& request, const std::wstring& what, ScanFinishedPayload& p)
+{
+    p.summary = ScanSummary();
+    p.summary.mode = request.mode;
+    p.summary.cancelled = true;
+    p.summary.baselinePath = request.baselinePath;
+    p.summary.finalState = ScanModeName(request.mode) + L" stopped by an internal error";
+    p.finalState = p.summary.finalState;
+    p.showDialog = true;
+    p.dialogTitle = L"Scan Stopped";
+    p.dialogText = L"The scan stopped because of an internal error:\n" + what +
+                   L"\n\nThe rows found so far are in the list but the results are incomplete." +
+                   (request.mode == ScanMode::Baseline ? L" No baseline was written." : L"");
+    p.dialogIcon = MB_ICONERROR;
+    DebugLog(L"Scan failed: " + what);
+}
+
 // ---------------------------------------------------------------------------
 // StartScanInBackground: UI thread entry point
 // ---------------------------------------------------------------------------
@@ -166,19 +189,38 @@ void StartScanInBackground(AppState& app, const ScanRequest& request)
         callbacks.onRow = [appPtr](const ScanRow& row) { QueueRow(*appPtr, row); };
 
         // The UI thread loaded currentBaseline before starting us and will not swap
-        // it while progress.running is set, so a plain pointer is safe here.
-        Baseline* comparison = req.mode == ScanMode::Baseline ? nullptr : &a.currentBaseline;
+        // it while progress.running is set, so a plain pointer is safe here. A
+        // request with its own baseline (the sample pack) owns it through req.
+        Baseline* comparison = nullptr;
+        if (req.mode != ScanMode::Baseline) {
+            comparison = req.comparisonBaseline ? req.comparisonBaseline.get() : &a.currentBaseline;
+        }
         std::wstring savePath = req.mode == ScanMode::Baseline ? req.baselinePath : L"";
 
-        ScanFinishedPayload* payload = new ScanFinishedPayload();
-        payload->summary = RunScan(req.mode, req.roots, req.csvPath, comparison, savePath, req.options, callbacks);
+        std::unique_ptr<ScanFinishedPayload> payload(new ScanFinishedPayload());
+        std::wstring failure;
+        try {
+            payload->summary = RunScan(req.mode, req.roots, req.csvPath, comparison, savePath, req.options, callbacks);
+        }
+        catch (const std::exception& e) {
+            failure = Utf8ToWide(e.what());
+        }
+        catch (...) {
+            failure = L"unknown error";
+        }
+
         payload->summary.baselinePath = req.baselinePath;
-        payload->finalState = payload->summary.finalState;
         payload->title = req.title;
-        DescribeOutcome(req, *payload);
+        if (failure.empty()) {
+            payload->finalState = payload->summary.finalState;
+            DescribeOutcome(req, *payload);
+        }
+        else {
+            DescribeFailure(req, failure, *payload);
+        }
 
         SetScanState(a, payload->finalState);
         DebugLog(L"Scan thread done: " + payload->finalState);
-        PostPayload(a.hMainWindow, WM_APP_SCAN_FINISHED, payload);
+        PostPayload(a.hMainWindow, WM_APP_SCAN_FINISHED, payload.release(), a.payloads);
     });
 }

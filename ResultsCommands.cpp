@@ -22,32 +22,36 @@ static void InfoNoSelection(AppState& app)
 // ---------------------------------------------------------------------------
 // Results menu
 // ---------------------------------------------------------------------------
+// Each command copies what it needs from the selected row before calling anything
+// that could run a message loop (the shell, a window), because rows streaming in
+// from a scan can move the model's storage.
 static void CmdDetails(AppState& app, HWND)
 {
     const ScanRow* row = SelectedRow(app);
-    if (row) ShowRowDetailWindow(app, *row);
+    if (row) ShowRowDetailWindow(app, ScanRow(*row));
 }
 
 static void CmdCopyPath(AppState& app, HWND hWnd)
 {
     const ScanRow* row = SelectedRow(app);
-    if (row) CopyTextToClipboard(hWnd, row->entry.path);
+    if (row) CopyTextToClipboard(hWnd, std::wstring(row->entry.path));
 }
 
 static void CmdCopySha(AppState& app, HWND hWnd)
 {
     const ScanRow* row = SelectedRow(app);
-    if (row) CopyTextToClipboard(hWnd, row->entry.sha256);
+    if (row) CopyTextToClipboard(hWnd, std::wstring(row->entry.sha256));
 }
 
 static void CmdOpenLocation(AppState& app, HWND)
 {
     const ScanRow* row = SelectedRow(app);
-    if (row) ShowFileInExplorer(row->entry.path);
+    if (row) ShowFileInExplorer(std::wstring(row->entry.path));
 }
 
 static void CmdClear(AppState& app, HWND hWnd)
 {
+    // Clear works on every row, also when the filter or search hides them all.
     if (RefuseWhileScanning(app, hWnd, L"clear the results")) return;
     app.lastScan = LastScan();
     ShowRows(app, {});
@@ -75,13 +79,18 @@ static void CmdAiSend(AppState& app, HWND)
 
 static void CmdAiTriage(AppState& app, HWND)
 {
-    const ScanRow* row = SelectedRow(app);
-    if (!row) {
+    const ScanRow* selected = SelectedRow(app);
+    if (!selected) {
         InfoNoSelection(app);
         return;
     }
+    // Copy the row now. The consent question that may follow runs a message loop;
+    // rows arriving from a running scan can grow the model and move every row, so
+    // a pointer or reference into the model is not valid after it.
+    ScanRow row = *selected;
+    DebugLog(L"Triage requested for " + row.entry.path);
     if (!app.aiSidebar.expanded) ToggleAiSidebar(app.aiSidebar);
-    TriageSelectedFile(app.aiSidebar, *row);
+    TriageSelectedFile(app.aiSidebar, std::move(row));
 }
 
 static void CmdAiSummary(AppState& app, HWND)

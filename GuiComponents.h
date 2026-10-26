@@ -47,6 +47,22 @@ void UpdateSortArrow(HWND hListView, const ResultsModel& model);
 // View index of the focused or first selected row, or -1.
 int SelectedResultIndex(HWND hListView);
 
+// The list view keeps its selection by row number. When rows arrive with a sort
+// active, the same number points at a different file. Save the selected and
+// focused rows by model row before the model changes, restore after.
+struct ResultsSelection {
+    bool   hasSelected = false;
+    size_t selectedRow = 0;   // model index
+    bool   hasFocused = false;
+    size_t focusedRow = 0;    // model index
+};
+ResultsSelection SaveResultsSelection(HWND hListView, const ResultsModel& model);
+void RestoreResultsSelection(HWND hListView, const ResultsModel& model, const ResultsSelection& saved);
+
+// LVN_ODFINDITEM: typing a file name's first letters in the list finds that row.
+// Returns the view index for the list, or -1.
+LRESULT FindResultsItem(LPARAM lParam, const ResultsModel& model);
+
 // Fill the filter combo box with the StatusFilter names, in enum order.
 void FillFilterCombo(HWND hCombo);
 const wchar_t* StatusFilterName(StatusFilter filter);

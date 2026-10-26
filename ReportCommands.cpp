@@ -13,6 +13,8 @@
 #include "ScanEngine.h"
 #include "resource.h"
 
+#include <memory>
+
 static void DebugLog(const std::wstring& msg)
 {
     OutputDebugStringW(L"[ReportCommands] ");
@@ -168,28 +170,28 @@ void CreateSamplePackInFolder(AppState& app, HWND hWnd, const std::wstring& fold
         }
     }
 
-    Baseline demo;
-    if (!demo.LoadFromFile(pack.baselinePath)) {
+    // The demo baseline belongs to this one scan only. The user's active baseline
+    // (app.currentBaseline and app.baselineFilePath) is not touched, so later scans,
+    // Take Baseline and the weekly task keep using the user's own file.
+    std::shared_ptr<Baseline> demo = std::make_shared<Baseline>();
+    if (!demo->LoadFromFile(pack.baselinePath)) {
         MessageBoxW(hWnd, L"The demo baseline could not be read.", L"Sample Pack", MB_OK | MB_ICONERROR);
         return;
     }
-    {
-        std::lock_guard<std::mutex> lock(app.baselineMutex);
-        app.currentBaseline = std::move(demo);
-        app.currentBaseline.ResetSeenFlags();
-    }
-    app.baselineFilePath = pack.baselinePath;
+    demo->ResetSeenFlags();
 
     ScanRequest req;
     req.mode = ScanMode::FullScan;
     req.roots = { pack.folder };
     req.csvPath = JoinPath(pack.folder, L"sample-scan.csv");
     req.baselinePath = pack.baselinePath;
+    req.comparisonBaseline = demo;
     req.options = ScanOptionsFromSettings(app.settings);
     req.options.excludeExtensions.push_back(L".csv");
     req.title = L"Full Scan of the sample pack";
     EnableWindow(app.controls.cancelButton, TRUE);
     StartScanInBackground(app, req);
+    DebugLog(L"Sample scan started against its own demo baseline; active baseline stays " + app.baselineFilePath);
 }
 
 bool DispatchReportCommand(AppState& app, HWND hWnd, int commandId)

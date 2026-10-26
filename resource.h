@@ -43,6 +43,7 @@
 // Scans menu
 #define ID_SCANS_CANCEL                 32783
 #define ID_SCANS_WEEKLY                 32784
+#define ID_SCANS_CANCEL_KEY             32802   // Esc: asks before cancelling
 
 // Audit menu
 #define ID_AUDIT_RUN                    32785
@@ -75,7 +76,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        131
-#define _APS_NEXT_COMMAND_VALUE         32802
+#define _APS_NEXT_COMMAND_VALUE         32803
 #define _APS_NEXT_CONTROL_VALUE         1106
 #define _APS_NEXT_SYMED_VALUE           111
 #endif

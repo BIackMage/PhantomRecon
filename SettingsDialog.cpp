@@ -4,6 +4,7 @@
 #include "AppMessages.h"
 #include "AppPaths.h"
 #include "GuiComponents.h"
+#include "SettingsValues.h"
 #include "StringConv.h"
 #include "TextUtils.h"
 #include "Theme.h"
@@ -94,9 +95,8 @@ AppSettings LoadAppSettings()
     s.llmEndpoint = ReadIniString(L"LLM", L"Endpoint", s.llmEndpoint, ini);
     s.llmModel = WideToUtf8(ReadIniString(L"LLM", L"Model", Utf8ToWide(s.llmModel), ini));
     s.llmMaxTokens = Clamp(ReadIniInt(L"LLM", L"MaxTokens", s.llmMaxTokens, ini), 1, 1000000);
-    s.llmTemperature = _wtof(ReadIniString(L"LLM", L"Temperature", FormatTemperature(s.llmTemperature), ini).c_str());
-    if (s.llmTemperature < 0.0) s.llmTemperature = 0.0;
-    if (s.llmTemperature > 2.0) s.llmTemperature = 2.0;
+    s.llmTemperature = ParseTemperatureText(ReadIniString(L"LLM", L"Temperature", FormatTemperature(s.llmTemperature), ini),
+                                            LLMConfig{}.temperature);
     s.llmRedact = ReadIniBool(L"LLM", L"Redact", s.llmRedact, ini);
     s.llmMaxPromptChars = Clamp(ReadIniInt(L"LLM", L"MaxPromptChars", s.llmMaxPromptChars, ini), 1000, 1000000);
 
@@ -120,6 +120,9 @@ AppSettings LoadAppSettings()
 bool SaveAppSettings(const AppSettings& s)
 {
     std::wstring ini = GetSettingsPath();
+    // Windows writes an INI file in the ANSI code page unless it already starts
+    // with a UTF-16 BOM; Cyrillic or CJK paths would come back as "?".
+    if (!EnsureUnicodeIniFile(ini)) DebugLog(L"Could not store the settings file as UTF-16: " + ini);
     bool ok = true;
     ok &= WriteIni(L"LLM", L"Endpoint", s.llmEndpoint, ini);
     ok &= WriteIni(L"LLM", L"Model", Utf8ToWide(s.llmModel), ini);
@@ -151,7 +154,7 @@ void ApplySettingsToLLMClient(const AppSettings& settings)
     cfg.endpoint = settings.llmEndpoint;
     cfg.model = settings.llmModel;
     cfg.maxTokens = settings.llmMaxTokens;
-    cfg.temperature = settings.llmTemperature;
+    cfg.temperature = SanitizeTemperature(settings.llmTemperature, LLMConfig{}.temperature);
     cfg.redact = settings.llmRedact;
     cfg.maxPromptChars = settings.llmMaxPromptChars;
     GetLLMClient().SetConfig(cfg);
@@ -213,6 +216,7 @@ struct SettingsDialogState {
     HFONT             font = NULL;
     bool              saved = false;
     BackgroundWorker* worker = nullptr;
+    PayloadTracker*   payloads = nullptr;
     std::vector<HWND> tabControls[TabCount];
 };
 
@@ -438,22 +442,34 @@ static void OnTestConnection(HWND hDlg, SettingsDialogState& st)
     testCfg.model = WideToUtf8(GetDlgItemString(hDlg, IDC_MODEL));
     testCfg.maxTokens = _wtoi(GetDlgItemString(hDlg, IDC_MAXTOKENS).c_str());
     if (testCfg.maxTokens < 1) testCfg.maxTokens = LLMConfig{}.maxTokens;
-    testCfg.temperature = _wtof(GetDlgItemString(hDlg, IDC_TEMP).c_str());
+    testCfg.temperature = ParseTemperatureText(GetDlgItemString(hDlg, IDC_TEMP), LLMConfig{}.temperature);
     testCfg.redact = IsChecked(hDlg, IDC_REDACT_AI);
 
-    if (!st.worker) {
+    if (!st.worker || !st.payloads) {
         SetWindowTextW(st.hStatusLabel, L"Failed: no background worker");
         return;
     }
 
-    st.worker->Run([hDlg, testCfg]() {
+    PayloadTracker* tracker = st.payloads;
+    st.worker->Run([hDlg, tracker, testCfg]() {
         LLMClient testClient;
         testClient.SetConfig(testCfg);
         bool ok = testClient.TestConnection();
         std::wstring text = ok ? L"Connected." : L"Failed: " + Utf8ToWide(testClient.GetLastError());
         DebugLog(ok ? L"Test connection: SUCCESS" : L"Test connection: FAILED");
-        PostPayload(hDlg, WM_APP_STATUS_TEXT, new std::wstring(text));
+        PostPayload(hDlg, WM_APP_STATUS_TEXT, new std::wstring(text), *tracker);
     });
+}
+
+// Close the dialog. The owner is enabled first: destroying the active window
+// while its owner is still disabled makes Windows activate some other program,
+// and the main window flickers behind it before ShowSettingsDialog re-enables it.
+static void CloseSettingsDialog(HWND hDlg)
+{
+    HWND owner = GetWindow(hDlg, GW_OWNER);
+    if (owner) EnableWindow(owner, TRUE);
+    DestroyWindow(hDlg);
+    DebugLog(L"Settings dialog closed with the owner enabled first");
 }
 
 static void OnBrowse(HWND hDlg, int editId, bool folder)
@@ -478,9 +494,7 @@ static void OnSave(HWND hDlg, SettingsDialogState& st)
     s.llmModel = WideToUtf8(TrimW(GetDlgItemString(hDlg, IDC_MODEL)));
     s.llmMaxTokens = _wtoi(GetDlgItemString(hDlg, IDC_MAXTOKENS).c_str());
     if (s.llmMaxTokens < 1) s.llmMaxTokens = LLMConfig{}.maxTokens;
-    s.llmTemperature = _wtof(GetDlgItemString(hDlg, IDC_TEMP).c_str());
-    if (s.llmTemperature < 0.0) s.llmTemperature = 0.0;
-    if (s.llmTemperature > 2.0) s.llmTemperature = 2.0;
+    s.llmTemperature = ParseTemperatureText(GetDlgItemString(hDlg, IDC_TEMP), LLMConfig{}.temperature);
     s.llmRedact = IsChecked(hDlg, IDC_REDACT_AI);
     s.llmMaxPromptChars = Clamp(_wtoi(GetDlgItemString(hDlg, IDC_PROMPTCHARS).c_str()), 1000, 1000000);
 
@@ -504,8 +518,8 @@ static void OnSave(HWND hDlg, SettingsDialogState& st)
     ApplySettingsToLLMClient(s);
 
     st.saved = true;
-    DestroyWindow(hDlg);
     DebugLog(L"Settings saved and applied");
+    CloseSettingsDialog(hDlg);
 }
 
 static LRESULT OnCommand(HWND hDlg, SettingsDialogState& st, int id)
@@ -513,8 +527,8 @@ static LRESULT OnCommand(HWND hDlg, SettingsDialogState& st, int id)
     switch (id) {
     case IDC_TEST:              OnTestConnection(hDlg, st);             return 0;
     case IDC_SAVE:              OnSave(hDlg, st);                       return 0;
-    case IDC_CANCEL:            DestroyWindow(hDlg);                    return 0;
-    case IDCANCEL:              DestroyWindow(hDlg);                    return 0;
+    case IDC_CANCEL:            CloseSettingsDialog(hDlg);              return 0;
+    case IDCANCEL:              CloseSettingsDialog(hDlg);              return 0;
     case IDC_SCANFOLDER_BROWSE: OnBrowse(hDlg, IDC_SCANFOLDER, true);   return 0;
     case IDC_BASELINE_BROWSE:   OnBrowse(hDlg, IDC_BASELINE, false);    return 0;
     case IDC_REPORTS_BROWSE:    OnBrowse(hDlg, IDC_REPORTS, true);      return 0;
@@ -551,10 +565,15 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
     }
 
     case WM_APP_STATUS_TEXT: {
-        std::unique_ptr<std::wstring> text(reinterpret_cast<std::wstring*>(lParam));
+        std::unique_ptr<std::wstring> text = TakePayload<std::wstring>(st ? st->payloads : nullptr, lParam);
         if (st && text) SetWindowTextW(st->hStatusLabel, text->c_str());
         return 0;
     }
+
+    case WM_NCDESTROY:
+        // A test reply already posted to this dialog is dropped with it; free it.
+        if (st && st->payloads) st->payloads->FreeFor(hDlg);
+        break;
 
     case WM_CTLCOLORSTATIC:
         return reinterpret_cast<LRESULT>(ThemeCtlColorStatic(reinterpret_cast<HDC>(wParam)));
@@ -568,7 +587,7 @@ static LRESULT CALLBACK SettingsDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPAR
         return ThemeEraseBackground(reinterpret_cast<HDC>(wParam), hDlg);
 
     case WM_CLOSE:
-        DestroyWindow(hDlg);
+        CloseSettingsDialog(hDlg);
         return 0;
 
     case WM_DESTROY:
@@ -599,13 +618,15 @@ static void EnsureSettingsClassRegistered(HINSTANCE hInst)
     RegisterClassExW(&wc);
 }
 
-bool ShowSettingsDialog(HWND hParent, HINSTANCE hInst, BackgroundWorker& worker, AppSettings& settings)
+bool ShowSettingsDialog(HWND hParent, HINSTANCE hInst, BackgroundWorker& worker, PayloadTracker& payloads,
+                        AppSettings& settings)
 {
     EnsureSettingsClassRegistered(hInst);
 
     SettingsDialogState st;
     st.settings = settings;
     st.worker = &worker;
+    st.payloads = &payloads;
 
     RECT parentRect;
     GetWindowRect(hParent, &parentRect);
@@ -643,7 +664,7 @@ bool ShowSettingsDialog(HWND hParent, HINSTANCE hInst, BackgroundWorker& worker,
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
-    if (IsWindow(hDlg)) DestroyWindow(hDlg);
+    if (IsWindow(hDlg)) CloseSettingsDialog(hDlg);
 
     EnableWindow(hParent, TRUE);
     SetForegroundWindow(hParent);

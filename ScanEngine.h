@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
 #include "AppState.h"
@@ -22,10 +23,16 @@ struct ScanRequest {
     std::wstring baselinePath;      // Baseline: where to save. Full/Fast: the file loaded into currentBaseline
     ScanOptions  options;
     std::wstring title;             // "Full Scan of C:\Program Files", for reports
+
+    // Full/Fast only: compare against this baseline instead of AppState::currentBaseline.
+    // The sample pack uses it so its demo baseline never becomes the user's active one.
+    std::shared_ptr<Baseline> comparisonBaseline;
 };
 
 // Start a scan on the worker. Does nothing if a scan is already running.
-// For Full and Fast the caller must have loaded AppState::currentBaseline.
+// For Full and Fast the caller must have loaded AppState::currentBaseline, or set
+// request.comparisonBaseline. WM_APP_SCAN_FINISHED is always posted, also when
+// the scan stops on an exception, so the window never stays in "scan running".
 void StartScanInBackground(AppState& app, const ScanRequest& request);
 
 // "Baseline Scan Running..." style label for the operation panel.

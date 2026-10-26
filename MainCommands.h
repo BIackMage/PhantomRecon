@@ -22,8 +22,9 @@ bool DispatchResultsCommand(AppState& app, HWND hWnd, int commandId, int notifyC
 // Help > Create Sample Pack (also offered by the Getting Started window).
 void CreateSamplePackAndScan(AppState& app, HWND hWnd);
 
-// Write the sample pack into folder (new or empty), make its demo baseline active
-// for this session and run a Full Scan of it. askBeforeScan shows a Yes/No first.
+// Write the sample pack into folder (new or empty) and run a Full Scan of it
+// against its demo baseline. The demo baseline is used for that scan only; the
+// active baseline does not change. askBeforeScan shows a Yes/No first.
 void CreateSamplePackInFolder(AppState& app, HWND hWnd, const std::wstring& folder, bool askBeforeScan);
 
 // File > Open Scan Results and File > Open Baseline, for a path already chosen

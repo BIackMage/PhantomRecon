@@ -53,6 +53,9 @@ static void LoadScoringConfigOrTemplate()
     }
 }
 
+// How long the exit waits for background jobs after asking them to stop.
+static const unsigned long kExitWaitMs = 3000;
+
 // Keyboard routing: modeless windows get Tab and Esc; the main window gets accelerators.
 static bool PreTranslate(AppState& app, HACCEL accel, MSG& msg)
 {
@@ -90,6 +93,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
     RegisterAiSidebarClass(hInstance);
 
     if (!CreateMainWindow(app, nCmdShow)) {
+        app.progress.cancelRequested = true;
+        app.audit.cancelRequested = true;
+        app.worker.JoinAll();
+        app.payloads.FreeRemaining();
         if (SUCCEEDED(comInit)) CoUninitialize();
         return FALSE;
     }
@@ -105,10 +112,24 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
     // Shutdown: stop any scan or audit and wait for every worker before AppState goes away.
     app.progress.cancelRequested = true;
     app.audit.cancelRequested = true;
-    app.worker.JoinAll();
+    int exitCode = static_cast<int>(msg.wParam);
+    if (!app.worker.JoinAllFor(kExitWaitMs)) {
+        // A job is stuck in a call that does not look at the cancel flag: an AI
+        // server that has not answered (WinHTTP waits up to two minutes) or one
+        // large file being hashed. The window is already gone, so waiting would
+        // leave an invisible process behind. End it now. A baseline is only written
+        // through a temporary file that replaces the old one in one step, so it is
+        // either complete or untouched; the CSV of the stopped scan is partial, as
+        // for any cancelled scan; settings were saved when Save was pressed.
+        DebugLog(L"Workers still busy " + std::to_wstring(kExitWaitMs) + L" ms after the window closed; ending the process");
+        if (SUCCEEDED(comInit)) CoUninitialize();
+        TerminateProcess(GetCurrentProcess(), static_cast<UINT>(exitCode));
+    }
+    // Payloads posted to windows that were destroyed before handling them.
+    app.payloads.FreeRemaining();
     if (SUCCEEDED(comInit)) CoUninitialize();
     DebugLog(L"Exit");
-    return static_cast<int>(msg.wParam);
+    return exitCode;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,7 +182,7 @@ static void OnCreate(AppState& app, HWND hWnd)
 {
     DebugLog(L"WM_CREATE");
     CreateMainControls(app, hWnd);
-    CreateAiSidebar(hWnd, app.hInstance, app.aiSidebar, app.worker);
+    CreateAiSidebar(hWnd, app.hInstance, app.aiSidebar, app.worker, app.payloads);
     if (app.aiSidebar.hPanel) {
         EnumChildWindows(app.aiSidebar.hPanel, [](HWND child, LPARAM font) -> BOOL {
             SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(font), TRUE);
@@ -234,6 +255,8 @@ static LRESULT OnResultsNotify(AppState& app, HWND hWnd, LPARAM lParam)
     case LVN_GETDISPINFOW:
         FillResultsDispInfo(lParam, app.results);
         return 0;
+    case LVN_ODFINDITEMW:
+        return FindResultsItem(lParam, app.results);
     case NM_CUSTOMDRAW:
         return ThemeResultsCustomDraw(lParam, app.results);
     case LVN_COLUMNCLICK: {
@@ -278,6 +301,8 @@ static LRESULT OnNotify(AppState& app, HWND hWnd, UINT message, WPARAM wParam, L
 
 // Drain the row queue into the model. Clear the in-flight flag first so a row
 // queued during the drain triggers a fresh post instead of waiting forever.
+// With a sort active, new rows land between old ones; the selection is kept on
+// the same file, not the same row number.
 static void OnScanRows(AppState& app)
 {
     app.progress.rowsPosted = false;
@@ -287,8 +312,10 @@ static void OnScanRows(AppState& app)
         rows.swap(app.progress.pendingRows);
     }
     if (rows.empty()) return;
+    ResultsSelection selection = SaveResultsSelection(app.controls.resultsListView, app.results);
     app.results.Append(rows);
     RefreshResultsList(app.controls.resultsListView, app.results);
+    RestoreResultsSelection(app.controls.resultsListView, app.results, selection);
     UpdateResultCount(app);
 }
 
@@ -325,6 +352,13 @@ static void OnScanFinished(AppState& app, HWND hWnd, ScanFinishedPayload* rawPay
     }
     if (s.highRisk > 0) ss << s.highRisk << L" file(s) scored 7 or more. Filter \"Score 7 or more\" to see them.\n";
     if (!s.csvPath.empty() && !s.csvFailed) ss << L"CSV: " << s.csvPath << L"\n";
+    if (app.baselinePathChangePending) {
+        // Settings changed the baseline file while this scan ran; it applies from now on.
+        app.baselinePathChangePending = false;
+        app.baselineFilePath = EffectiveBaselinePath(app.settings);
+        ss << L"\nActive baseline is now: " << app.baselineFilePath << L"\n";
+        DebugLog(L"Pending baseline setting applied after the scan: " + app.baselineFilePath);
+    }
     SetWindowTextW(app.controls.operationInfoLabel, ss.str().c_str());
     DebugLog(L"Scan finished: " + payload->finalState);
 
@@ -444,13 +478,13 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
         OnScanProgress(app);
         return 0;
     case WM_APP_SCAN_FINISHED:
-        OnScanFinished(app, hWnd, reinterpret_cast<ScanFinishedPayload*>(lParam));
+        OnScanFinished(app, hWnd, TakePayload<ScanFinishedPayload>(&app.payloads, lParam).release());
         return 0;
     case WM_APP_AUDIT_PROGRESS:
         OnAuditProgressMessage(app);
         return 0;
     case WM_APP_AUDIT_FINISHED:
-        OnAuditFinishedMessage(app, reinterpret_cast<AuditFinishedPayload*>(lParam));
+        OnAuditFinishedMessage(app, TakePayload<AuditFinishedPayload>(&app.payloads, lParam).release());
         return 0;
     case WM_CLOSE:
         OnClose(app, hWnd);

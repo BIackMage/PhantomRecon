@@ -183,6 +183,54 @@ int SelectedResultIndex(HWND hListView)
     return ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
 }
 
+ResultsSelection SaveResultsSelection(HWND hListView, const ResultsModel& model)
+{
+    ResultsSelection saved;
+    if (!hListView) return saved;
+    int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
+    if (selected >= 0) saved.hasSelected = model.ModelIndexOfView(static_cast<size_t>(selected), saved.selectedRow);
+    int focused = ListView_GetNextItem(hListView, -1, LVNI_FOCUSED);
+    if (focused >= 0) saved.hasFocused = model.ModelIndexOfView(static_cast<size_t>(focused), saved.focusedRow);
+    if (saved.hasSelected) DebugLog(L"Selection saved: list row " + std::to_wstring(selected) + L", model row " +
+                                    std::to_wstring(saved.selectedRow));
+    return saved;
+}
+
+void RestoreResultsSelection(HWND hListView, const ResultsModel& model, const ResultsSelection& saved)
+{
+    if (!hListView) return;
+    if (saved.hasSelected) {
+        int now = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
+        int wanted = model.ViewIndexOfModel(saved.selectedRow);
+        if (wanted != now) {
+            ListView_SetItemState(hListView, -1, 0, LVIS_SELECTED);
+            if (wanted >= 0) ListView_SetItemState(hListView, wanted, LVIS_SELECTED, LVIS_SELECTED);
+            DebugLog(L"Selection kept on the same file: list row " + std::to_wstring(now) + L" -> " + std::to_wstring(wanted));
+        }
+    }
+    if (saved.hasFocused) {
+        int now = ListView_GetNextItem(hListView, -1, LVNI_FOCUSED);
+        int wanted = model.ViewIndexOfModel(saved.focusedRow);
+        if (wanted >= 0 && wanted != now) ListView_SetItemState(hListView, wanted, LVIS_FOCUSED, LVIS_FOCUSED);
+    }
+}
+
+LRESULT FindResultsItem(LPARAM lParam, const ResultsModel& model)
+{
+    // The list's own type-ahead asks with LVFI_STRING | LVFI_SUBSTRING (or the older
+    // LVFI_PARTIAL); both mean "starts with". LVFI_STRING alone means the whole name.
+    const NMLVFINDITEMW* find = reinterpret_cast<const NMLVFINDITEMW*>(lParam);
+    const UINT stringFlags = LVFI_STRING | LVFI_SUBSTRING | LVFI_PARTIAL;
+    if (!find || !(find->lvfi.flags & stringFlags) || !find->lvfi.psz) return -1;
+    bool exact = (find->lvfi.flags & (LVFI_SUBSTRING | LVFI_PARTIAL)) == 0;
+    bool wrap = (find->lvfi.flags & LVFI_WRAP) != 0;
+    size_t start = find->iStart > 0 ? static_cast<size_t>(find->iStart) : 0;
+    int index = model.FindByFileName(find->lvfi.psz, start, wrap, exact);
+    DebugLog(L"Type-ahead \"" + std::wstring(find->lvfi.psz) + L"\" flags " + std::to_wstring(find->lvfi.flags) +
+             L" from row " + std::to_wstring(start) + L" -> " + std::to_wstring(index));
+    return index;
+}
+
 const wchar_t* StatusFilterName(StatusFilter filter)
 {
     switch (filter) {

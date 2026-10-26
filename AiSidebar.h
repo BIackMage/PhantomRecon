@@ -8,6 +8,8 @@
 #include "ScanTypes.h"
 #include "SecurityChecks.h"
 
+class PayloadTracker;   // AppMessages.h
+
 // ---------------------------------------------------------------------------
 // AiSidebar: slide-out AI triage panel.
 //
@@ -21,7 +23,11 @@
 // controls. See CLAUDE.md.
 //
 // Privacy: before anything is sent to an endpoint that is not on this machine,
-// the user is asked once per session. See ConfirmSendAllowed in AiSidebar.cpp.
+// the user is asked. The answer covers that exact endpoint for the session; a
+// different endpoint is asked about again. Each request runs with the settings
+// captured when the question was answered, so a later change in Settings cannot
+// redirect a request that is already approved. The startup connection test runs
+// by itself only for an endpoint on this PC. See AiConsent.h.
 // ---------------------------------------------------------------------------
 
 struct AiSidebarState {
@@ -40,14 +46,16 @@ struct AiSidebarState {
     HWND hTitleLabel = NULL;        // panel title label
 
     BackgroundWorker* worker = nullptr;  // owned by AppState; set by CreateAiSidebar
-    bool remoteSendApproved = false;     // user said yes to a non-local endpoint this session
+    PayloadTracker*   payloads = nullptr;// owned by AppState; set by CreateAiSidebar
+    std::wstring approvedRemoteEndpoint; // the one non-local endpoint the user said yes to, "" when none
 };
 
 // Register the sidebar window class (call once at startup).
 void RegisterAiSidebarClass(HINSTANCE hInst);
 
 // Create the sidebar panel and the toggle tab on the main window.
-void CreateAiSidebar(HWND hMainWindow, HINSTANCE hInst, AiSidebarState& state, BackgroundWorker& worker);
+void CreateAiSidebar(HWND hMainWindow, HINSTANCE hInst, AiSidebarState& state, BackgroundWorker& worker,
+                     PayloadTracker& payloads);
 
 // Toggle the sidebar open/closed with slide animation.
 void ToggleAiSidebar(AiSidebarState& state);
@@ -71,7 +79,14 @@ int GetAiSidebarWidth(const AiSidebarState& state);
 void SendUserMessage(AiSidebarState& state, const std::wstring& message);
 
 // Quick action: triage one file from the scan results (every field on the row).
-void TriageSelectedFile(AiSidebarState& state, const ScanRow& row);
+// Takes its own copy: the consent question runs a message loop, during which
+// rows from a running scan can move the model's storage.
+void TriageSelectedFile(AiSidebarState& state, ScanRow row);
+
+// Settings changed the endpoint or model: forget nothing about approvals (they are
+// per endpoint), but redo the startup status: test again when the endpoint is on
+// this PC, else say it was not tested.
+void OnAiSettingsChanged(AiSidebarState& state);
 
 // Quick action: summarise the last scan.
 void RequestScanSummary(AiSidebarState& state, const ScanSummary& summary, const std::wstring& title);
