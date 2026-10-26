@@ -5,7 +5,7 @@
 #include <windows.h>
 
 // ---------------------------------------------------------------------------
-// InstalledProgram — one entry from the Windows registry Uninstall keys
+// InstalledProgram - one entry from the Windows registry Uninstall keys
 // ---------------------------------------------------------------------------
 struct InstalledProgram {
     std::wstring displayName;
@@ -16,7 +16,7 @@ struct InstalledProgram {
 };
 
 // ---------------------------------------------------------------------------
-// RegistryEnumerator — enumerates installed programs and their executables
+// RegistryEnumerator - enumerates installed programs and their executables
 // ---------------------------------------------------------------------------
 class RegistryEnumerator {
 public:

@@ -67,11 +67,10 @@ SecurityCheckResult CheckRunningPrograms(const AuditContext& context)
     std::map<DWORD, const ProcessInfo*> byPid;
     for (const ProcessInfo& p : processes) byPid[p.pid] = &p;
 
-    std::wstringstream flagged;
-    int high = 0, review = 0, inaccessible = 0;
+    CappedList highList(60), reviewList(60), baselineNotes(30);
+    int inaccessible = 0;
     std::set<std::wstring> checkedImages;
-    int inBaseline = 0, notInBaseline = 0, changed = 0;
-    std::wstringstream baselineNotes;
+    int inBaseline = 0, notInBaseline = 0, outsideBaseline = 0, changed = 0;
 
     for (const ProcessInfo& p : processes) {
         if (p.pid <= 4 || p.pid == GetCurrentProcessId()) continue;
@@ -126,9 +125,12 @@ SecurityCheckResult CheckRunningPrograms(const AuditContext& context)
                 }
                 if (context.baseline) {
                     const BaselineEntry* b = context.baseline->FindEntry(p.image);
-                    if (!b) {
+                    if (!b && !context.baseline->CoversFolderOf(p.image)) {
+                        outsideBaseline++;   // the baseline never recorded this folder
+                    }
+                    else if (!b) {
                         notInBaseline++;
-                        baselineNotes << L"  not in baseline: " << p.image << L"\n";
+                        baselineNotes.Add(L"  not in baseline: " + p.image + L"\n");
                     }
                     else {
                         inBaseline++;
@@ -143,11 +145,15 @@ SecurityCheckResult CheckRunningPrograms(const AuditContext& context)
         }
 
         if (!reasons.empty()) {
-            if (severe) high++; else review++;
-            flagged << L"  " << (severe ? L"[HIGH] " : L"[REVIEW] ") << p.name << L" (pid " << p.pid << L")"
-                    << (p.image.empty() ? L"" : L"\n      " + p.image) << L"\n      why: " << JoinW(reasons, L"; ") << L"\n";
+            std::wstring line = std::wstring(L"  ") + (severe ? L"[HIGH] " : L"[REVIEW] ") + p.name + L" (pid " +
+                std::to_wstring(p.pid) + L")" + (p.image.empty() ? L"" : L"\n      " + p.image) +
+                L"\n      why: " + JoinW(reasons, L"; ") + L"\n";
+            if (severe) highList.Add(line);
+            else reviewList.Add(line);
         }
     }
+    size_t high = highList.Total();
+    size_t review = reviewList.Total();
 
     std::wstringstream detail;
     detail << processes.size() << L" process(es) running";
@@ -155,10 +161,11 @@ SecurityCheckResult CheckRunningPrograms(const AuditContext& context)
     detail << L".\n";
     if (context.baseline) {
         detail << L"Against the baseline: " << inBaseline << L" program(s) known, " << changed << L" changed, "
-               << notInBaseline << L" not in it.\n";
+               << notInBaseline << L" not in it although their folder is, " << outsideBaseline
+               << L" in folders the baseline does not cover.\n";
     }
-    if (high + review > 0) detail << L"Flagged:\n" << flagged.str();
-    if (notInBaseline > 0) detail << L"Programs not in the baseline:\n" << baselineNotes.str();
+    if (high + review > 0) detail << L"Flagged:\n" << highList.Text() << reviewList.Text();
+    if (notInBaseline > 0) detail << L"Programs not in the baseline:\n" << baselineNotes.Text();
 
     result.status = high > 0 ? CHECK_FAIL : (review > 0 || changed > 0 ? CHECK_WARNING : CHECK_PASS);
     result.detail = detail.str();

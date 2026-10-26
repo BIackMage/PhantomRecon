@@ -711,7 +711,11 @@ SecurityCheckResult CheckPersistence(const AuditContext& context)
         if (context.baseline && !e.program.empty() && FileExists(e.program)) {
             const BaselineEntry* b = context.baseline->FindEntry(e.program);
             if (!b) {
-                if (!e.microsoft) Flag(e, Level::Review, L"program is not in the baseline");
+                // Only meaningful when the baseline recorded that folder; a baseline of
+                // one folder says nothing about programs elsewhere.
+                if (!e.microsoft && context.baseline->CoversFolderOf(e.program)) {
+                    Flag(e, Level::Review, L"program is not in the baseline, but its folder is");
+                }
             }
             else {
                 std::wstring sha = ComputeFileSHA256(ToExtendedPath(e.program));
@@ -724,25 +728,25 @@ SecurityCheckResult CheckPersistence(const AuditContext& context)
     SaveSnapshot(snapshotPath, entries);
 
     // Report
+    // High findings first, then review, then a short inventory. Each list is capped
+    // so a PC with thousands of shell extensions still gets a readable report.
     std::map<std::wstring, int> perSource;
-    std::wstringstream flagged;
-    std::wstringstream inventory;
-    int high = 0, review = 0;
+    CappedList highList(60), reviewList(60), inventory(40);
     for (const PersistenceEntry& e : entries) {
         perSource[e.source]++;
-        std::wstring line = L"  " + e.source + L": " + e.name + (e.command.empty() ? L"" : L"\n      " + e.command);
+        std::wstring line = e.source + L": " + e.name + (e.command.empty() ? L"" : L"\n      " + e.command);
         if (e.level == Level::High) {
-            high++;
-            flagged << L"  [HIGH] " << line.substr(2) << L"\n      why: " << JoinW(e.reasons, L"; ") << L"\n";
+            highList.Add(L"  [HIGH] " + line + L"\n      why: " + JoinW(e.reasons, L"; ") + L"\n");
         }
         else if (e.level == Level::Review) {
-            review++;
-            flagged << L"  [REVIEW] " << line.substr(2) << L"\n      why: " << JoinW(e.reasons, L"; ") << L"\n";
+            reviewList.Add(L"  [REVIEW] " + line + L"\n      why: " + JoinW(e.reasons, L"; ") + L"\n");
         }
         else if (!e.microsoft) {
-            inventory << line << L"\n";
+            inventory.Add(L"  " + line + L"\n");
         }
     }
+    size_t high = highList.Total();
+    size_t review = reviewList.Total();
 
     std::wstringstream detail;
     detail << entries.size() << L" autostart entries in " << perSource.size() << L" kinds of location";
@@ -750,11 +754,10 @@ SecurityCheckResult CheckPersistence(const AuditContext& context)
     else detail << L"; first audit, so nothing is marked new yet";
     if (context.baseline) detail << L"; programs cross-checked against the baseline";
     detail << L".\n";
-    if (high + review > 0) detail << L"Flagged:\n" << flagged.str();
+    if (high + review > 0) detail << L"Flagged:\n" << highList.Text() << reviewList.Text();
     detail << L"Counts:\n";
     for (const auto& pair : perSource) detail << L"  " << pair.first << L": " << pair.second << L"\n";
-    std::wstring inv = inventory.str();
-    if (!inv.empty()) detail << L"Other entries (not signed by Microsoft):\n" << inv;
+    if (!inventory.Empty()) detail << L"Other entries (not signed by Microsoft):\n" << inventory.Text();
 
     result.status = high > 0 ? CHECK_FAIL : (review > 0 ? CHECK_WARNING : CHECK_PASS);
     result.detail = detail.str();

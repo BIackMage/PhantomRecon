@@ -10,6 +10,11 @@
 #include "AppMessages.h"
 #include "BackgroundWorker.h"
 #include "Baseline.h"
+#include "HardeningScore.h"
+#include "ResultsModel.h"
+#include "ScanCore.h"
+#include "SecurityChecks.h"
+#include "SettingsDialog.h"
 
 #define MAX_LOADSTRING 100
 
@@ -27,9 +32,25 @@ struct MainControls {
     HWND systemInfoLabel    = NULL;
     HWND operationInfoTitle = NULL;
     HWND operationInfoLabel = NULL;
+    HWND scoreTitle         = NULL;
+    HWND scoreValue         = NULL;   // big number
+    HWND scoreCaption       = NULL;   // label and counts
+    HWND findingsButton     = NULL;
     HWND progressBar        = NULL;
     HWND cancelButton       = NULL;
+    HWND filterLabel        = NULL;
+    HWND filterCombo        = NULL;
+    HWND searchLabel        = NULL;
+    HWND searchEdit         = NULL;
+    HWND countLabel         = NULL;
     HWND resultsListView    = NULL;
+};
+
+// GDI objects the main window creates and destroys. UI thread only.
+struct UiResources {
+    HFONT uiFont    = NULL;   // message-box font for every control
+    HFONT titleFont = NULL;   // panel titles
+    HFONT scoreFont = NULL;   // the hardening score number
 };
 
 // Live state of the scan in flight. Written by the scan thread, read by the UI
@@ -38,6 +59,7 @@ struct MainControls {
 struct ScanProgress {
     std::atomic<int>  filesProcessed{0};
     std::atomic<int>  executablesFound{0};
+    std::atomic<int>  totalFiles{0};          // 0 until the pre-count finishes
     std::atomic<bool> cancelRequested{false};
     std::atomic<bool> running{false};
 
@@ -55,6 +77,30 @@ struct ScanProgress {
     std::vector<ScanRow> pendingRows;
 };
 
+// The posture audit: progress while it runs, results after. Progress fields are
+// written by the audit thread; results are written on the UI thread only.
+struct AuditState {
+    std::atomic<bool> running{false};
+    std::atomic<bool> cancelRequested{false};
+    std::atomic<int>  done{0};
+    std::atomic<int>  total{0};
+    std::atomic<bool> progressPosted{false};
+    std::mutex        textMutex;
+    std::wstring      currentTitle;
+
+    bool                             hasResults = false;
+    std::vector<SecurityCheckResult> results;
+    HardeningScore                   score;
+    std::wstring                     finishedAt;
+};
+
+// The last finished scan, for reports. UI thread only.
+struct LastScan {
+    bool         has = false;
+    ScanSummary  summary;
+    std::wstring title;
+};
+
 struct AppState {
     HINSTANCE hInstance   = NULL;
     HWND      hMainWindow = NULL;
@@ -62,12 +108,19 @@ struct AppState {
     WCHAR     windowClass[MAX_LOADSTRING] = {};
 
     MainControls   controls;
+    UiResources    ui;
     AiSidebarState aiSidebar;
+    HWND           findingsWindow = NULL;   // modeless, at most one
+    HWND           detailWindow   = NULL;   // modeless, at most one
 
-    std::wstring outputCsvPath    = L"output.csv";
-    std::wstring baselineFilePath = L"phantom_recon_baseline.prbl";
+    AppSettings  settings;                  // loaded in wWinMain, saved by the Settings dialog
+    std::wstring outputCsvPath;             // CSV of the last scan
+    std::wstring baselineFilePath;          // active baseline for Full and Fast Scan
 
     ScanProgress progress;
+    AuditState   audit;
+    LastScan     lastScan;
+    ResultsModel results;                   // rows behind the results list, UI thread only
 
     std::mutex baselineMutex;   // guards currentBaseline while the UI thread swaps it
     Baseline   currentBaseline; // the active baseline used by Full Scan and Fast Scan

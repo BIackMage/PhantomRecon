@@ -48,6 +48,8 @@
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions>_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <!-- Keep the compiler's symbol file next to the objects, away from the programs' own .pdb files. -->
+      <ProgramDataBaseFileName>$(IntDir)$(ProjectName).pdb</ProgramDataBaseFileName>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -58,6 +60,7 @@
     <ClInclude Include="CheckCatalog.h" />
     <ClInclude Include="CheckHelpers.h" />
     <ClInclude Include="DebugTrace.h" />
+    <ClInclude Include="DetailText.h" />
     <ClInclude Include="FileAnalysis.h" />
     <ClInclude Include="FileIO.h" />
     <ClInclude Include="FileOrigin.h" />
@@ -92,6 +95,7 @@
     <ClInclude Include="ResultsModel.h" />
     <ClInclude Include="SampleData.h" />
     <ClInclude Include="ScheduledScan.h" />
+    <ClInclude Include="StartupRequest.h" />
     <ClInclude Include="WmiQuery.h" />
   </ItemGroup>
   <ItemGroup>
@@ -103,6 +107,7 @@
     <ClCompile Include="CheckCatalog.cpp" />
     <ClCompile Include="CheckHelpers.cpp" />
     <ClCompile Include="DebugTrace.cpp" />
+    <ClCompile Include="DetailText.cpp" />
     <ClCompile Include="FileAnalysis.cpp" />
     <ClCompile Include="FileIO.cpp" />
     <ClCompile Include="FileOrigin.cpp" />
@@ -141,6 +146,7 @@
     <ClCompile Include="ResultsModel.cpp" />
     <ClCompile Include="SampleData.cpp" />
     <ClCompile Include="ScheduledScan.cpp" />
+    <ClCompile Include="StartupRequest.cpp" />
     <ClCompile Include="WmiQuery.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

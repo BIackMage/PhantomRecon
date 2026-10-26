@@ -2,8 +2,11 @@
 
 #include <windows.h>
 #include <string>
+#include <vector>
 #include "BackgroundWorker.h"
+#include "ScanCore.h"
 #include "ScanTypes.h"
+#include "SecurityChecks.h"
 
 // ---------------------------------------------------------------------------
 // AiSidebar: slide-out AI triage panel.
@@ -67,14 +70,18 @@ int GetAiSidebarWidth(const AiSidebarState& state);
 // Send a typed message to the LLM and display the response when it arrives.
 void SendUserMessage(AiSidebarState& state, const std::wstring& message);
 
-// Quick action: triage one file from the scan results.
-void TriageSelectedFile(AiSidebarState& state, const BaselineEntry& entry);
+// Quick action: triage one file from the scan results (every field on the row).
+void TriageSelectedFile(AiSidebarState& state, const ScanRow& row);
 
-// Quick action: summarise the scan counters.
-void RequestScanSummary(AiSidebarState& state, int filesProcessed, int executablesFound);
+// Quick action: summarise the last scan.
+void RequestScanSummary(AiSidebarState& state, const ScanSummary& summary, const std::wstring& title);
 
-// Quick action: explain the posture audit text shown in the system info panel.
-void RequestAuditAnalysis(AiSidebarState& state, const std::wstring& auditText);
+// Quick action: explain every failed or warned audit check. Long findings are
+// sent in parts of at most maxPartChars characters, one reply per part.
+void RequestAuditAnalysis(AiSidebarState& state, const std::vector<SecurityCheckResult>& results, size_t maxPartChars);
+
+// Re-colour the panel after a theme change.
+void ApplyThemeToAiSidebar(AiSidebarState& state);
 
 // Control IDs for sidebar widgets
 #define ID_AI_TOGGLE     2001

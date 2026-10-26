@@ -10,6 +10,37 @@
 // calls, so the tests can feed them crafted input and check the verdict.
 // ---------------------------------------------------------------------------
 
+// --- Long evidence lists ---
+
+// Collects report lines but keeps only the first maxItems, so one check cannot
+// bury the report (a PC can have thousands of autostart entries). Text() ends
+// with "... and N more" when lines were left out.
+class CappedList {
+public:
+    explicit CappedList(size_t maxItems) : m_max(maxItems) {}
+    void Add(const std::wstring& item)
+    {
+        if (m_items.size() < m_max) m_items.push_back(item);
+        ++m_total;
+    }
+    size_t Total() const { return m_total; }
+    bool Empty() const { return m_total == 0; }
+    std::wstring Text() const
+    {
+        std::wstring out;
+        for (const std::wstring& s : m_items) out += s;
+        if (m_total > m_items.size()) {
+            out += L"  ... and " + std::to_wstring(m_total - m_items.size()) + L" more not listed here.\n";
+        }
+        return out;
+    }
+
+private:
+    size_t                    m_max;
+    size_t                    m_total = 0;
+    std::vector<std::wstring> m_items;
+};
+
 // --- Command lines (scheduled tasks, Run keys, WMI consumers, services) ---
 
 // True when a command line shows a classic abuse pattern: encoded PowerShell,

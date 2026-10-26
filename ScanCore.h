@@ -29,8 +29,8 @@ struct ScanOptions {
 
 // Parse an exclusion list (one entry per line or ';' separated):
 //   "*.ext" or ".ext"  -> extension
-//   "C:\path" or "\\server\share" -> absolute prefix
-//   anything else      -> folder name matched anywhere in the path
+//   "C:\path" or "\\server\share" -> that folder (and everything in it) or that one file
+//   anything else      -> a folder or file with that exact name, anywhere in the path
 void ParseExclusions(const std::wstring& text, ScanOptions& options);
 
 // True when the path is excluded. isDirectory skips the extension rule.

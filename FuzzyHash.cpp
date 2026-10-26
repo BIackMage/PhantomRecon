@@ -162,6 +162,18 @@ static int ScoreStrings(const std::string& s1, const std::string& s2, uint32_t b
     return score;
 }
 
+// Fuzzy hash digits are base64 (ASCII). Anything else means the text is not a hash.
+static bool AsciiOnly(const std::wstring& in, std::string& out)
+{
+    out.clear();
+    out.reserve(in.size());
+    for (wchar_t c : in) {
+        if (c > 0x7F) return false;
+        out.push_back(static_cast<char>(c));
+    }
+    return true;
+}
+
 static bool SplitHash(const std::wstring& h, uint32_t& blockSize, std::string& a, std::string& b)
 {
     size_t c1 = h.find(L':');
@@ -169,10 +181,8 @@ static bool SplitHash(const std::wstring& h, uint32_t& blockSize, std::string& a
     size_t c2 = h.find(L':', c1 + 1);
     if (c2 == std::wstring::npos) return false;
     blockSize = static_cast<uint32_t>(_wtoi(h.substr(0, c1).c_str()));
-    std::wstring wa = h.substr(c1 + 1, c2 - c1 - 1);
-    std::wstring wb = h.substr(c2 + 1);
-    a.assign(wa.begin(), wa.end());
-    b.assign(wb.begin(), wb.end());
+    if (!AsciiOnly(h.substr(c1 + 1, c2 - c1 - 1), a)) return false;
+    if (!AsciiOnly(h.substr(c2 + 1), b)) return false;
     return blockSize > 0;
 }
 

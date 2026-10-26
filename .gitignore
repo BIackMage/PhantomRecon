@@ -5,7 +5,11 @@ x64/
 x86/
 [Bb]in/
 [Oo]bj/
+build/
+dist/
 .vs/
+*.lib
+*.exe
 *.ilk
 *.pdb
 *.idb
@@ -36,6 +40,11 @@ phantom_recon_scoring.ini
 security_audit_report.txt
 output.csv
 *.csv
+*.snapshot
+phantom_recon_revocation_cache.txt
+known_good_sha256.txt
+portable.flag
+reports/
 
 # Private planning notes kept outside the repo
 *.private.md

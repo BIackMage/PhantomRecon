@@ -21,6 +21,20 @@ static void DebugLog(const std::wstring& msg)
 
 using CheckFn = std::function<SecurityCheckResult(const AuditContext&)>;
 
+// Safety net: no single check's evidence may exceed this many characters. Each
+// check caps its own lists; this catches anything that slips past (a report that
+// is mostly one check is no use to anyone, and Windows edit boxes choke on it).
+static const size_t kMaxDetailChars = 20000;
+
+std::wstring LimitDetail(const std::wstring& detail)
+{
+    if (detail.size() <= kMaxDetailChars) return detail;
+    size_t cut = detail.rfind(L'\n', kMaxDetailChars);
+    if (cut == std::wstring::npos || cut < kMaxDetailChars / 2) cut = kMaxDetailChars;
+    return detail.substr(0, cut) + L"\n... (the rest of this evidence, " + std::to_wstring(detail.size() - cut) +
+           L" characters, was cut to keep the report readable)";
+}
+
 template <typename F>
 static CheckFn Plain(F f)
 {
@@ -74,6 +88,7 @@ static const std::map<std::wstring, CheckFn>& CheckFunctions()
         { L"net.wpad",            Plain(CheckProxyAutoDetect) },
         { L"net.hosts",           Plain(CheckHostsFile) },
         { L"net.dns",             Plain(CheckDnsSettings) },
+        { L"cert.roots",          Plain(CheckRootCertificates) },
         { L"persist.sweep",       CheckPersistence },
         { L"persist.tasks",       Plain(CheckScheduledTasks) },
         { L"proc.image",          CheckRunningPrograms },
@@ -138,7 +153,7 @@ std::vector<SecurityCheckResult> RunAllSecurityChecks(const AuditContext& contex
         }
         if (r.id.empty()) r.id = check.id;
         if (r.name.empty()) r.name = info ? info->title : check.id;
-        r.detail = AsciiPunctuation(r.detail);
+        r.detail = LimitDetail(AsciiPunctuation(r.detail));
         DebugLog(check.id + L" -> " + r.status + L" in " + std::to_wstring(GetTickCount64() - started) + L" ms");
         results.push_back(r);
         done++;

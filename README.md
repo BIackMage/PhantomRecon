@@ -1,142 +1,200 @@
 # Phantom Recon
 
-Phantom Recon is a defensive Windows endpoint auditing tool. It takes a snapshot of the
-executables on a machine, scores each one for risk, checks the host for common hardening
-gaps, and later tells you exactly what changed.
+[![Build and test](https://github.com/BIackMage/PhantomRecon/actions/workflows/build.yml/badge.svg)](https://github.com/BIackMage/PhantomRecon/actions/workflows/build.yml)
 
-It is a single native Win32 executable. It needs no agent, no service, no cloud account
-and no network connection. Everything it writes stays on the machine you run it on.
+Phantom Recon checks a Windows PC for security problems and tells you, in plain words,
+how to fix each one. It also records the programs on a PC you trust, and later shows
+you what is new, changed or missing.
 
-Status: version 0.7, pre-release. Windows 10 and 11, x64. See [ROADMAP.md](ROADMAP.md)
-for what is done and what is planned.
+It runs entirely on the PC. No account, no cloud, no agent, no service, no install.
+Nothing is sent anywhere unless you turn on the optional AI panel and point it at a
+server yourself.
+
+It is a defensive tool. It looks at the PC it runs on and changes nothing. Every fix is
+shown for you to run yourself, with the command to undo it.
+
+Version 1.0.0. Windows 10 and 11, 64-bit.
 
 ## What it does
 
-### File analysis
-For every executable it finds (28 extension types: PE binaries, installers, scripts,
-shortcuts) it records:
+### Security audit: 51 checks, one score
 
-- Path, size, MD5 and SHA-256
-- Authenticode signature result, signer, issuer, root CA, thumbprint
-- Stolen or cloned signature indicators (hash mismatch, untrusted root, self-signed, expired)
-- Version and company name from the version resource
-- Read-only and hidden attributes, owner, allow and deny ACE counts
-- Shannon entropy of the whole file
+The audit runs when the program starts and scores the PC from 0 to 100. Each problem
+comes with what it means, the exact fix, and how to undo the fix.
 
-### Malware risk score (0 to 10)
-Static analysis of PE files. No execution, no sandbox.
+| Area | What is checked |
+|------|-----------------|
+| Malware protection | Real-time protection, Tamper Protection, cloud protection, definition age, exclusions, Attack Surface Reduction rules, SmartScreen, Controlled folder access |
+| Updates and software | Windows Update health, known-vulnerable or end-of-life programs (7-Zip, WinRAR, PuTTY, VLC and more) |
+| Platform hardening | BitLocker, TPM, Secure Boot, UAC, AutoPlay, Windows Script Host, PowerShell 2.0, Office macros |
+| Credential protection | LSA protection, Credential Guard, Guest and Administrator accounts, local accounts, password and lockout policy |
+| Services and privileges | Unquoted service paths, service programs normal users can change, AlwaysInstallElevated, folders where a planted DLL would load, leftover setup files with passwords, Group Policy Preference passwords, Print Spooler |
+| Network exposure | Firewall, listening programs, LLMNR, NetBIOS, mDNS, SMB signing, SMBv1, Remote Desktop, WinRM, Remote Registry, WPAD, hosts file, DNS servers, trusted root certificates |
+| Persistence | 13 kinds of autostart location (Run keys to WMI subscriptions and COM), scheduled tasks |
+| Running programs | Programs pretending to be Windows, started from Downloads or Temp, or changed since your baseline |
+| Logging and audit | Audit policy per subcategory, event log sizes, PowerShell logging |
 
-- Import table parsing for 32-bit and 64-bit PE
-- 80 or more suspicious API imports in 10 categories, each with a weight
-- Packer detection: 12 known packer families, section names, entry-point bytes,
-  per-section entropy, RWX sections, virtual-to-raw size ratio
-- Signature anomaly and packing bumps feed one composite score
-- Every weight is overridable in `phantom_recon_scoring.ini`, written next to the exe on
-  first run
+Each check is mapped to MITRE ATT&CK techniques and CIS Controls v8 where the mapping is
+honest. [docs/FINDINGS.md](docs/FINDINGS.md) lists every check with its fix.
 
-### Baseline comparison
-- **Baseline Scan** walks a folder tree on a known-clean machine and saves a `.prbl`
-  snapshot with an integrity footer.
-- **Full Scan** walks the same tree later and marks every file MATCH, NEW, CHANGED or
-  MISSING, with the exact fields that changed and the risk score delta.
-- **Fast Scan** does the same for installed programs only, found through the registry
-  Uninstall keys.
-- Results go to a CSV you choose and to an in-app list view with colour-coded rows.
+### File watch: baseline, then compare
 
-### Host posture audit
-Runs at startup and writes `security_audit_report.txt` next to the exe. Checks include:
+- **Take Baseline** records every program and script in a folder: hashes, signature,
+  version, and about forty more facts per file.
+- **Full Scan** compares a folder with the baseline. **Fast Scan** does the same for
+  installed programs only.
+- Every file comes back as MATCH, NEW, CHANGED or MISSING. Files changed by a signed
+  Microsoft update show as UPDATED, and new files on your own known-good list as KNOWN,
+  so Patch Tuesday does not bury the real changes.
+- **Compare Two Baselines** shows what changed between two snapshots without scanning.
 
-- Unquoted service paths and writable service executables
-- AlwaysInstallElevated
-- Leftover unattended-install files that may hold credentials
-- Credential Guard (LsaIso) running
-- LLMNR, NBT-NS, mDNS, SMB signing, WPAD auto-detect
-- Scheduled tasks, startup programs, PowerShell logging and execution policy
-- Windows Firewall profiles, audit policy proxies, Windows Update state
+### File analysis, without running anything
 
-### Optional AI triage sidebar
-A slide-out panel can send a file's scan facts, a scan summary or the audit summary to
-any OpenAI-compatible chat endpoint and show the reply.
+Every program and script gets a risk score from 0 to 10, built from:
 
-- Off by default in the sense that nothing is sent until you press a button.
-- The default endpoint is `http://localhost:1234`, so data stays on the machine.
-- If you point it at a remote server in File > Settings, scan data including file
-  paths will leave the machine. Do not do that on a host you do not own.
+- Authenticode and Windows catalog signatures, certificate chain, revocation status, and
+  signs of a copied or broken signature
+- Program header facts: imports that malware also uses, packing, writable code, build
+  date in the future, checksum mismatch, code that runs before the start point, data
+  appended after the program, odd debug paths
+- Where the file came from: the browser's download mark (Mark of the Web) and hidden
+  NTFS data streams
+- Script lines worth a look: encoded commands, download-and-run, Defender tampering
+- Import hash and fuzzy hash, so a small patch looks different from a replaced file
 
-## Build
+A finding is a reason to look, not proof of harm. Double-click a row to read what each
+finding means.
 
-Requirements:
+### Reports
 
-- Visual Studio 2022 or later with the "Desktop development with C++" workload
-- Windows 10 SDK or later
+- **HTML**: one self-contained page, light and dark, with copy buttons on every fix
+- **JSON**: a versioned schema (`phantomrecon.report/1`) for other tools
+- **MITRE ATT&CK Navigator layer**: the techniques your findings relate to
+- **CSV**: every scan row, UTF-8, opens in Excel
+- Optional: hide your user, computer and domain names before saving or sending
 
-Steps:
+### Optional AI panel
 
-1. Open `PhantomRecon.sln`.
-2. Pick the `x64` platform and `Debug` or `Release`.
-3. Build. The exe lands in `x64\Debug\` or `x64\Release\`.
+The panel on the right edge can explain a file, a scan or the audit using any
+OpenAI-compatible chat server. The default address is a model on your own PC
+(`http://localhost:1234`). Names are hidden before anything is sent, long text goes in
+parts, and the program asks before sending to any other address.
 
-Command line, from a Developer PowerShell:
+## Download and run
+
+1. Download the zip from [Releases](https://github.com/BIackMage/PhantomRecon/releases)
+   and check its SHA-256 against the one on the release page.
+2. Unzip it anywhere, for example a USB stick.
+3. Run `PhantomRecon.exe`.
+
+The programs are not code-signed (a signing certificate costs money this project does
+not have), so Windows SmartScreen may warn the first time. The SHA-256 check is how you
+know the zip is the one built by this repository's release workflow.
+
+### First steps
+
+1. The audit runs on its own. Press **F6** for the findings and their fixes.
+2. Want to see the file watch work first? **Help > Create Sample Pack** writes a few
+   harmless demo files and a demo baseline, then scans them. Expect 1 NEW, 1 CHANGED
+   and 1 MISSING file.
+3. On a day you trust the PC: **Scans > Take Baseline**, for example of
+   `C:\Program Files`.
+4. Later: **Scans > Full Scan** or **Fast Scan**. Filter to "Needs review" and
+   double-click anything you do not recognise.
+5. **Reports > Save HTML Report** for something you can read later or hand to someone.
+
+Run it as a normal user for the normal-user view. Run it as administrator to see every
+service, task and process.
+
+### Keyboard
+
+| Key | Does |
+|-----|------|
+| F5 | Run the audit again |
+| F6 | Findings and fixes |
+| Enter, double-click | Details of the selected row |
+| Ctrl+C | Copy the selected file's full path |
+| Ctrl+F | Search the results |
+| Ctrl+E | Export the rows you can see to CSV |
+| Esc | Cancel the scan |
+
+You can also drop a `.csv` (saved results) or `.prbl` (baseline) file on the window, or
+pass one on the command line.
+
+### Command line
+
+`PhantomReconCli.exe` does everything without a window, for scripts, scheduled runs and
+remote management tools:
+
+```powershell
+# Audit with an HTML report
+PhantomReconCli.exe --audit --report audit.html
+
+# Baseline now, compare later
+PhantomReconCli.exe --baseline-scan "C:\Program Files"
+PhantomReconCli.exe --full "C:\Program Files" --report changes.html --csv changes.csv
+
+# Weekly Fast Scan as one visible, removable scheduled task
+PhantomReconCli.exe --schedule-weekly
+```
+
+Exit code 0 means nothing needs attention, 1 means something does, 2 means an error.
+`PhantomReconCli.exe --help` lists every option.
+
+### Portable mode
+
+Run from a USB drive, pass `--portable`, or put a file named `portable.flag` next to the
+program. Everything is then written next to the program, no scheduled task is ever
+created, and certificate revocation never goes online.
+
+## Files it writes
+
+All next to the program unless you choose another folder in **File > Settings**:
+
+| File | What it is |
+|------|------------|
+| `phantom_recon_baseline.prbl` | The baseline (binary, with an integrity check) |
+| `phantom_recon_settings.ini` | Your settings |
+| `phantom_recon_scoring.ini` | Every scoring weight, written with defaults on first run; edit to tune |
+| `security_audit_report.txt` | Plain text of the last audit |
+| `phantom_recon_persistence.snapshot` | Autostart entries seen last time, so new ones stand out |
+| `phantom_recon_revocation_cache.txt` | Certificate revocation answers, kept for a day |
+| `known_good_sha256.txt` | Optional: SHA-256 hashes you trust, one per line |
+| `reports\` | Reports and scan CSVs |
+
+## Build from source
+
+Requirements: Visual Studio 2022 or later with "Desktop development with C++" (v143
+tools) and a Windows 10 or 11 SDK. No other libraries.
 
 ```powershell
 msbuild PhantomRecon.sln /p:Configuration=Release /p:Platform=x64
+.\x64\Release\PhantomReconTests.exe
 ```
 
-No third-party libraries. Everything links against the Windows SDK: WinTrust, Crypt32,
-BCrypt, WinHTTP, Shlwapi, Comctl32, Version.
+| Project | Builds |
+|---------|--------|
+| `PhantomRecon.Core` | The engine, as a static library. No windows. |
+| `PhantomRecon` | `PhantomRecon.exe`, the Windows app |
+| `cli\PhantomRecon.Cli` | `PhantomReconCli.exe`, the console program |
+| `tests\PhantomRecon.Tests` | `PhantomReconTests.exe`, the automated tests |
 
-## Run
+GitHub Actions builds and tests every push. A version tag (`v1.0.0`) builds the release
+zip and its SHA-256. `tools/make_winget_manifest.py` turns a release into a winget
+manifest.
 
-1. Start `PhantomRecon.exe`. The posture audit runs on its own and fills the left panel.
-2. Scans > Baseline Scan on a clean machine. Pick a root folder and a CSV path.
-3. Later, Scans > Full Scan or Fast Scan on the same root. Compare the CSV.
-4. File > Open Baseline, Import Baseline and Export Baseline move `.prbl` files around.
-5. File > Open Scan Results loads an old CSV back into the list.
-
-Files written next to the exe:
-
-| File | Purpose |
-|------|---------|
-| `phantom_recon_baseline.prbl` | The active baseline |
-| `phantom_recon_scoring.ini` | Scoring weights, created with defaults on first run |
-| `phantom_recon_settings.ini` | AI sidebar endpoint and model |
-| `security_audit_report.txt` | Full text of the last posture audit |
-
-Run it as a normal user for a normal-user view of writable paths. Run it elevated to
-read every service binary and every scheduled task.
-
-## Layout
-
-| File | Role |
-|------|------|
-| `PhantomRecon.cpp` | Entry point, window class, message dispatcher and handlers |
-| `MainCommands.cpp` | One function per menu and button command |
-| `ScanEngine.cpp` | File analysis driver, directory walk, CSV writer, scan thread |
-| `AppState.h` | The one struct that holds all application state |
-| `AppMessages.h` | Messages background threads post to the UI, and their payloads |
-| `BackgroundWorker.cpp` | Joinable thread pool used by every background job |
-| `SystemInfo.cpp` | Computer, CPU, RAM and disk text |
-| `FileAnalysis.cpp` | Signatures, certificate chain, version info, attributes, DACL, entropy |
-| `MalwareScoring.cpp` | PE import parsing, packer detection, composite score |
-| `ScoringConfig.cpp` | INI load and default write for all weights |
-| `Baseline.cpp` | `.prbl` read and write, in-memory lookup, comparison |
-| `RegistryEnumerator.cpp` | Installed-program discovery for Fast Scan |
-| `SecurityChecks.cpp` | Core posture checks and report writer |
-| `SecurityChecksExtra.cpp` | Tasks, startup, PowerShell, firewall, audit policy, updates |
-| `HashUtils.cpp` | MD5 and SHA-256 |
-| `GuiComponents.cpp` | Progress bar, results list view, file dialogs, CSV parser |
-| `AiSidebar.cpp`, `LLMClient.cpp` | Optional triage panel and HTTP client |
-| `SettingsDialog.cpp`, `DarkMode.cpp` | Settings dialog, dark theme |
-
-Rules for changing the code are in [CLAUDE.md](CLAUDE.md). They apply to people too.
+The rules for changing the code are in [CLAUDE.md](CLAUDE.md). They apply to people too.
 
 ## Contributing
 
-Issues and pull requests are welcome. Keep changes small and in the module they belong
-to. Do not add third-party dependencies without opening an issue first.
+Issues and pull requests are welcome. Keep each change small and in the module it
+belongs to, add a test for engine changes, and do not add third-party dependencies
+without opening an issue first.
 
-Looking for something to build? [docs/IDEAS.md](docs/IDEAS.md) lists what would help most,
-in order. [ROADMAP.md](ROADMAP.md) has the long-range plan.
+This project stays defensive. Changes that read other programs' memory, act on other
+machines, or help evade security tools will not be accepted.
+
+[docs/IDEAS.md](docs/IDEAS.md) tracks what is built and what is left.
 
 ## License
 
@@ -145,7 +203,7 @@ PolyForm Noncommercial 1.0.0. See [LICENSE](LICENSE).
 In plain words: anyone may use, study, change and share this software for free, for any
 noncommercial purpose. Nobody may sell it, sell a changed version of it, or charge for a
 product or service built on it. Companies may run it internally. Companies may not bill
-clients for it. If you want to use it commercially, you do not have permission.
+clients for it.
 
 This is a source-available license, not an OSI-approved open source license, because
-OSI licenses must allow commercial use and this one does not on purpose.
+OSI licenses must allow commercial use and this one does not, on purpose.

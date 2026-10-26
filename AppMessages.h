@@ -2,7 +2,12 @@
 
 #include <windows.h>
 #include <string>
+#include <vector>
+
+#include "HardeningScore.h"
+#include "ScanCore.h"
 #include "ScanTypes.h"
+#include "SecurityChecks.h"
 
 // ---------------------------------------------------------------------------
 // AppMessages: the only way a background thread talks to the UI.
@@ -15,16 +20,16 @@
 // ---------------------------------------------------------------------------
 
 enum AppMessage : UINT {
-    // Main window. No payload. Handler drains AppState::progress.pendingRows into the list view.
+    // Main window. No payload. Handler drains AppState::progress.pendingRows into the results model.
     WM_APP_SCAN_ROWS = WM_APP + 1,
 
-    // Main window. No payload. Handler re-reads AppState::progress and repaints the label.
+    // Main window. No payload. Handler re-reads AppState::progress and repaints the label and bar.
     WM_APP_SCAN_PROGRESS = WM_APP + 2,
 
     // Main window. lParam = ScanFinishedPayload*.
     WM_APP_SCAN_FINISHED = WM_APP + 3,
 
-    // Main window. lParam = std::wstring* holding the full system info panel text.
+    // Main window. lParam = AuditFinishedPayload*.
     WM_APP_AUDIT_FINISHED = WM_APP + 4,
 
     // AI sidebar panel window. lParam = AiResponsePayload*.
@@ -32,12 +37,13 @@ enum AppMessage : UINT {
 
     // Any window with a status label. lParam = std::wstring*.
     WM_APP_STATUS_TEXT = WM_APP + 6,
-};
 
-// One finished row for the results list view.
-struct ScanRow {
-    BaselineEntry entry;
-    std::wstring  status;   // BASELINE, MATCH, NEW, CHANGED, MISSING
+    // Main window. No payload. Handler re-reads AppState::audit progress.
+    WM_APP_AUDIT_PROGRESS = WM_APP + 7,
+
+    // Main window. No payload. Posted once by CreateMainWindow so first-run UI
+    // appears after the window is on screen and the message loop is running.
+    WM_APP_STARTUP = WM_APP + 8,
 };
 
 // Sent once when a scan thread exits, for any reason.
@@ -47,6 +53,17 @@ struct ScanFinishedPayload {
     std::wstring dialogTitle;
     std::wstring dialogText;
     UINT         dialogIcon = MB_ICONINFORMATION;
+    ScanSummary  summary;
+    std::wstring title;                      // "Full Scan of C:\Program Files"
+};
+
+// Sent once when the posture audit finishes.
+struct AuditFinishedPayload {
+    std::vector<SecurityCheckResult> results;
+    HardeningScore                   score;
+    std::wstring                     panelText;   // system info + summary for the left panel
+    std::wstring                     finishedAt;  // local time
+    bool                             cancelled = false;
 };
 
 // Sent once per LLM request when the response (or error) is in.

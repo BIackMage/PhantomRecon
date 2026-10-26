@@ -2,33 +2,30 @@
 
 #include <string>
 #include "AppState.h"
+#include "ScanCore.h"
 #include "ScanTypes.h"
 
 // ---------------------------------------------------------------------------
-// ScanEngine: everything that happens on the scan thread.
+// ScanEngine: the GUI's bridge to RunScan (ScanCore.cpp).
 //
 // StartScanInBackground is called on the UI thread. It resets the progress
-// state, clears the list view, starts the marquee and hands the walk to
-// AppState::worker. From then on the scan thread only writes to
-// AppState::progress and posts WM_APP_* messages. It never touches a window.
+// state, clears the results, starts the progress bar and hands RunScan to
+// AppState::worker. RunScan's callbacks only write AppState::progress and post
+// WM_APP_* messages. Nothing on the scan thread touches a window.
 // ---------------------------------------------------------------------------
 
-// Run every analysis pass on one file. Thread-safe, no UI.
-BaselineEntry AnalyzeFile(const std::wstring& fullPath);
+struct ScanRequest {
+    ScanMode     mode = ScanMode::FullScan;
+    std::wstring root;              // folder for Baseline and Full; ignored for Fast
+    std::wstring csvPath;           // may be empty (no CSV)
+    std::wstring baselinePath;      // Baseline: where to save. Full/Fast: the file loaded into currentBaseline
+    ScanOptions  options;
+    std::wstring title;             // "Full Scan of C:\Program Files", for reports
+};
 
-// True for the 28 extensions that can carry or execute code on Windows.
-bool IsExecutableExtension(const std::wstring& fileName);
+// Start a scan on the worker. Does nothing if a scan is already running.
+// For Full and Fast the caller must have loaded AppState::currentBaseline.
+void StartScanInBackground(AppState& app, const ScanRequest& request);
 
-// MATCH / NEW / CHANGED / MISSING.
-std::wstring BaselineStatusToString(BaselineStatus status);
-
-// Append one baseline-mode row (22 columns) to the CSV. Writes the header when the file is new.
-void WriteCsvRow(const std::wstring& outputPath, const BaselineEntry& entry);
-
-// Append one comparison row (22 columns + status, change details, risk delta).
-void WriteCsvRowWithComparison(const std::wstring& outputPath, const BaselineEntry& entry,
-                               const ComparisonResult& comparison);
-
-// Start a scan on the worker. For FastScan the directory is ignored. Does nothing if a scan
-// is already running. Callers must have loaded AppState::currentBaseline for Full and Fast.
-void StartScanInBackground(AppState& app, ScanMode mode, const std::wstring& directory);
+// "Baseline Scan Running..." style label for the operation panel.
+std::wstring ScanStateLabel(ScanMode mode);

@@ -270,8 +270,10 @@ std::vector<SoftwareRule> ParseSoftwareRules(const std::wstring& text)
     for (const std::wstring& raw : SplitAnyW(text, L"\r\n")) {
         std::wstring line = TrimW(raw);
         if (line.empty() || line[0] == L'#') continue;
+        // A line needs at least "name|version". Without the bar it is a typo, not an
+        // end-of-life rule that would flag every program starting with that text.
         std::vector<std::wstring> parts = SplitW(line, L'|', false);
-        if (parts.empty() || parts[0].empty()) continue;
+        if (parts.size() < 2 || parts[0].empty()) continue;
         SoftwareRule r;
         r.namePrefix = parts[0];
         if (parts.size() > 1) r.minimumVersion = parts[1];

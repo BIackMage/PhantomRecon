@@ -134,11 +134,44 @@ static std::wstring Sha1Hex(PCCERT_CONTEXT cert)
     return ss.str();
 }
 
-// Thumbprints of the roots in Microsoft's Trusted Root Program that Windows
-// keeps in the AuthRoot store, read live so the list is never stale.
-static std::set<std::wstring> AuthRootThumbprints()
+static std::wstring BytesHex(const BYTE* data, DWORD size)
+{
+    std::wstringstream ss;
+    for (DWORD i = 0; i < size; ++i) ss << std::uppercase << std::hex << std::setw(2) << std::setfill(L'0') << static_cast<int>(data[i]);
+    return ss.str();
+}
+
+// Thumbprints of every root in Microsoft's Trusted Root Program. Windows keeps
+// the program's signed list (the same one as authroot.stl) in the registry and
+// refreshes it with automatic root updates. It covers the roots that ship with
+// Windows as well as the ones downloaded later.
+static size_t AddRootProgramList(std::set<std::wstring>& out)
+{
+    std::vector<BYTE> data;
+    if (!RegReadBinary(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\AutoUpdate", L"EncodedCtl", data) ||
+        data.empty()) {
+        return 0;
+    }
+    PCCTL_CONTEXT ctl = CertCreateCTLContext(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, data.data(), static_cast<DWORD>(data.size()));
+    if (!ctl) return 0;
+    size_t added = 0;
+    for (DWORD i = 0; i < ctl->pCtlInfo->cCTLEntry; ++i) {
+        const CRYPT_DATA_BLOB& id = ctl->pCtlInfo->rgCTLEntry[i].SubjectIdentifier;
+        if (id.cbData == 20) {   // SHA-1 thumbprint
+            out.insert(BytesHex(id.pbData, id.cbData));
+            ++added;
+        }
+    }
+    CertFreeCTLContext(ctl);
+    return added;
+}
+
+// Roots of the program, read live so the list is never stale: the program list
+// above plus whatever is in the AuthRoot store (roots Windows downloaded).
+static std::set<std::wstring> AuthRootThumbprints(size_t& programListSize)
 {
     std::set<std::wstring> out;
+    programListSize = AddRootProgramList(out);
     HCERTSTORE store = CertOpenStore(CERT_STORE_PROV_SYSTEM_REGISTRY_W, 0, NULL,
         CERT_SYSTEM_STORE_LOCAL_MACHINE | CERT_STORE_READONLY_FLAG | CERT_STORE_OPEN_EXISTING_FLAG, L"AuthRoot");
     if (!store) return out;
@@ -206,7 +239,8 @@ static void ScanRootStore(DWORD location, const wchar_t* locationName, HKEY regR
 SecurityCheckResult CheckRootCertificates()
 {
     SecurityCheckResult result = MakeCheckResult(L"cert.roots");
-    std::set<std::wstring> authRoot = AuthRootThumbprints();
+    size_t programListSize = 0;
+    std::set<std::wstring> authRoot = AuthRootThumbprints(programListSize);
     std::vector<RootFinding> findings;
     int total = 0;
     ScanRootStore(CERT_SYSTEM_STORE_LOCAL_MACHINE, L"Computer", HKEY_LOCAL_MACHINE,
@@ -244,15 +278,20 @@ SecurityCheckResult CheckRootCertificates()
         details << L"  [Group Policy] " << f.subject << L" (" << f.thumbprint << L")\n";
     }
 
+    std::wstring source = programListSize > 0
+        ? L"Compared with Microsoft's root program list (" + std::to_wstring(programListSize) + L" roots) that Windows keeps up to date.\n"
+        : L"Windows' copy of Microsoft's root program list is missing (automatic root updates may be off), so only "
+          L"downloaded roots were recognised and the list below may include normal Windows roots.\n";
+
     if (!findings.empty()) {
         result.status = CHECK_WARNING;
         result.detail = std::to_wstring(findings.size()) + L" trusted root(s) are not part of Microsoft's root program. "
-            L"Make sure you or your organization installed them:\n" + details.str();
+            L"Make sure you or your organization installed them:\n" + details.str() + source;
     }
     else {
         result.status = CHECK_PASS;
-        result.detail = L"All " + std::to_wstring(total) + L" trusted roots come from Microsoft's root program or Windows itself." +
-            (policyRoots.empty() ? L"" : L"\n" + details.str());
+        result.detail = L"All " + std::to_wstring(total) + L" trusted roots come from Microsoft's root program or Windows itself.\n" +
+            source + (policyRoots.empty() ? L"" : details.str());
     }
     return result;
 }

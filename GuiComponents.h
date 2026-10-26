@@ -3,76 +3,83 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <string>
-#include <vector>
-#include "ScanTypes.h"
+#include "ResultsModel.h"
 
 // ---------------------------------------------------------------------------
-// GuiComponents — reusable Win32 GUI helpers for progress bar and results list
+// GuiComponents: reusable Win32 controls and dialogs. UI thread only.
+//
+// The results list is a virtual (owner-data) list view: it stores no text.
+// It asks ResultsModel for each visible cell through LVN_GETDISPINFO, so a
+// scan with 100,000 rows costs no more to show than one with 100.
 // ---------------------------------------------------------------------------
 
-// Initialize common controls (call once at startup before creating windows)
+// Initialize common controls (call once at startup before creating windows).
 void InitGuiCommonControls();
 
-// ---------------------------------------------------------------------------
-// Progress Bar
-// ---------------------------------------------------------------------------
+// Fonts that follow the system message font, scaled for the window's DPI.
+HFONT CreateUiFont(HWND hWnd, int pointSizeDelta, bool bold);
+void  SetControlFont(HWND hControl, HFONT font);
 
-// Create a progress bar control inside the parent window
+// ---------------------------------------------------------------------------
+// Progress bar
+// ---------------------------------------------------------------------------
 HWND CreateScanProgressBar(HWND hParent, HINSTANCE hInst, int x, int y, int width, int height);
-
-// Set the progress bar range (0 to max)
 void SetProgressRange(HWND hProgressBar, int maxValue);
-
-// Update the progress bar position
 void SetProgressPosition(HWND hProgressBar, int position);
-
-// Set progress bar to marquee mode (indeterminate — used when total count unknown)
+// Marquee (moving block) while the total is unknown.
 void SetProgressMarquee(HWND hProgressBar, bool enable);
 
 // ---------------------------------------------------------------------------
-// Results ListView
+// Results list
 // ---------------------------------------------------------------------------
-
-// Create the results ListView with all columns
 HWND CreateResultsListView(HWND hParent, HINSTANCE hInst, int x, int y, int width, int height);
 
-// Add a scan result row to the ListView
-// Returns the row index, or -1 on failure.
-int AddResultRow(HWND hListView, const BaselineEntry& entry, const std::wstring& status = L"");
+// Tell the list how many rows the model shows now and repaint.
+void RefreshResultsList(HWND hListView, const ResultsModel& model);
 
-// Clear all rows from the ListView
-void ClearResultRows(HWND hListView);
+// LVN_GETDISPINFO: fill the requested cell from the model.
+void FillResultsDispInfo(LPARAM lParam, const ResultsModel& model);
 
-// Set row color based on malware score (called from WM_NOTIFY / NM_CUSTOMDRAW)
-// Returns the CDRF_ result for the custom draw handler.
-LRESULT HandleResultsCustomDraw(LPARAM lParam);
+// Show the sort arrow in the header for the model's sort column.
+void UpdateSortArrow(HWND hListView, const ResultsModel& model);
 
-// ---------------------------------------------------------------------------
-// Directory / File Picker Dialogs
-// ---------------------------------------------------------------------------
+// View index of the focused or first selected row, or -1.
+int SelectedResultIndex(HWND hListView);
 
-// Show a folder browse dialog and return the selected path.
-// Returns empty string if user cancels.
-std::wstring BrowseForScanDirectory(HWND hParent);
-
-// Open File dialog filtered for CSV scan result files (.csv)
-// Returns empty string if user cancels.
-std::wstring BrowseForScanFile(HWND hParent);
-
-// Open File dialog filtered for baseline files (.prbl)
-// Returns empty string if user cancels.
-std::wstring BrowseForBaselineFile(HWND hParent);
-
-// Save File dialog for exporting a baseline (.prbl)
-// Returns empty string if user cancels.
-std::wstring SaveBaselineFileDialog(HWND hParent);
+// Fill the filter combo box with the StatusFilter names, in enum order.
+void FillFilterCombo(HWND hCombo);
+const wchar_t* StatusFilterName(StatusFilter filter);
 
 // ---------------------------------------------------------------------------
-// CSV Scan Result Parser
+// File and folder dialogs. Each returns "" when the user cancels.
+// filter uses the OPENFILENAME format: L"Name (*.x)\0*.x\0".
 // ---------------------------------------------------------------------------
+std::wstring BrowseForFolder(HWND hParent, const wchar_t* title, const std::wstring& startFolder);
+std::wstring BrowseForOpenFile(HWND hParent, const wchar_t* title, const wchar_t* filter);
+std::wstring BrowseForSaveFile(HWND hParent, const wchar_t* title, const wchar_t* filter,
+                               const wchar_t* defaultExtension, const std::wstring& suggestedPath);
 
-// Parse a CSV scan result file and populate entries + statuses.
-// Returns true if parsing succeeded (even if 0 rows).
-bool ParseScanResultCSV(const std::wstring& filePath,
-    std::vector<BaselineEntry>& outEntries,
-    std::vector<std::wstring>& outStatuses);
+// Filters used by the commands.
+extern const wchar_t kFilterCsv[];
+extern const wchar_t kFilterBaseline[];
+extern const wchar_t kFilterHtml[];
+extern const wchar_t kFilterJson[];
+extern const wchar_t kFilterText[];
+
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+// Put text on the clipboard. False when the clipboard is busy.
+bool CopyTextToClipboard(HWND hOwner, const std::wstring& text);
+
+// Text of a window (edit, static) as a std::wstring.
+std::wstring GetWindowTextString(HWND hWnd);
+
+// Open Explorer with the file selected (or the folder when the file is gone).
+void ShowFileInExplorer(const std::wstring& path);
+
+// Open a folder or document with its default program.
+void OpenWithShell(const std::wstring& path);
+
+// "report-2026-10-26-1405" style stamp for default file names.
+std::wstring FileTimeStamp();

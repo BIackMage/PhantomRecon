@@ -3,36 +3,36 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.10.35013.160
 MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PhantomRecon.Core", "PhantomRecon.Core.vcxproj", "{6BE1BD7F-5BC6-4DA8-82A3-510FE409851C}"
+EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PhantomRecon", "PhantomRecon.vcxproj", "{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PhantomReconCli", "cli\PhantomRecon.Cli.vcxproj", "{F21846A6-8CE7-433A-ABF0-E7F95A9025C1}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PhantomReconTests", "tests\PhantomRecon.Tests.vcxproj", "{3C9E4B1A-7D2F-4E8B-9A61-2F5D8C0B7E44}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
-		Debug|x86 = Debug|x86
-		DLL-Import Debug|x64 = DLL-Import Debug|x64
-		DLL-Import Debug|x86 = DLL-Import Debug|x86
-		DLL-Import Release|x64 = DLL-Import Release|x64
-		DLL-Import Release|x86 = DLL-Import Release|x86
 		Release|x64 = Release|x64
-		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6BE1BD7F-5BC6-4DA8-82A3-510FE409851C}.Debug|x64.ActiveCfg = Debug|x64
+		{6BE1BD7F-5BC6-4DA8-82A3-510FE409851C}.Debug|x64.Build.0 = Debug|x64
+		{6BE1BD7F-5BC6-4DA8-82A3-510FE409851C}.Release|x64.ActiveCfg = Release|x64
+		{6BE1BD7F-5BC6-4DA8-82A3-510FE409851C}.Release|x64.Build.0 = Release|x64
 		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.Debug|x64.ActiveCfg = Debug|x64
 		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.Debug|x64.Build.0 = Debug|x64
-		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.Debug|x86.ActiveCfg = Debug|Win32
-		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.Debug|x86.Build.0 = Debug|Win32
-		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.DLL-Import Debug|x64.ActiveCfg = Debug|x64
-		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.DLL-Import Debug|x64.Build.0 = Debug|x64
-		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.DLL-Import Debug|x86.ActiveCfg = Debug|Win32
-		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.DLL-Import Debug|x86.Build.0 = Debug|Win32
-		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.DLL-Import Release|x64.ActiveCfg = Release|x64
-		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.DLL-Import Release|x64.Build.0 = Release|x64
-		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.DLL-Import Release|x86.ActiveCfg = Release|Win32
-		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.DLL-Import Release|x86.Build.0 = Release|Win32
 		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.Release|x64.ActiveCfg = Release|x64
 		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.Release|x64.Build.0 = Release|x64
-		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.Release|x86.ActiveCfg = Release|Win32
-		{68A03DAE-80AD-43F1-8D43-3AC3F998EAF1}.Release|x86.Build.0 = Release|Win32
+		{F21846A6-8CE7-433A-ABF0-E7F95A9025C1}.Debug|x64.ActiveCfg = Debug|x64
+		{F21846A6-8CE7-433A-ABF0-E7F95A9025C1}.Debug|x64.Build.0 = Debug|x64
+		{F21846A6-8CE7-433A-ABF0-E7F95A9025C1}.Release|x64.ActiveCfg = Release|x64
+		{F21846A6-8CE7-433A-ABF0-E7F95A9025C1}.Release|x64.Build.0 = Release|x64
+		{3C9E4B1A-7D2F-4E8B-9A61-2F5D8C0B7E44}.Debug|x64.ActiveCfg = Debug|x64
+		{3C9E4B1A-7D2F-4E8B-9A61-2F5D8C0B7E44}.Debug|x64.Build.0 = Debug|x64
+		{3C9E4B1A-7D2F-4E8B-9A61-2F5D8C0B7E44}.Release|x64.ActiveCfg = Release|x64
+		{3C9E4B1A-7D2F-4E8B-9A61-2F5D8C0B7E44}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

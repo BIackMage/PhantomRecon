@@ -55,6 +55,9 @@ const std::vector<RegisteredCheck>& GetRegisteredChecks();
 std::vector<SecurityCheckResult> RunAllSecurityChecks(const AuditContext& context);
 std::vector<SecurityCheckResult> RunAllSecurityChecks();
 
+// Cut evidence longer than 20,000 characters at a line end, saying how much was cut.
+std::wstring LimitDetail(const std::wstring& detail);
+
 // Compact multi-line summary for the UI panel.
 std::wstring GetSecuritySummary(const std::vector<SecurityCheckResult>& results);
 

@@ -333,8 +333,9 @@ SamplePackResult CreateSamplePack(const std::wstring& folderIn)
         L"=========================\r\n\r\n"
         L"Every file here is harmless. The .exe files are tiny programs whose only code is \"return\".\r\n\r\n"
         L"Try it:\r\n"
-        L"  1. File > Open Baseline... and pick demo_baseline.prbl in this folder.\r\n"
-        L"  2. Scans > Full Binary Scan and pick this folder.\r\n\r\n"
+        L"  1. File > Open Baseline (Set as Active)... and pick demo_baseline.prbl in this folder.\r\n"
+        L"  2. Scans > Full Scan (Compare a Folder)... and pick this folder.\r\n"
+        L"  (Help > Create Sample Pack does both steps for you.)\r\n\r\n"
         L"What you should see:\r\n"
         L"  plain_tool.exe        MATCH    unchanged since the baseline\r\n"
         L"  will_change.exe       CHANGED  bytes were appended after the baseline\r\n"
@@ -346,7 +347,7 @@ SamplePackResult CreateSamplePack(const std::wstring& folderIn)
         L"  has_extra_stream.exe  MATCH, carries an extra NTFS data stream\r\n"
         L"  sample_script.ps1     MATCH, the script check points at the commented download line\r\n\r\n"
         L"Command line equivalent:\r\n"
-        L"  PhantomRecon.exe --full \"<this folder>\" --baseline \"<this folder>\\demo_baseline.prbl\" --report demo.html\r\n",
+        L"  PhantomReconCli.exe --full \"<this folder>\" --baseline \"<this folder>\\demo_baseline.prbl\" --report demo.html\r\n",
         true);
     result.files.push_back(readme);
     result.ok = true;

@@ -447,6 +447,18 @@ If your organization relies on WPAD, use a fixed setup script address instead.)~
 For filtering and encryption, choose a well-known resolver and turn on DNS over HTTPS in the same screen.)~",
         LR"~(Set the DNS servers back in the same screen.)~" });
 
+    add({ L"cert.roots", L"Trusted root certificates", CAT_NETWORK, Severity::Medium,
+        { L"T1553.004" }, { L"3.10" }, L"",
+        L"Root certificates decide which secure (HTTPS) sites and signed programs your PC trusts. A root you did not install "
+        L"lets whoever holds its key read your encrypted web traffic or make their programs look signed. Some adware and "
+        L"interception tools add one. Company PCs and some antivirus products add their own on purpose.",
+        LR"~(Open certlm.msc (computer) and certmgr.msc (your account), go to Trusted Root Certification Authorities > Certificates, and look up each root listed by its thumbprint.
+Export a root before you remove it: right-click > All Tasks > Export. Then delete it, or in elevated PowerShell:
+  Remove-Item Cert:\LocalMachine\Root\<thumbprint>
+If a program you use installed it on purpose (antivirus web filtering, a company proxy), keep it.)~",
+        LR"~(Import the exported file: right-click Certificates > All Tasks > Import, or elevated PowerShell:
+  Import-Certificate -FilePath root.cer -CertStoreLocation Cert:\LocalMachine\Root)~" });
+
     // ------------------------------------------------------------------ Persistence
     add({ L"persist.sweep", L"Autostart locations", CAT_PERSIST, Severity::High,
         { L"T1547", L"T1546", L"T1543.003", L"T1137", L"T1176" }, {}, L"",
@@ -573,7 +585,7 @@ std::wstring BuildFindingsMarkdown()
     std::wstringstream md;
     md << L"# What the findings mean\n\n";
     md << L"Generated from the check catalog of " << PHANTOMRECON_NAME_W << L" " << PHANTOMRECON_VERSION_W
-       << L". Do not edit by hand; run `PhantomRecon.exe --findings-md docs/FINDINGS.md` instead.\n\n";
+       << L". Do not edit by hand; run `PhantomReconCli.exe --findings-md docs/FINDINGS.md` instead.\n\n";
     md << L"Each check below says what it looks at, why it matters, how to fix it and how to undo the fix. "
        << L"Commands marked elevated need a PowerShell or Command Prompt opened with Run as administrator.\n\n";
     md << L"Severity drives the hardening score: Critical counts 10, High 6, Medium 3, Low 1.\n\n";

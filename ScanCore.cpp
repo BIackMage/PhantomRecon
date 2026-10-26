@@ -80,8 +80,10 @@ bool IsExcluded(const std::wstring& path, bool isDirectory, const ScanOptions& o
         return false;
     }
     std::wstring lower = ToLowerW(path);
+    // A trailing slash on files too, so "C:\x\tool.exe" (stored as "c:\x\tool.exe\")
+    // excludes that one file and a bare name such as "tool.exe" matches it as well.
     std::wstring withSlash = lower;
-    if (isDirectory && !withSlash.empty() && withSlash.back() != L'\\') withSlash += L'\\';
+    if (!withSlash.empty() && withSlash.back() != L'\\') withSlash += L'\\';
 
     for (const std::wstring& prefix : options.excludePathPrefixes) {
         if (withSlash.rfind(prefix, 0) == 0) return true;

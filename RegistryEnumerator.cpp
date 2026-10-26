@@ -60,7 +60,7 @@ std::wstring RegistryEnumerator::ReadRegString(HKEY hKey, const wchar_t* valueNa
 }
 
 // ---------------------------------------------------------------------------
-// EnumerateUninstallKey — read all subkeys under one Uninstall registry path
+// EnumerateUninstallKey - read all subkeys under one Uninstall registry path
 // ---------------------------------------------------------------------------
 void RegistryEnumerator::EnumerateUninstallKey(HKEY hRoot, const wchar_t* subKeyPath,
     std::vector<InstalledProgram>& out)
@@ -125,7 +125,7 @@ void RegistryEnumerator::EnumerateUninstallKey(HKEY hRoot, const wchar_t* subKey
 }
 
 // ---------------------------------------------------------------------------
-// EnumerateInstalledPrograms — check all three standard registry locations
+// EnumerateInstalledPrograms - check all three standard registry locations
 // ---------------------------------------------------------------------------
 std::vector<InstalledProgram> RegistryEnumerator::EnumerateInstalledPrograms()
 {
@@ -151,7 +151,7 @@ std::vector<InstalledProgram> RegistryEnumerator::EnumerateInstalledPrograms()
 }
 
 // ---------------------------------------------------------------------------
-// FindExecutablesInDirectory — recursive search with depth limit
+// FindExecutablesInDirectory - recursive search with depth limit
 // ---------------------------------------------------------------------------
 void RegistryEnumerator::FindExecutablesInDirectory(const std::wstring& directory,
     std::vector<std::wstring>& out, int maxDepth)
@@ -216,7 +216,7 @@ void RegistryEnumerator::FindExecutablesInDirectory(const std::wstring& director
 }
 
 // ---------------------------------------------------------------------------
-// GetExecutablePathsFromPrograms — extract executables from install locations
+// GetExecutablePathsFromPrograms - extract executables from install locations
 // ---------------------------------------------------------------------------
 std::vector<std::wstring> RegistryEnumerator::GetExecutablePathsFromPrograms(
     const std::vector<InstalledProgram>& programs, int maxDepth)

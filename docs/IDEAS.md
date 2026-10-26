@@ -1,269 +1,98 @@
-# Ideas: what Phantom Recon could do next
+# Ideas: what is built and what is left
 
-Written 2026-10-25, after the architecture refactor. Nothing here is built yet. Each item
-says who it helps, what it would take, and roughly how big it is (S: an evening, M: a
-weekend, L: a week or more). The tool stays defensive, offline-first and single-exe. Nothing
-in this list acts on another machine or sends data anywhere without asking.
+The idea list was written on 2026-10-25, after the architecture refactor. Version 1.0.0
+(2026-10-26) built nearly all of it. Each item below says what shipped, and for anything
+not built, why.
 
-The five I would do first are marked with a star.
+The tool stays defensive, offline-first and portable. Nothing here acts on another
+machine, reads another program's memory, or sends data anywhere without asking.
+
+Status words: **Done**, **Partly** (what is missing is named), **Not doing** (with the
+reason).
 
 ---
 
 ## 1. Make the results useful to a normal person
 
-**1.1 Plain-English HTML report** (star, M)
-After the audit and after a scan, write `phantom_recon_report.html` next to the CSV. One
-page. A traffic-light summary at the top (how many FAIL, WARN, PASS), then one card per
-finding in plain words: what it is, why it matters, what to do. Sortable tables for the
-scan rows. Embedded CSS, no external files, opens in any browser, prints to PDF. This is
-the thing a home user or a small-business owner can actually read, and the thing a
-consultant hands to a client.
+| # | Idea | Status |
+|---|------|--------|
+| 1.1 | Plain-English HTML report | **Done.** Reports > Save HTML Report, or `--report`. One self-contained page, light and dark, prints well. |
+| 1.2 | Fix guidance per finding | **Done.** Every check carries the fix and the undo. Copy buttons in the HTML report and in the findings window (F6). The tool never runs a fix itself. |
+| 1.3 | Built-in explanations, no AI needed | **Done.** Double-click a result row for every field and a plain explanation of each finding code. |
+| 1.4 | Guided first run | **Done.** Getting Started window with a "show at startup" box and a Create Sample Pack button. |
+| 1.5 | Hardening score | **Done.** 0 to 100, shown large on the main window. Weights: Critical 10, High 6, Medium 3, Low 1; a warning earns half. |
+| 1.6 | Weekly drift check | **Done.** Scans > Weekly Fast Scan, or `--schedule-weekly`. One visible user-level task, removable the same way, with a desktop notification. |
+| 1.7 | Portable mode | **Done.** USB drive, `--portable` or `portable.flag`. |
 
-**1.2 Fix guidance per finding** (star, M)
-Every FAIL or WARN gets a "how to fix" block: the exact PowerShell or registry command,
-what it changes, and the command to undo it. Copy button in the HTML report. The tool does
-not run the fix itself. People learn more when they run it, and the tool stays safe to
-hand to anyone. Fix text lives in a table next to the check (see 5.3) so docs and report
-come from one source.
+## 2. See more (checks and analysis)
 
-**1.3 Built-in explanations, no AI needed** (star, S)
-Most users will not have a local LLM running. Add an "Explain" action on a results row and
-on each audit finding that shows a fixed, written explanation from a table in the code.
-The AI sidebar stays as the optional deeper layer.
-
-**1.4 Guided first run** (S)
-On first launch, a short panel: "1. Run the audit (already done). 2. Take a baseline of
-Program Files on a day you trust the machine. 3. Come back next week and run Fast Scan."
-Three buttons. Hide it once a baseline exists.
-
-**1.5 Hardening score** (S)
-Turn the audit into a 0 to 100 score with a short label. Show it big on the left panel.
-Run audit, fix two things, run again, watch it go up. This is the hook for the video.
-
-**1.6 Weekly drift check** (M)
-A menu item that registers a Task Scheduler entry (user-level, visible, removable from the
-same menu) to run a Fast Scan once a week and write the HTML report. Toast on NEW or
-CHANGED. Everything stays local. Needs the headless mode in 4.1.
-
-**1.7 Portable mode** (S)
-Flag or auto-detect "running from removable media": write every output next to the exe,
-touch nothing on the host. For auditing a machine you do not own and do not want to leave
-traces on.
-
----
-
-## 2. See more (new checks and analysis)
-
-These are the parts of the roadmap that most help ordinary Windows users, ordered by
-value for effort.
-
-**2.1 Windows Defender state** (star, M)
-Real-time protection on, tamper protection on, cloud-delivered protection on, SmartScreen
-on, Controlled Folder Access, Attack Surface Reduction rule state, and most important the
-exclusion list. Attackers add exclusions; nobody looks at them. Read through WMI
-`root\Microsoft\Windows\Defender` or the policy registry keys. Huge value, every PC has it.
-
-**2.2 Persistence sweep** (star, L)
-The Autoruns idea done as checks: Run and RunOnce (have), Winlogon Shell and Userinit,
-Image File Execution Options debuggers, AppInit_DLLs, WMI event subscriptions, LSA
-authentication and notification packages, print monitors, Explorer shell extensions,
-Office add-ins, browser extensions, services whose binary is unsigned or outside Program
-Files and Windows. Every hit shows the binary with its signature and score, and gets
-compared to the baseline so a new persistence entry shows as NEW.
-
-**2.3 Core hardening checks that are missing** (M)
-BitLocker per volume, TPM present, Secure Boot on, UAC level, LSA protection (RunAsPPL),
-RDP enabled and whether NLA is required, SMBv1 enabled, WinRM listeners, Remote Registry
-running, Guest account enabled, AutoPlay, Windows Script Host enabled, PowerShell v2
-engine present, Print Spooler on a machine that has no printer, macro settings. Each one
-is a few registry reads or one API call. Together they are what a CIS Level 1 pass looks
-like for a home or small business PC.
-
-**2.4 Local accounts and password policy** (M)
-NetUserEnum for accounts, enabled state, last logon, password age; NetUserModalsGet for
-minimum length, lockout threshold, maximum age; whether the built-in Administrator was
-renamed and whether Guest and DefaultAccount are disabled. On the roadmap already (1.5).
-
-**2.5 Scheduled tasks done properly** (M)
-Use the Task Scheduler COM API instead of reading the Tasks folder. Walk nested folders,
-read actions, triggers and run-as. Flag actions in temp or user-writable paths, tasks that
-run as SYSTEM but were created by a user, and tasks pointing at missing binaries.
-
-**2.6 Real audit policy** (S)
-`AuditQuerySystemPolicy` per subcategory instead of the registry proxies. Say which of
-logon, process creation, object access and privilege use are actually auditing.
-
-**2.7 Mark of the Web and alternate data streams** (S)
-Read `Zone.Identifier` on every executable: zone, referrer, host URL. Flag internet-sourced
-unsigned executables. Flag an executable in Downloads with no MOTW at all (stripped).
-Enumerate other named streams and flag executable content inside them.
-
-**2.8 PE header anomalies** (M)
-Compile timestamp in the future or zeroed, checksum mismatch, TLS callbacks present,
-overlay data after the last section with its entropy, PDB path with a user name or words
-like payload or inject. All static, all cheap, all already parsed halfway in
-MalwareScoring.
-
-**2.9 Script analysis** (M)
-For .ps1, .bat, .cmd, .vbs, .js, .hta: encoded command flags, Invoke-Expression, download
-cradles, base64 blobs over 100 chars, char-code building, certutil decode, bitsadmin
-transfer, mshta and regsvr32 patterns. Produces a script risk score that feeds the composite.
-
-**2.10 Running processes against the baseline** (L)
-Snapshot running processes. For each image: is it in the baseline, did its hash change, is
-it running from a user-writable or network path, does its name match a system binary but
-its path does not. Then per process: any executable private memory region (RWX, no file
-behind it) in a process that is not a known JIT host. This is the single most useful live
-check and it needs no driver.
-
-**2.11 Network exposure snapshot** (M)
-Listening TCP and UDP ports mapped to owning process, with that binary's signature and
-score, plus the firewall rules that allow inbound to it. "Unsigned binary listening on
-port 4444" is a finding anyone understands.
-
-**2.12 Certificate store audit** (S)
-Enumerate trusted root CAs on the machine and compare to the known-good list the tool
-already carries. Corporate proxies and some malware install their own roots. Flag anything
-unexpected with its thumbprint and install date.
-
-**2.13 DNS and hosts hygiene** (S)
-Hosts file entries that redirect well-known domains, DNS servers set statically that differ
-from DHCP, DNS over HTTPS state. Cheap and catches real tampering.
-
-**2.14 Outdated software table** (M)
-Ship a small, hand-curated table of "known vulnerable below version X" for the twenty most
-installed desktop apps (browsers, Java, 7-Zip, Adobe Reader, VLC, Zoom, Notepad++). Fast
-Scan already has the versions. Offline. Optional online NVD lookup later, opt-in.
-
-**2.15 Revocation checking** (M)
-CRL and OCSP for signed binaries, cached per thumbprint, "unknown" when offline. Roadmap 1.1.
-
-**2.16 Known-good lists to kill false NEWs** (L)
-After Patch Tuesday a Full Scan lights up with hundreds of NEW and CHANGED system files.
-Check Windows files against the catalog store (CatRoot) membership and an optional local
-NSRL subset. Mark "changed by a Microsoft catalog-signed update" separately from "changed
-by something else".
-
-**2.17 Baseline diff tool** (S)
-File > Compare Two Baselines: open two .prbl files, show added, removed and changed
-entries. Answers "what did that update change" without rescanning.
-
-**2.18 Fuzzy hashes** (M)
-Import hash now (it is just MD5 of the ordered import list). ssdeep and TLSH later. Lets
-CHANGED be split into "small patch" versus "replaced with something else", and lets a
-local list of bad hashes match variants.
-
-**2.19 DLL search order hijack check** (M)
-For every service and every running process, walk the DLL search order and flag a
-user-writable directory that comes before the real DLL. Roadmap 1.5.
-
-**2.20 GPP cpassword** (S)
-Domain-joined only. Search SYSVOL for the six XML files with cpassword attributes and
-report the file path. The key is public (MS14-025) so decrypting is fine, but reporting the
-location is enough for a defender.
-
----
+| # | Idea | Status |
+|---|------|--------|
+| 2.1 | Microsoft Defender state | **Done.** Eight checks, exclusions included. Steps aside correctly when another antivirus is active. |
+| 2.2 | Persistence sweep | **Done.** 13 kinds of autostart location, a snapshot so new entries stand out, and a cross-check with the baseline for folders it covers. |
+| 2.3 | Core hardening checks | **Done.** BitLocker, TPM, Secure Boot, UAC, LSA protection, RDP and NLA, SMBv1, WinRM, Remote Registry, Guest, AutoPlay, Windows Script Host, PowerShell 2.0, Print Spooler, Office macros. |
+| 2.4 | Local accounts and password policy | **Done.** |
+| 2.5 | Scheduled tasks through the Task Scheduler API | **Done.** Nested folders, actions, run-as, missing programs, user-writable paths. |
+| 2.6 | Real audit policy | **Done.** `AuditQuerySystemPolicy` per subcategory. |
+| 2.7 | Mark of the Web and alternate data streams | **Done.** |
+| 2.8 | Program header anomalies | **Done.** Timestamps, checksum, TLS callbacks, appended data and its entropy, debug paths, section oddities. Reproducible builds are recognised so their hash-like timestamps are not flagged. |
+| 2.9 | Script analysis | **Done.** PowerShell, batch, VBScript, JScript, HTA and WSF, with per-language rules. |
+| 2.10 | Running programs against the baseline | **Done** for what can be seen from outside a process: name and folder mismatches, wrong parent, Office starting a shell, drop folders, signatures, baseline hash. **Not doing:** looking inside other processes' memory. Phantom Recon never reads another program's memory. |
+| 2.11 | Network exposure snapshot | **Done.** Listening ports with the owning program and its signature, plus the firewall state. |
+| 2.12 | Trusted root certificates | **Done.** Compared with Microsoft's root program list that Windows keeps up to date. Roots pushed by Group Policy are listed, not flagged. |
+| 2.13 | DNS and hosts hygiene | **Done.** |
+| 2.14 | Outdated software table | **Done.** A reviewed built-in table, plus your own rules in a text file. Offline. |
+| 2.15 | Revocation checking | **Done.** Off, Windows cache only (default), or online; answers cached for a day. Never online in portable mode. |
+| 2.16 | Known-good lists | **Done.** Windows catalog signatures, UPDATED for Microsoft-signed changes, KNOWN for hashes in `known_good_sha256.txt` (any hash list works, an NSRL subset included). |
+| 2.17 | Baseline diff | **Done.** File > Compare Two Baselines, or `--diff`. |
+| 2.18 | Fuzzy hashes | **Partly.** Import hash and ssdeep are done and feed CHANGED details ("small patch" against "replaced"). TLSH is not: a correct implementation needs its reference tables, and a homemade one would produce hashes no other tool can compare with. |
+| 2.19 | DLL search order | **Partly.** Service folders and system PATH folders that normal users can write to are found. Walking each running program's own search order is not done. |
+| 2.20 | Group Policy Preference passwords | **Done.** Reports the file location only. |
 
 ## 3. Output and interoperability
 
-**3.1 JSON export** (S)
-Versioned schema. One file per run: host facts, audit findings, scan rows. This is what
-lets other people build on the tool without parsing CSV.
-
-**3.2 MITRE ATT&CK tags on every finding** (M)
-Add a technique id field to `SecurityCheckResult`, `SuspiciousImport` and the packing
-result. Carry it into the CSV, JSON and HTML. Export an ATT&CK Navigator layer. The
-roadmap has the full mapping table written out already (4.4).
-
-**3.3 CIS Benchmark mapping for the checks we have** (M)
-Only the controls the tool actually tests, mapped to the Windows 11 Level 1 benchmark ids.
-Honest coverage number in the report. Do not claim a full benchmark.
-
-**3.4 Signed releases** (S)
-Build in GitHub Actions, sign with a free open-source code-signing service, publish the
-SHA-256 in the release notes, add a winget manifest. A security tool that is itself
-unsigned looks wrong in its own results list.
-
----
+| # | Idea | Status |
+|---|------|--------|
+| 3.1 | JSON export | **Done.** Schema `phantomrecon.report/1`. |
+| 3.2 | MITRE ATT&CK tags and a Navigator layer | **Done.** On checks, imports, packing, header, origin and script findings. |
+| 3.3 | CIS mapping | **Done** for CIS Controls v8, plus the CIS Windows Benchmark recommendation title where one matches. The tool does not claim a full benchmark. |
+| 3.4 | Signed releases | **Partly.** GitHub Actions builds, tests and publishes the zip with its SHA-256; `tools/make_winget_manifest.py` writes a winget manifest that passes `winget validate`. Code signing is not done: it needs a certificate this project does not have. |
 
 ## 4. Ways to run it
 
-**4.1 Headless command line** (star, M)
-`PhantomRecon.exe --audit --report out.html`, `--baseline C:\ --out base.prbl`,
-`--fast --baseline base.prbl --report out.html`. No window. Exit code reflects findings.
-This is what makes 1.6 (scheduled check) possible, what an MSP can push through an RMM,
-and what a CI job can run against a golden image. The engine is already separate from the
-UI after the refactor, so this is mostly a second entry point.
-
-**4.2 Determinate progress** (S)
-Pre-count files on the chosen root (fast, directory metadata only), set the progress range,
-show percent and files per second. Roadmap 1.6.
-
-**4.3 Results list: sort, filter, detail** (M)
-Click a header to sort. A filter strip: show only NEW, CHANGED, MISSING, score above N.
-Double-click a row for a detail window with every field and the explanation from 1.3.
-
-**4.4 Scan settings** (S)
-Exclusions (paths and extensions), default scan root, active baseline path, output folder.
-Settings dialog grows a second tab.
-
-**4.5 Light theme and system theme** (S)
-Follow the Windows app theme setting. The palette is already in one place.
-
----
+| # | Idea | Status |
+|---|------|--------|
+| 4.1 | Headless command line | **Done.** `PhantomReconCli.exe`, exit codes 0, 1 and 2. |
+| 4.2 | Determinate progress | **Done.** Files are counted first; the bar and the label show the percentage. |
+| 4.3 | Results list: sort, filter, detail | **Done.** Click a header to sort, a filter list, a search box, a detail window, a right-click menu. Handles any number of rows. |
+| 4.4 | Scan settings | **Done.** Exclusions, default folder, baseline file, reports folder, revocation, Fast Scan depth, fuzzy hashing. |
+| 4.5 | Light theme and system theme | **Done.** Follow Windows, dark or light; follows Windows live when it changes. |
 
 ## 5. Engineering
 
-**5.1 Test harness** (star, M)
-A second project, `PhantomRecon.Tests`, console exe, no framework needed. Build fixture
-binaries at test time (a tiny PE with known imports via the compiler, a UPX-packed copy, an
-unsigned copy, a self-signed copy). Assert scores, packer detection, CSV round trip, PRBL
-round trip, comparison statuses, `IsExecutableExtension`, `IsLoopbackEndpoint`. The GUI
-stays untested; the engine stops being untested.
-
-**5.2 GitHub Actions** (S)
-`windows-latest`, build Debug and Release, run 5.1, upload the exe as an artifact on every
-push. A green badge on the README is worth a lot of trust for a security tool.
-
-**5.3 Self-describing checks** (M)
-Each check carries id, title, severity, ATT&CK id, CIS id, plain explanation, fix text and
-undo text in one struct. The report, the docs page and the explanations in 1.3 all generate
-from that table. Adding a check becomes adding one row and one function.
-
-**5.4 Long path support** (S)
-`\\?\` prefix on every file open so paths past 260 characters hash and sign-check instead
-of silently failing. Common in node_modules and build trees.
-
-**5.5 Redaction before sending to the AI** (S)
-Replace `C:\Users\<name>` with `C:\Users\<user>` and the hostname with `<host>` before a
-prompt leaves the process, even to localhost. Cap prompt size and chunk the audit text.
-
----
+| # | Idea | Status |
+|---|------|--------|
+| 5.1 | Test harness | **Done.** `PhantomReconTests.exe`, no framework. Builds its fixtures at run time. |
+| 5.2 | GitHub Actions | **Done.** Build with warnings as errors, tests, a command-line smoke test, release on tags. |
+| 5.3 | Self-describing checks | **Done.** One catalog row per check feeds the audit text, the HTML report, the findings window, the score and `docs/FINDINGS.md`. Tests make sure every row has a check and every check has a row. |
+| 5.4 | Long path support | **Done.** |
+| 5.5 | Redaction before sending to the AI | **Done.** User, computer and domain names are hidden; long text is sent in parts. |
 
 ## 6. For the video and the community
 
-**6.1 Sample data pack** (S)
-A folder of harmless fixture files that trigger each finding type (an unsigned exe, a
-UPX-packed exe, a .bat with an encoded PowerShell line, a file with a Zone.Identifier
-stream) so viewers can see every row colour without touching anything dangerous.
-
-**6.2 Demo baseline** (S)
-A `.prbl` of a clean Windows 11 Program Files tree so a new user can run Fast Scan on
-minute one and see MATCH rows before they make their own baseline.
-
-**6.3 One-page "what the findings mean"** (S)
-`docs/FINDINGS.md`: every audit check in plain words with the fix. Doubles as the script
-source for the video and the content for 1.2.
+| # | Idea | Status |
+|---|------|--------|
+| 6.1 | Sample data pack | **Done.** Help > Create Sample Pack, `--make-samples`, or `PhantomRecon.exe --samples <folder>`. Tiny programs whose only code is "return". It contains no packed or malware-like programs on purpose; `odd_headers.exe` shows the header findings instead. |
+| 6.2 | Demo baseline | **Done differently.** The demo baseline belongs to the sample pack. A baseline of one person's Program Files would be wrong on every other PC. |
+| 6.3 | One page of what the findings mean | **Done.** [FINDINGS.md](FINDINGS.md), generated from the catalog. |
 
 ---
 
-## Suggested order
+## Left to do, in order
 
-1. 5.1 test harness and 5.2 CI, because everything after this changes scoring code.
-2. 5.3 self-describing checks, because 1.1, 1.2, 1.3 and 3.2 all read from it.
-3. 2.1 Defender state and 2.3 core hardening checks, because they are the findings a home
-   user cares about most and they are cheap.
-4. 1.1 HTML report with 1.2 fix guidance and 1.5 score. This is the video.
-5. 4.1 headless mode, then 1.6 weekly check.
-6. 2.2 persistence sweep and 2.10 running processes. The big detection wins.
-7. Everything else as demand shows up in issues.
+1. Walk each running program's DLL search order (rest of 2.19).
+2. Code-sign the releases if a free signing service for open-source projects accepts a
+   noncommercial license (rest of 3.4).
+3. TLSH, if a correct, compatible implementation can be added without outside libraries
+   (rest of 2.18).
+4. Anything people ask for in issues, inside the defensive scope.

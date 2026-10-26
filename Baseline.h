@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,10 @@ public:
 
     // Every entry, in no particular order.
     std::vector<const BaselineEntry*> AllEntries() const;
+
+    // True when the baseline holds at least one file from the folder that path is
+    // in. "Not in the baseline" only means something for folders it recorded.
+    bool CoversFolderOf(const std::wstring& path) const;
 
     bool SaveToFile(const std::wstring& filePath) const;
     // Write an older format version (tests use this to prove upgrades work).
@@ -70,10 +75,13 @@ private:
     };
 
     std::unordered_map<std::wstring, InternalEntry> m_entries;
+    std::unordered_set<std::wstring>                m_folders;   // normalized folders of every entry
     uint64_t m_creationTime;
     uint32_t m_loadedVersion = 0;
 
     static const char BASELINE_MAGIC[4];
+
+    static std::wstring FolderKey(const std::wstring& normalizedPath);
 };
 
 // True when the entry is validly signed by Microsoft (embedded or catalog).

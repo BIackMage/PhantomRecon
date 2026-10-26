@@ -2,9 +2,12 @@
 #include "AiSidebar.h"
 
 #include "AppMessages.h"
-#include "DarkMode.h"
+#include "DetailText.h"
 #include "LLMClient.h"
+#include "Redactor.h"
 #include "StringConv.h"
+#include "TextUtils.h"
+#include "Theme.h"
 
 #include <memory>
 #include <sstream>
@@ -48,7 +51,7 @@ void RegisterAiSidebarClass(HINSTANCE hInst)
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = AiPanelWndProc;
     wc.hInstance = hInst;
-    wc.hbrBackground = CreateSolidBrush(DarkColors::Background);
+    wc.hbrBackground = NULL;   // WM_ERASEBKGND paints the theme colour
     wc.lpszClassName = AI_PANEL_CLASS;
     wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
     RegisterClassExW(&wc);
@@ -117,7 +120,7 @@ static void RunLlmRequest(AiSidebarState& state, const std::vector<LLMMessage>& 
             payload->statusText = L"  Error";
         }
         else {
-            payload->chatText = successPrefix + Utf8ToWide(response) + L"\r\n";
+            payload->chatText = successPrefix + ToWindowsLineEnds(Utf8ToWide(response)) + L"\r\n";
             payload->statusText = L"  Ready";
         }
         PostPayload(hPanel, WM_APP_AI_RESPONSE, payload);
@@ -318,15 +321,17 @@ static LRESULT CALLBACK AiPanelWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
         return 0;
     }
 
-    case WM_CTLCOLORSTATIC: {
-        HDC hdc = reinterpret_cast<HDC>(wParam);
-        SetTextColor(hdc, DarkColors::TextPrimary);
-        SetBkColor(hdc, DarkColors::Background);
-        return reinterpret_cast<LRESULT>(GetDarkBackgroundBrush());
-    }
+    case WM_CTLCOLORSTATIC:
+        return reinterpret_cast<LRESULT>(ThemeCtlColorStatic(reinterpret_cast<HDC>(wParam)));
 
     case WM_CTLCOLOREDIT:
-        return reinterpret_cast<LRESULT>(HandleDarkCtlColorEdit(reinterpret_cast<HDC>(wParam)));
+        return reinterpret_cast<LRESULT>(ThemeCtlColorEdit(reinterpret_cast<HDC>(wParam)));
+
+    case WM_CTLCOLORBTN:
+        return reinterpret_cast<LRESULT>(ThemeCtlColorButton(reinterpret_cast<HDC>(wParam)));
+
+    case WM_ERASEBKGND:
+        return ThemeEraseBackground(reinterpret_cast<HDC>(wParam), hWnd);
     }
 
     return DefWindowProcW(hWnd, msg, wParam, lParam);
@@ -463,54 +468,103 @@ void SendUserMessage(AiSidebarState& state, const std::wstring& message)
     RunLlmRequest(state, messages, L"\r\n[AI]: ");
 }
 
-void TriageSelectedFile(AiSidebarState& state, const BaselineEntry& entry)
+void TriageSelectedFile(AiSidebarState& state, const ScanRow& row)
 {
     if (!ConfirmSendAllowed(state)) return;
 
-    DebugLog((L"Triaging file: " + entry.path).c_str());
+    DebugLog((L"Triaging file: " + row.entry.path).c_str());
 
-    AppendToChatDisplay(state, L"\r\n[Triage]: Analyzing " + entry.path + L"...\r\n");
+    AppendToChatDisplay(state, L"\r\n[Triage]: Looking at " + row.entry.path + L"...\r\n");
     SetAiStatusText(state, L"  Analyzing file...");
 
-    std::string prompt = BuildTriagePrompt(entry.path, entry.malwareScore,
-        entry.signature, entry.packingStatus, entry.suspiciousImports,
-        entry.sigWarnings, entry.packIndicators, entry.entropy);
+    // The short legacy prompt plus every field the scan recorded, so the model
+    // sees the same facts as the detail window.
+    std::string prompt = BuildTriagePrompt(row.entry.path, row.entry.malwareScore,
+        row.entry.signature, row.entry.packingStatus, row.entry.suspiciousImports,
+        row.entry.sigWarnings, row.entry.packIndicators, row.entry.entropy);
+    prompt += "\n\nEverything the scan recorded about this file:\n" + WideToUtf8(BuildRowDetailText(row));
 
     std::vector<LLMMessage> messages = {
-        { "system", "You are a cybersecurity threat analyst assistant. "
-          "Analyze the following file scan result and provide a detailed threat assessment. "
-          "Be technical, concise, and actionable." },
+        { "system", "You help a defender decide whether a file on their own Windows PC needs attention. "
+          "Explain what the findings mean in plain words, say how worried to be, and list safe next steps "
+          "such as checking the vendor's published hash. Do not guess beyond the facts given." },
         { "user", prompt }
     };
     RunLlmRequest(state, messages, L"\r\n[AI Triage]:\r\n");
 }
 
-void RequestScanSummary(AiSidebarState& state, int filesProcessed, int executablesFound)
+void RequestScanSummary(AiSidebarState& state, const ScanSummary& summary, const std::wstring& title)
 {
     if (!ConfirmSendAllowed(state)) return;
 
-    AppendToChatDisplay(state, L"\r\n[Summary]: Generating scan summary...\r\n");
+    AppendToChatDisplay(state, L"\r\n[Summary]: Summarising " + (title.empty() ? std::wstring(L"the last scan") : title) + L"...\r\n");
     SetAiStatusText(state, L"  Analyzing scan...");
 
-    std::string prompt = BuildScanSummaryPrompt(filesProcessed, executablesFound, 0, 0, 0, 0);
+    std::string prompt = BuildScanSummaryPrompt(summary.filesProcessed, summary.executables,
+        summary.highRisk, summary.added, summary.changed, summary.missing);
+    prompt += "\nAlso: " + std::to_string(summary.updated) + " files changed by signed Microsoft updates, " +
+              std::to_string(summary.known) + " new files on the known-good list, " +
+              std::to_string(summary.match) + " unchanged. Scan type: " + WideToUtf8(ScanModeName(summary.mode)) +
+              (summary.cancelled ? " (cancelled, results are partial)." : ".");
     std::vector<LLMMessage> messages = {
-        { "system", "You are a cybersecurity analyst. Analyze scan results concisely." },
+        { "system", "You help a defender read the results of a file integrity scan of their own Windows PC. "
+          "Be concise. Say what deserves a look first and why." },
         { "user", prompt }
     };
     RunLlmRequest(state, messages, L"\r\n[AI Summary]:\r\n");
 }
 
-void RequestAuditAnalysis(AiSidebarState& state, const std::wstring& auditText)
+void RequestAuditAnalysis(AiSidebarState& state, const std::vector<SecurityCheckResult>& results, size_t maxPartChars)
 {
+    if (results.empty()) {
+        AppendToChatDisplay(state, L"\r\n[Info]: The security audit has not finished yet. Press F5 to run it.\r\n");
+        return;
+    }
     if (!ConfirmSendAllowed(state)) return;
+    if (!state.worker) {
+        AppendToChatDisplay(state, L"\r\n[AI Error]: background worker not available.\r\n");
+        return;
+    }
 
-    AppendToChatDisplay(state, L"\r\n[Audit]: Analyzing security audit...\r\n");
+    // Leave room for the instructions that go with each part.
+    size_t partChars = maxPartChars > 2000 ? maxPartChars - 1000 : 1000;
+    std::vector<std::wstring> parts = SplitIntoParts(BuildAuditFindingsText(results), partChars);
+    AppendToChatDisplay(state, L"\r\n[Audit]: Sending the audit findings in " + std::to_wstring(parts.size()) +
+                               (parts.size() == 1 ? L" part" : L" parts") + L"...\r\n");
     SetAiStatusText(state, L"  Analyzing audit...");
+    DebugLog((L"Audit analysis: " + std::to_wstring(parts.size()) + L" part(s)").c_str());
 
-    std::string prompt = BuildSecurityAuditPrompt(WideToUtf8(auditText));
-    std::vector<LLMMessage> messages = {
-        { "system", "You are a cybersecurity analyst. Analyze this audit report." },
-        { "user", prompt }
-    };
-    RunLlmRequest(state, messages, L"\r\n[AI Audit Analysis]:\r\n");
+    HWND hPanel = state.hPanel;
+    state.worker->Run([hPanel, parts]() {
+        for (size_t i = 0; i < parts.size(); ++i) {
+            std::string header = parts.size() == 1 ? std::string("Here are the findings.\n\n")
+                : "This is part " + std::to_string(i + 1) + " of " + std::to_string(parts.size()) +
+                  " of the findings. Answer for this part only.\n\n";
+            std::vector<LLMMessage> messages = {
+                { "system", "You help a defender harden their own Windows PC. For each finding, explain the risk "
+                  "in plain words and the order to fix things in, most important first. Keep each item short." },
+                { "user", header + BuildSecurityAuditPrompt(WideToUtf8(parts[i])) }
+            };
+            std::string response = GetLLMClient().SendChatCompletion(messages);
+
+            AiResponsePayload* payload = new AiResponsePayload();
+            std::wstring label = parts.size() == 1 ? L"\r\n[AI Audit Analysis]:\r\n"
+                : L"\r\n[AI Audit Analysis, part " + std::to_wstring(i + 1) + L" of " + std::to_wstring(parts.size()) + L"]:\r\n";
+            if (response.empty()) {
+                payload->chatText = L"\r\n[AI Error]: " + Utf8ToWide(GetLLMClient().GetLastError()) + L"\r\n";
+                payload->statusText = L"  Error";
+                PostPayload(hPanel, WM_APP_AI_RESPONSE, payload);
+                return;
+            }
+            payload->chatText = label + ToWindowsLineEnds(Utf8ToWide(response)) + L"\r\n";
+            payload->statusText = (i + 1 == parts.size()) ? L"  Ready" : L"  Analyzing audit...";
+            PostPayload(hPanel, WM_APP_AI_RESPONSE, payload);
+        }
+    });
+}
+
+void ApplyThemeToAiSidebar(AiSidebarState& state)
+{
+    if (state.hPanel) ApplyThemeToWindowTree(state.hPanel);
+    if (state.hToggleTab) ApplyThemeToControl(state.hToggleTab);
 }

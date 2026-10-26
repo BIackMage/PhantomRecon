@@ -172,6 +172,7 @@ static double CharEntropy(const std::wstring& s)
 ScriptAnalysisResult AnalyzeScriptText(const std::wstring& original, const std::wstring& ext)
 {
     ScriptAnalysisResult result;
+    if (!IsScriptExtension(ext)) return result;   // analyzed stays false, as the header promises
     result.analyzed = true;
     unsigned lang = LanguageOf(ext);
 

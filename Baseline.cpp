@@ -43,14 +43,12 @@ Baseline::Baseline()
 }
 
 // ---------------------------------------------------------------------------
-// NormalizePath — lowercase + collapse double backslashes
+// NormalizePath - lowercase + collapse double backslashes
 // ---------------------------------------------------------------------------
 std::wstring Baseline::NormalizePath(const std::wstring& path)
 {
-    std::wstring norm = path;
-
-    // Lowercase
-    std::transform(norm.begin(), norm.end(), norm.begin(), ::towlower);
+    // Lowercase (Unicode-aware, so accented folder names match in any case)
+    std::wstring norm = ToLowerW(path);
 
     // Collapse double backslashes
     size_t pos = norm.find(L"\\\\");
@@ -68,7 +66,7 @@ std::wstring Baseline::NormalizePath(const std::wstring& path)
 }
 
 // ---------------------------------------------------------------------------
-// WriteString — length-prefixed wstring into byte buffer
+// WriteString - length-prefixed wstring into byte buffer
 // Format: [uint32 charCount][charCount * wchar_t]
 // ---------------------------------------------------------------------------
 void Baseline::WriteString(std::vector<BYTE>& buffer, const std::wstring& str)
@@ -84,7 +82,7 @@ void Baseline::WriteString(std::vector<BYTE>& buffer, const std::wstring& str)
 }
 
 // ---------------------------------------------------------------------------
-// ReadString — read length-prefixed wstring from byte buffer at offset
+// ReadString - read length-prefixed wstring from byte buffer at offset
 // ---------------------------------------------------------------------------
 bool Baseline::ReadString(const std::vector<BYTE>& buffer, size_t& offset, std::wstring& out)
 {
@@ -97,7 +95,7 @@ bool Baseline::ReadString(const std::vector<BYTE>& buffer, size_t& offset, std::
     std::memcpy(&charCount, buffer.data() + offset, sizeof(uint32_t));
     offset += sizeof(uint32_t);
 
-    // Sanity check — no single string should be > 64KB chars
+    // Sanity check - no single string should be > 64KB chars
     if (charCount > 65536) {
         DebugLog(L"ReadString: implausible char count, possible corruption");
         return false;
@@ -130,8 +128,21 @@ void Baseline::AddEntry(const BaselineEntry& entry)
     ie.data = entry;
     ie.seen = false;
     m_entries[key] = std::move(ie);
+    m_folders.insert(FolderKey(key));
 
     DebugLog(L"AddEntry: " + key);
+}
+
+// Folder part of an already normalized path.
+std::wstring Baseline::FolderKey(const std::wstring& normalizedPath)
+{
+    size_t slash = normalizedPath.find_last_of(L'\\');
+    return slash == std::wstring::npos ? std::wstring() : normalizedPath.substr(0, slash);
+}
+
+bool Baseline::CoversFolderOf(const std::wstring& path) const
+{
+    return m_folders.count(FolderKey(NormalizePath(path))) > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +171,7 @@ void Baseline::MarkSeen(const std::wstring& path)
 }
 
 // ---------------------------------------------------------------------------
-// GetUnseenEntries — files in baseline but not found on disk
+// GetUnseenEntries - files in baseline but not found on disk
 // ---------------------------------------------------------------------------
 std::vector<const BaselineEntry*> Baseline::GetUnseenEntries() const
 {
@@ -195,6 +206,7 @@ size_t Baseline::Count() const
 void Baseline::Clear()
 {
     m_entries.clear();
+    m_folders.clear();
     m_creationTime = 0;
     m_loadedVersion = 0;
 }
@@ -695,7 +707,7 @@ static bool DeserializeEntry(const std::vector<BYTE>& buffer, size_t& offset, Ba
 }
 
 // ---------------------------------------------------------------------------
-// SaveToFile — binary format with PRBL magic + MD5 integrity footer
+// SaveToFile - binary format with PRBL magic + MD5 integrity footer
 // ---------------------------------------------------------------------------
 bool Baseline::SaveToFile(const std::wstring& filePath) const
 {
@@ -804,7 +816,7 @@ bool Baseline::SaveToFile(const std::wstring& filePath, uint32_t version) const
 }
 
 // ---------------------------------------------------------------------------
-// LoadFromFile — read binary PRBL file, verify MD5 integrity
+// LoadFromFile - read binary PRBL file, verify MD5 integrity
 // ---------------------------------------------------------------------------
 bool Baseline::LoadFromFile(const std::wstring& filePath)
 {
@@ -841,7 +853,7 @@ bool Baseline::LoadFromFile(const std::wstring& filePath)
     }
 
     if (std::memcmp(computedMD5, buffer.data() + dataLen, 16) != 0) {
-        DebugLog(L"LoadFromFile: MD5 integrity check FAILED — file is corrupted or tampered");
+        DebugLog(L"LoadFromFile: MD5 integrity check FAILED - file is corrupted or tampered");
         return false;
     }
     DebugLog(L"LoadFromFile: MD5 integrity check passed");
@@ -885,6 +897,7 @@ bool Baseline::LoadFromFile(const std::wstring& filePath)
 
     // Deserialize entries
     m_entries.clear();
+    m_folders.clear();
     m_loadedVersion = version;
     if (entryCount > 50000000ULL) {
         DebugLog(L"LoadFromFile: implausible entry count");
@@ -899,6 +912,7 @@ bool Baseline::LoadFromFile(const std::wstring& filePath)
             ss << L"LoadFromFile: failed to deserialize entry " << i << L" of " << entryCount;
             DebugLog(ss.str());
             m_entries.clear();
+            m_folders.clear();
             return false;
         }
 
@@ -907,6 +921,7 @@ bool Baseline::LoadFromFile(const std::wstring& filePath)
         ie.data = std::move(entry);
         ie.seen = false;
         m_entries[key] = std::move(ie);
+        m_folders.insert(FolderKey(key));
     }
 
     std::wstringstream ss;

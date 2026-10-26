@@ -137,6 +137,36 @@ std::string LLMClient::BuildRequestBody(const LLMConfig& config, const std::vect
 // ---------------------------------------------------------------------------
 // HttpPost: WinHTTP POST request
 // ---------------------------------------------------------------------------
+// Plain words for the WinHTTP errors people actually hit, with the code kept for support.
+static std::string WinHttpErrorText(const char* step, DWORD code)
+{
+    std::string text;
+    switch (code) {
+    case ERROR_WINHTTP_CANNOT_CONNECT:
+        text = "Could not connect to the AI server. Is it running? The address is in File > Settings > AI panel.";
+        break;
+    case ERROR_WINHTTP_TIMEOUT:
+        text = "The AI server did not answer in time.";
+        break;
+    case ERROR_WINHTTP_NAME_NOT_RESOLVED:
+        text = "The AI server's name could not be found. Check the address in File > Settings > AI panel.";
+        break;
+    case ERROR_WINHTTP_SECURE_FAILURE:
+        text = "The secure (HTTPS) connection to the AI server failed. Its certificate may be invalid.";
+        break;
+    case ERROR_WINHTTP_CONNECTION_ERROR:
+        text = "The connection to the AI server was closed before it answered.";
+        break;
+    case ERROR_WINHTTP_INVALID_SERVER_RESPONSE:
+        text = "The AI server sent an answer that is not valid HTTP.";
+        break;
+    default:
+        text = std::string(step) + " failed.";
+        break;
+    }
+    return text + " (WinHTTP error " + std::to_string(code) + ")";
+}
+
 std::string LLMClient::HttpPost(const std::wstring& url, const std::string& body)
 {
     DebugLog("HttpPost to: " + WideToUtf8(url));
@@ -161,7 +191,7 @@ std::string LLMClient::HttpPost(const std::wstring& url, const std::string& body
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) {
-        SetLastError("WinHttpOpen failed: " + std::to_string(::GetLastError()));
+        SetLastError(WinHttpErrorText("Starting the web client", ::GetLastError()));
         return "";
     }
 
@@ -170,7 +200,7 @@ std::string LLMClient::HttpPost(const std::wstring& url, const std::string& body
 
     HINTERNET hConnect = WinHttpConnect(hSession, hostName, urlComp.nPort, 0);
     if (!hConnect) {
-        SetLastError("WinHttpConnect failed: " + std::to_string(::GetLastError()));
+        SetLastError(WinHttpErrorText("Connecting", ::GetLastError()));
         WinHttpCloseHandle(hSession);
         return "";
     }
@@ -179,7 +209,7 @@ std::string LLMClient::HttpPost(const std::wstring& url, const std::string& body
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"POST", urlPath,
         NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
     if (!hRequest) {
-        SetLastError("WinHttpOpenRequest failed: " + std::to_string(::GetLastError()));
+        SetLastError(WinHttpErrorText("Preparing the request", ::GetLastError()));
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
         return "";
@@ -193,7 +223,7 @@ std::string LLMClient::HttpPost(const std::wstring& url, const std::string& body
         (LPVOID)body.c_str(), (DWORD)body.size(),
         (DWORD)body.size(), 0);
     if (!sendResult) {
-        SetLastError("WinHttpSendRequest failed: " + std::to_string(::GetLastError()));
+        SetLastError(WinHttpErrorText("Sending the request", ::GetLastError()));
         WinHttpCloseHandle(hRequest);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
@@ -201,7 +231,7 @@ std::string LLMClient::HttpPost(const std::wstring& url, const std::string& body
     }
 
     if (!WinHttpReceiveResponse(hRequest, NULL)) {
-        SetLastError("WinHttpReceiveResponse failed: " + std::to_string(::GetLastError()));
+        SetLastError(WinHttpErrorText("Reading the answer", ::GetLastError()));
         WinHttpCloseHandle(hRequest);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);

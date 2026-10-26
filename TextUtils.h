@@ -1,5 +1,6 @@
 #pragma once
 
+#include <windows.h>
 #include <algorithm>
 #include <cwctype>
 #include <string>
@@ -10,10 +11,25 @@
 // Header-only and side-effect free so tests can call them directly.
 // ---------------------------------------------------------------------------
 
+// Lowercase for comparisons. ASCII text takes a fast path; anything else goes
+// through Windows' invariant casing, so accented and non-Latin letters in paths
+// compare equal the way the file system treats them. (towlower in the C locale
+// only knows A to Z.)
 inline std::wstring ToLowerW(std::wstring s)
 {
-    std::transform(s.begin(), s.end(), s.begin(), [](wchar_t c) { return static_cast<wchar_t>(::towlower(c)); });
-    return s;
+    bool ascii = true;
+    for (wchar_t& c : s) {
+        if (c >= L'A' && c <= L'Z') c = static_cast<wchar_t>(c + (L'a' - L'A'));
+        else if (c >= 0x80) ascii = false;
+    }
+    if (ascii || s.empty()) return s;
+    int size = LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, s.c_str(), static_cast<int>(s.size()),
+        NULL, 0, NULL, NULL, 0);
+    if (size <= 0) return s;
+    std::wstring out(static_cast<size_t>(size), L'\0');
+    LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, s.c_str(), static_cast<int>(s.size()),
+        &out[0], size, NULL, NULL, 0);
+    return out;
 }
 
 inline std::string ToLowerA(std::string s)
