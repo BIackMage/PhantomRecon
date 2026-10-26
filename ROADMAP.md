@@ -7,8 +7,7 @@
 Remaining work to close Phase 1 and ship 1.0 standalone:
 
 1. ~~Fix the cancelled-scan partial save and bogus MISSING sweep (1.4)~~ — done 2026-08-29.
-2. Gate the AI sidebar behind an explicit send-consent prompt (1.7) — scan data with
-   user-bearing file paths currently leaves the host with no warning.
+2. ~~Gate the AI sidebar behind an explicit send-consent prompt (1.7)~~ done 2026-10-25.
 3. Certificate revocation checking, CRL/OCSP (1.1).
 4. Scoring config validation + hot-reload (1.2).
 5. GPP/cpassword, DLL search order hijacking, local account security checks (1.5).
@@ -376,9 +375,9 @@ slide-out sidebar that sends scan context to a networked model for analyst-facin
     - [x] Quick actions: Triage File, Scan Summary, Security Audit
 - [x] Default endpoint is `http://localhost:1234` (local only). LLMConfig in LLMClient.h is the single
       source of the default; AppSettings in SettingsDialog.h copies it, so the two cannot drift (2026-10-25).
-- [ ] Scan data leaves the machine to whatever endpoint is configured. No warning in the UI,
-      no opt-in gate, no redaction of file paths (which carry usernames). Needs an explicit
-      consent prompt before first send, and a policy switch for enterprise mode (Phase 2).
+- [x] Consent gate (2026-10-25): before the first send to an endpoint that is not on this
+      machine, the sidebar names the endpoint, says file paths will leave the host, and asks.
+      One approval per session. Local (loopback) endpoints never prompt. No redaction yet.
 - [ ] No token/size cap on what gets sent — a large audit summary is posted whole
 - [ ] Local-endpoint-only enforcement option (block non-RFC1918 endpoints unless overridden)
 
@@ -393,9 +392,7 @@ Also shipped in March 2026 and not previously in this roadmap.
 - [x] Dark mode (DarkMode.h/.cpp): central `DarkColors` palette, WM_CTLCOLOR* handlers,
       dark ListView (DarkMode_Explorer theme) and progress bar, dark custom-draw for score rows
 - [x] Dark mode applied to the main window and the settings dialog
-- [ ] AiSidebar.cpp paints itself with hardcoded RGB literals — RGB(30,30,35), RGB(220,220,225),
-      RGB(45,45,50) — instead of the DarkColors constants they duplicate. Point it at the palette
-      so the sidebar can't drift from the rest of the UI.
+- [x] AiSidebar.cpp uses the DarkColors palette (2026-10-25); no RGB literals remain.
 - [ ] Settings for scan behavior (exclusions, default scan root, active baseline path)
       — the dialog covers LLM configuration only
 - [ ] Theme follows the system light/dark preference automatically (dark is currently

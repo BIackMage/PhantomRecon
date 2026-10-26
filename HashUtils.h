@@ -4,10 +4,14 @@
 #include <windows.h>
 
 // ---------------------------------------------------------------------------
-// HashUtils — file hashing utilities (SHA-256)
-// Uses BCrypt (modern Windows CNG API) for SHA-256 computation.
+// HashUtils: file hashing.
+//   SHA-256 via BCrypt (CNG). The hash to use for lookups and reporting.
+//   MD5 via CryptoAPI. Kept for baseline format compatibility only.
+// Both read the file in 64 KB blocks and are safe to call from any thread.
 // ---------------------------------------------------------------------------
 
-// Compute SHA-256 of a file and return as lowercase hex string.
-// Returns empty string on failure.
+// Lowercase hex SHA-256 of a file. Empty string on failure.
 std::wstring ComputeFileSHA256(const std::wstring& filePath);
+
+// Lowercase hex MD5 of a file. Empty string on failure.
+std::wstring ComputeFileMD5Hex(const std::wstring& filePath);

@@ -2,11 +2,13 @@
 #include "HashUtils.h"
 
 #include <bcrypt.h>
+#include <wincrypt.h>
 #include <vector>
 #include <sstream>
 #include <iomanip>
 
 #pragma comment(lib, "bcrypt.lib")
+#pragma comment(lib, "advapi32.lib")
 
 // ---------------------------------------------------------------------------
 // Debug logging
@@ -16,6 +18,68 @@ static void DebugLog(const wchar_t* msg)
     OutputDebugStringW(L"[HashUtils] ");
     OutputDebugStringW(msg);
     OutputDebugStringW(L"\n");
+}
+
+// ---------------------------------------------------------------------------
+// ComputeFileMD5Hex: CryptoAPI MD5, 64 KB reads, lowercase hex out.
+// MD5 is kept only because the .prbl baseline format and older CSVs carry it.
+// ---------------------------------------------------------------------------
+std::wstring ComputeFileMD5Hex(const std::wstring& filePath)
+{
+    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ,
+        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        DebugLog((L"MD5: failed to open file: " + filePath).c_str());
+        return L"";
+    }
+
+    HCRYPTPROV hProv = 0;
+    if (!CryptAcquireContextW(&hProv, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
+        DebugLog(L"MD5: CryptAcquireContext failed");
+        CloseHandle(hFile);
+        return L"";
+    }
+
+    HCRYPTHASH hHash = 0;
+    if (!CryptCreateHash(hProv, CALG_MD5, 0, 0, &hHash)) {
+        DebugLog(L"MD5: CryptCreateHash failed");
+        CryptReleaseContext(hProv, 0);
+        CloseHandle(hFile);
+        return L"";
+    }
+
+    std::vector<BYTE> buffer(64 * 1024);
+    DWORD bytesRead = 0;
+    bool ok = true;
+    while (ReadFile(hFile, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, NULL) && bytesRead > 0) {
+        if (!CryptHashData(hHash, buffer.data(), bytesRead, 0)) {
+            DebugLog(L"MD5: CryptHashData failed");
+            ok = false;
+            break;
+        }
+    }
+    CloseHandle(hFile);
+
+    std::wstring result;
+    if (ok) {
+        BYTE digest[16] = {};
+        DWORD digestSize = sizeof(digest);
+        if (CryptGetHashParam(hHash, HP_HASHVAL, digest, &digestSize, 0)) {
+            std::wstringstream ss;
+            ss << std::hex << std::setfill(L'0');
+            for (DWORD i = 0; i < digestSize; ++i) {
+                ss << std::setw(2) << static_cast<unsigned int>(digest[i]);
+            }
+            result = ss.str();
+        }
+        else {
+            DebugLog(L"MD5: CryptGetHashParam failed");
+        }
+    }
+
+    CryptDestroyHash(hHash);
+    CryptReleaseContext(hProv, 0);
+    return result;
 }
 
 // ---------------------------------------------------------------------------

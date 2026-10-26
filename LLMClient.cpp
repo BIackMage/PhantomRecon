@@ -1,10 +1,11 @@
 #include "pch.h"
 #include "LLMClient.h"
+#include "StringConv.h"
 
 #include <windows.h>
 #include <winhttp.h>
+#include <algorithm>
 #include <sstream>
-#include <thread>
 
 #pragma comment(lib, "winhttp.lib")
 
@@ -49,28 +50,6 @@ static std::string EscapeJson(const std::string& s)
     return result;
 }
 
-// Convert wstring to UTF-8
-static std::string WideToUtf8(const std::wstring& wide)
-{
-    if (wide.empty()) return "";
-    int size = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, NULL, 0, NULL, NULL);
-    if (size <= 0) return "";
-    std::string result(size - 1, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, &result[0], size, NULL, NULL);
-    return result;
-}
-
-// Convert UTF-8 to wstring
-static std::wstring Utf8ToWide(const std::string& utf8)
-{
-    if (utf8.empty()) return L"";
-    int size = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, NULL, 0);
-    if (size <= 0) return L"";
-    std::wstring result(size - 1, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, &result[0], size);
-    return result;
-}
-
 // ---------------------------------------------------------------------------
 // Global singleton
 // ---------------------------------------------------------------------------
@@ -81,24 +60,67 @@ LLMClient& GetLLMClient()
 }
 
 // ---------------------------------------------------------------------------
-// Constructor
+// Config and error access (guarded)
 // ---------------------------------------------------------------------------
-LLMClient::LLMClient() {}
+void LLMClient::SetConfig(const LLMConfig& config)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_config = config;
+}
 
-void LLMClient::SetConfig(const LLMConfig& config) { m_config = config; }
-const LLMConfig& LLMClient::GetConfig() const { return m_config; }
-std::string LLMClient::GetLastError() const { return m_lastError; }
+LLMConfig LLMClient::GetConfig() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_config;
+}
+
+std::string LLMClient::GetLastError() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_lastError;
+}
+
+void LLMClient::SetLastError(const std::string& error)
+{
+    DebugLog(error);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_lastError = error;
+}
 
 // ---------------------------------------------------------------------------
-// BuildRequestBody — construct OpenAI-compatible JSON
+// IsLoopbackEndpoint
 // ---------------------------------------------------------------------------
-std::string LLMClient::BuildRequestBody(const std::vector<LLMMessage>& messages) const
+bool IsLoopbackEndpoint(const std::wstring& url)
+{
+    URL_COMPONENTS urlComp = {};
+    urlComp.dwStructSize = sizeof(URL_COMPONENTS);
+
+    wchar_t hostName[256] = {};
+    urlComp.lpszHostName = hostName;
+    urlComp.dwHostNameLength = 256;
+
+    if (!WinHttpCrackUrl(url.c_str(), 0, 0, &urlComp)) {
+        return false;
+    }
+
+    std::wstring host(hostName, urlComp.dwHostNameLength);
+    std::transform(host.begin(), host.end(), host.begin(), ::towlower);
+
+    if (host == L"localhost" || host == L"::1" || host == L"[::1]") return true;
+    if (host.compare(0, 4, L"127.") == 0) return true;
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// BuildRequestBody: OpenAI-compatible JSON
+// ---------------------------------------------------------------------------
+std::string LLMClient::BuildRequestBody(const LLMConfig& config, const std::vector<LLMMessage>& messages)
 {
     std::ostringstream json;
     json << "{";
-    json << "\"model\":\"" << EscapeJson(m_config.model) << "\",";
-    json << "\"max_tokens\":" << m_config.maxTokens << ",";
-    json << "\"temperature\":" << m_config.temperature << ",";
+    json << "\"model\":\"" << EscapeJson(config.model) << "\",";
+    json << "\"max_tokens\":" << config.maxTokens << ",";
+    json << "\"temperature\":" << config.temperature << ",";
     json << "\"messages\":[";
 
     for (size_t i = 0; i < messages.size(); i++) {
@@ -112,16 +134,13 @@ std::string LLMClient::BuildRequestBody(const std::vector<LLMMessage>& messages)
 }
 
 // ---------------------------------------------------------------------------
-// HttpPost — WinHTTP POST request
+// HttpPost: WinHTTP POST request
 // ---------------------------------------------------------------------------
 std::string LLMClient::HttpPost(const std::wstring& url, const std::string& body)
 {
     DebugLog("HttpPost to: " + WideToUtf8(url));
     DebugLog("Request body length: " + std::to_string(body.size()));
 
-    std::string result;
-
-    // Parse URL components
     URL_COMPONENTS urlComp = {};
     urlComp.dwStructSize = sizeof(URL_COMPONENTS);
 
@@ -133,93 +152,73 @@ std::string LLMClient::HttpPost(const std::wstring& url, const std::string& body
     urlComp.dwUrlPathLength = 1024;
 
     if (!WinHttpCrackUrl(url.c_str(), 0, 0, &urlComp)) {
-        m_lastError = "Failed to parse URL";
-        DebugLog(m_lastError);
+        SetLastError("Failed to parse URL");
         return "";
     }
 
-    // Open WinHTTP session
     HINTERNET hSession = WinHttpOpen(L"PhantomRecon/1.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-
     if (!hSession) {
-        m_lastError = "WinHttpOpen failed: " + std::to_string(::GetLastError());
-        DebugLog(m_lastError);
+        SetLastError("WinHttpOpen failed: " + std::to_string(::GetLastError()));
         return "";
     }
 
-    // Set timeouts (30 second connect, 60 second read for LLM responses)
+    // Resolve 10s, connect 30s, send 60s, receive 120s (LLM replies can be slow)
     WinHttpSetTimeouts(hSession, 10000, 30000, 60000, 120000);
 
-    // Connect to host
     HINTERNET hConnect = WinHttpConnect(hSession, hostName, urlComp.nPort, 0);
     if (!hConnect) {
-        m_lastError = "WinHttpConnect failed: " + std::to_string(::GetLastError());
-        DebugLog(m_lastError);
+        SetLastError("WinHttpConnect failed: " + std::to_string(::GetLastError()));
         WinHttpCloseHandle(hSession);
         return "";
     }
 
-    // Create request
     DWORD flags = (urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"POST", urlPath,
         NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
-
     if (!hRequest) {
-        m_lastError = "WinHttpOpenRequest failed: " + std::to_string(::GetLastError());
-        DebugLog(m_lastError);
+        SetLastError("WinHttpOpenRequest failed: " + std::to_string(::GetLastError()));
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
         return "";
     }
 
-    // Add content type header
     WinHttpAddRequestHeaders(hRequest, L"Content-Type: application/json",
         (DWORD)-1, WINHTTP_ADDREQ_FLAG_REPLACE | WINHTTP_ADDREQ_FLAG_ADD);
 
-    // Send request
     BOOL sendResult = WinHttpSendRequest(hRequest,
         WINHTTP_NO_ADDITIONAL_HEADERS, 0,
         (LPVOID)body.c_str(), (DWORD)body.size(),
         (DWORD)body.size(), 0);
-
     if (!sendResult) {
-        m_lastError = "WinHttpSendRequest failed: " + std::to_string(::GetLastError());
-        DebugLog(m_lastError);
+        SetLastError("WinHttpSendRequest failed: " + std::to_string(::GetLastError()));
         WinHttpCloseHandle(hRequest);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
         return "";
     }
 
-    // Receive response
     if (!WinHttpReceiveResponse(hRequest, NULL)) {
-        m_lastError = "WinHttpReceiveResponse failed: " + std::to_string(::GetLastError());
-        DebugLog(m_lastError);
+        SetLastError("WinHttpReceiveResponse failed: " + std::to_string(::GetLastError()));
         WinHttpCloseHandle(hRequest);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
         return "";
     }
 
-    // Check status code
     DWORD statusCode = 0;
     DWORD statusCodeSize = sizeof(DWORD);
     WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
         WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &statusCodeSize, WINHTTP_NO_HEADER_INDEX);
-
     DebugLog("HTTP status: " + std::to_string(statusCode));
 
-    // Read response body
+    std::string responseBody;
     DWORD bytesAvailable = 0;
     DWORD bytesRead = 0;
-    std::string responseBody;
-
     do {
         bytesAvailable = 0;
         WinHttpQueryDataAvailable(hRequest, &bytesAvailable);
-
         if (bytesAvailable > 0) {
             std::vector<char> buffer(bytesAvailable + 1, '\0');
             if (WinHttpReadData(hRequest, buffer.data(), bytesAvailable, &bytesRead)) {
@@ -230,14 +229,12 @@ std::string LLMClient::HttpPost(const std::wstring& url, const std::string& body
 
     DebugLog("Response body length: " + std::to_string(responseBody.size()));
 
-    // Cleanup
     WinHttpCloseHandle(hRequest);
     WinHttpCloseHandle(hConnect);
     WinHttpCloseHandle(hSession);
 
     if (statusCode != 200) {
-        m_lastError = "HTTP " + std::to_string(statusCode) + ": " + responseBody;
-        DebugLog(m_lastError);
+        SetLastError("HTTP " + std::to_string(statusCode) + ": " + responseBody);
         return "";
     }
 
@@ -245,22 +242,19 @@ std::string LLMClient::HttpPost(const std::wstring& url, const std::string& body
 }
 
 // ---------------------------------------------------------------------------
-// ParseResponse — extract assistant message from OpenAI JSON response
-// Simple parser (no external JSON lib)
+// ParseResponse: extract the assistant message from the OpenAI JSON response.
+// Simple scanner, no external JSON lib.
 // ---------------------------------------------------------------------------
 std::string LLMClient::ParseResponse(const std::string& responseBody)
 {
-    // Look for "content":"..." in the response
     // OpenAI format: { "choices": [{ "message": { "content": "..." } }] }
     const std::string marker = "\"content\":";
     size_t pos = responseBody.find(marker);
     if (pos == std::string::npos) {
-        // Try alternate: "content": " (with space)
         const std::string marker2 = "\"content\": ";
         pos = responseBody.find(marker2);
         if (pos == std::string::npos) {
-            m_lastError = "Could not find 'content' in response";
-            DebugLog(m_lastError);
+            SetLastError("Could not find 'content' in response");
             return "";
         }
         pos += marker2.size();
@@ -269,26 +263,22 @@ std::string LLMClient::ParseResponse(const std::string& responseBody)
         pos += marker.size();
     }
 
-    // Skip whitespace
     while (pos < responseBody.size() && (responseBody[pos] == ' ' || responseBody[pos] == '\t'))
         pos++;
 
     if (pos >= responseBody.size() || responseBody[pos] != '"') {
-        // Might be null
         if (responseBody.substr(pos, 4) == "null") {
             return "";
         }
-        m_lastError = "Unexpected content format";
-        DebugLog(m_lastError);
+        SetLastError("Unexpected content format");
         return "";
     }
 
-    // Parse the JSON string (handle escapes)
     pos++; // skip opening quote
     std::string content;
     while (pos < responseBody.size()) {
         char c = responseBody[pos];
-        if (c == '"') break;  // end of string
+        if (c == '"') break;
         if (c == '\\' && pos + 1 < responseBody.size()) {
             pos++;
             char next = responseBody[pos];
@@ -313,30 +303,15 @@ std::string LLMClient::ParseResponse(const std::string& responseBody)
 }
 
 // ---------------------------------------------------------------------------
-// SendChatCompletion — synchronous
+// SendChatCompletion
 // ---------------------------------------------------------------------------
 std::string LLMClient::SendChatCompletion(const std::vector<LLMMessage>& messages)
 {
-    std::string body = BuildRequestBody(messages);
-    std::string response = HttpPost(m_config.endpoint, body);
+    LLMConfig config = GetConfig();   // one snapshot for the whole request
+    std::string body = BuildRequestBody(config, messages);
+    std::string response = HttpPost(config.endpoint, body);
     if (response.empty()) return "";
     return ParseResponse(response);
-}
-
-// ---------------------------------------------------------------------------
-// SendChatCompletionAsync — fire-and-forget on a thread
-// ---------------------------------------------------------------------------
-void LLMClient::SendChatCompletionAsync(const std::vector<LLMMessage>& messages,
-                                          LLMResponseCallback callback)
-{
-    // Capture by value for thread safety
-    std::vector<LLMMessage> msgsCopy = messages;
-    std::thread([this, msgsCopy, callback]() {
-        std::string result = SendChatCompletion(msgsCopy);
-        if (callback) {
-            callback(result, true);
-        }
-    }).detach();
 }
 
 // ---------------------------------------------------------------------------
@@ -357,9 +332,8 @@ bool LLMClient::TestConnection()
 }
 
 // ---------------------------------------------------------------------------
-// Triage prompt builders
+// Prompt builders
 // ---------------------------------------------------------------------------
-
 std::string BuildTriagePrompt(const std::wstring& filePath, double malwareScore,
     const std::wstring& signature, const std::wstring& packingStatus,
     int suspiciousImports, const std::wstring& sigWarnings,

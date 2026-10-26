@@ -1,13 +1,18 @@
 #pragma once
 
+#include <mutex>
 #include <string>
 #include <vector>
-#include <functional>
 
 // ---------------------------------------------------------------------------
-// LLMClient — OpenAI-compatible API client for LLM triage/analysis.
-// Sends scan data to a networked LLM endpoint for threat assessment.
-// Uses WinHTTP for HTTP POST requests.
+// LLMClient: OpenAI-compatible chat completions over WinHTTP.
+//
+// Blocking only. Callers run it on the shared BackgroundWorker and post the
+// result back to the UI (see AiSidebar.cpp). There is no detached async path.
+//
+// Thread safety: SetConfig / GetConfig / GetLastError are guarded, so the UI
+// thread may change settings while a request is in flight on a worker. A
+// request copies the config once when it starts.
 // ---------------------------------------------------------------------------
 
 // Default endpoint is the local machine only (LM Studio / Ollama style server on
@@ -25,61 +30,57 @@ struct LLMMessage {
     std::string content;
 };
 
-// Callback for streaming responses (called on background thread)
-using LLMResponseCallback = std::function<void(const std::string& chunk, bool isDone)>;
-
 class LLMClient {
 public:
-    LLMClient();
+    LLMClient() = default;
+    LLMClient(const LLMClient&) = delete;
+    LLMClient& operator=(const LLMClient&) = delete;
 
-    // Configure the endpoint
-    void SetConfig(const LLMConfig& config);
-    const LLMConfig& GetConfig() const;
+    void      SetConfig(const LLMConfig& config);
+    LLMConfig GetConfig() const;
 
-    // Send a chat completion request (blocking).
-    // Returns the assistant's response, or empty string on error.
+    // Send a chat completion request and block for the reply.
+    // Returns the assistant's text, or an empty string on error (see GetLastError).
     std::string SendChatCompletion(const std::vector<LLMMessage>& messages);
 
-    // Send a chat completion request (async, calls callback on response).
-    void SendChatCompletionAsync(const std::vector<LLMMessage>& messages,
-                                  LLMResponseCallback callback);
-
-    // Get the last error message
+    // Last error message from this client.
     std::string GetLastError() const;
 
-    // Check if the endpoint is reachable
+    // Send a tiny prompt and report whether anything came back.
     bool TestConnection();
 
 private:
-    LLMConfig m_config;
-    std::string m_lastError;
+    mutable std::mutex m_mutex;
+    LLMConfig          m_config;
+    std::string        m_lastError;
 
-    // Build the JSON request body
-    std::string BuildRequestBody(const std::vector<LLMMessage>& messages) const;
+    void SetLastError(const std::string& error);
 
-    // Perform HTTP POST and return response body
+    static std::string BuildRequestBody(const LLMConfig& config, const std::vector<LLMMessage>& messages);
     std::string HttpPost(const std::wstring& url, const std::string& body);
-
-    // Parse the response JSON to extract the assistant message
     std::string ParseResponse(const std::string& responseBody);
 };
 
 // Global singleton
 LLMClient& GetLLMClient();
 
+// True when the URL's host is this machine (localhost, 127.x.x.x, ::1).
+// Used by the sidebar to decide whether to ask before sending scan data.
+bool IsLoopbackEndpoint(const std::wstring& url);
+
 // ---------------------------------------------------------------------------
-// Helper: build a triage prompt from scan data
+// Prompt builders
 // ---------------------------------------------------------------------------
 
-// Generate a triage request for a specific file's scan results
+// Triage request for one file's scan results.
 std::string BuildTriagePrompt(const std::wstring& filePath, double malwareScore,
     const std::wstring& signature, const std::wstring& packingStatus,
     int suspiciousImports, const std::wstring& sigWarnings,
     const std::wstring& packIndicators, double entropy);
 
-// Generate a summary analysis prompt for the entire scan
+// Summary request for a whole scan.
 std::string BuildScanSummaryPrompt(int totalFiles, int totalExecutables,
     int highRiskCount, int newFiles, int changedFiles, int missingFiles);
 
-// Generate a security audit analysis prompt
+// Explanation request for the posture audit text.
 std::string BuildSecurityAuditPrompt(const std::string& auditSummary);

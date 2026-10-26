@@ -1,9 +1,14 @@
 #include "pch.h"
 #include "AiSidebar.h"
-#include "LLMClient.h"
 
-#include <thread>
+#include "AppMessages.h"
+#include "DarkMode.h"
+#include "LLMClient.h"
+#include "StringConv.h"
+
+#include <memory>
 #include <sstream>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // Debug logging
@@ -15,27 +20,6 @@ static void DebugLog(const wchar_t* msg)
     OutputDebugStringW(L"\n");
 }
 
-// Convert std::string to std::wstring (UTF-8)
-static std::wstring ToWide(const std::string& s)
-{
-    if (s.empty()) return L"";
-    int size = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, NULL, 0);
-    if (size <= 0) return L"";
-    std::wstring result(size - 1, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &result[0], size);
-    return result;
-}
-
-static std::string ToUtf8(const std::wstring& s)
-{
-    if (s.empty()) return "";
-    int size = WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, NULL, 0, NULL, NULL);
-    if (size <= 0) return "";
-    std::string result(size - 1, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, &result[0], size, NULL, NULL);
-    return result;
-}
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -45,15 +29,14 @@ static const int SLIDE_STEP_MS = 10;   // timer interval for slide animation
 static const int SLIDE_PX_STEP = 40;   // pixels per animation step
 static const int PANEL_MARGIN = 8;     // inner margin inside the panel
 
+#define IDT_SLIDE_ANIM 5001
+
 // ---------------------------------------------------------------------------
 // Forward declarations
 // ---------------------------------------------------------------------------
 static LRESULT CALLBACK AiPanelWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 static void LayoutPanelControls(AiSidebarState& state);
 static RECT GetMainWindowScreenRect(HWND hMain);
-
-// Timer ID for slide animation
-#define IDT_SLIDE_ANIM 5001
 
 // ---------------------------------------------------------------------------
 // RegisterAiSidebarClass
@@ -65,17 +48,14 @@ void RegisterAiSidebarClass(HINSTANCE hInst)
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = AiPanelWndProc;
     wc.hInstance = hInst;
-    wc.hbrBackground = CreateSolidBrush(RGB(30, 30, 35));  // dark background
+    wc.hbrBackground = CreateSolidBrush(DarkColors::Background);
     wc.lpszClassName = AI_PANEL_CLASS;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
     RegisterClassExW(&wc);
 
     DebugLog(L"AI panel window class registered");
 }
 
-// ---------------------------------------------------------------------------
-// Helper: get screen rect of the main window
-// ---------------------------------------------------------------------------
 static RECT GetMainWindowScreenRect(HWND hMain)
 {
     RECT r = {};
@@ -84,39 +64,122 @@ static RECT GetMainWindowScreenRect(HWND hMain)
 }
 
 // ---------------------------------------------------------------------------
+// Privacy gate
+//
+// The default endpoint is localhost, so nothing leaves the machine. If the user
+// pointed Settings at another host, say so plainly and ask once per session.
+// ---------------------------------------------------------------------------
+static bool ConfirmSendAllowed(AiSidebarState& state)
+{
+    std::wstring endpoint = GetLLMClient().GetConfig().endpoint;
+    if (IsLoopbackEndpoint(endpoint)) {
+        return true;
+    }
+    if (state.remoteSendApproved) {
+        return true;
+    }
+
+    std::wstring text =
+        L"The AI endpoint is not on this machine:\n\n" + endpoint + L"\n\n"
+        L"Scan data will be sent there. That includes file paths, which can contain "
+        L"user names and other details about this host.\n\n"
+        L"Send anyway? You will not be asked again this session.";
+    int answer = MessageBoxW(state.hMainWindow, text.c_str(), L"Send scan data to a remote server?",
+        MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+    if (answer != IDYES) {
+        AppendToChatDisplay(state, L"\r\n[Info]: Not sent. Change the endpoint in File > Settings to a local server, or approve the remote one.\r\n");
+        return false;
+    }
+
+    state.remoteSendApproved = true;
+    DebugLog(L"User approved sending to a remote endpoint for this session");
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Worker plumbing: run one chat completion, post the result to the panel
+// ---------------------------------------------------------------------------
+static void RunLlmRequest(AiSidebarState& state, const std::vector<LLMMessage>& messages,
+                          const std::wstring& successPrefix)
+{
+    if (!state.worker) {
+        AppendToChatDisplay(state, L"\r\n[AI Error]: background worker not available.\r\n");
+        return;
+    }
+
+    HWND hPanel = state.hPanel;
+    state.worker->Run([hPanel, messages, successPrefix]() {
+        std::string response = GetLLMClient().SendChatCompletion(messages);
+
+        AiResponsePayload* payload = new AiResponsePayload();
+        if (response.empty()) {
+            payload->chatText = L"\r\n[AI Error]: " + Utf8ToWide(GetLLMClient().GetLastError()) + L"\r\n";
+            payload->statusText = L"  Error";
+        }
+        else {
+            payload->chatText = successPrefix + Utf8ToWide(response) + L"\r\n";
+            payload->statusText = L"  Ready";
+        }
+        PostPayload(hPanel, WM_APP_AI_RESPONSE, payload);
+    });
+}
+
+// Probe the endpoint once at startup. Sends no scan data, so no consent needed.
+static void TestConnectionInBackground(AiSidebarState& state)
+{
+    if (!state.worker) return;
+
+    HWND hPanel = state.hPanel;
+    state.worker->Run([hPanel]() {
+        DebugLog(L"Testing LLM connection...");
+        bool connected = GetLLMClient().TestConnection();
+
+        AiResponsePayload* payload = new AiResponsePayload();
+        if (connected) {
+            payload->statusText = L"  Connected (" + Utf8ToWide(GetLLMClient().GetConfig().model) + L")";
+            DebugLog(L"LLM connection successful");
+        }
+        else {
+            payload->statusText = L"  Connection failed";
+            DebugLog((L"LLM connection failed: " + Utf8ToWide(GetLLMClient().GetLastError())).c_str());
+        }
+        PostPayload(hPanel, WM_APP_AI_RESPONSE, payload);
+    });
+}
+
+// ---------------------------------------------------------------------------
 // CreateAiSidebar
 // ---------------------------------------------------------------------------
-void CreateAiSidebar(HWND hMainWindow, HINSTANCE hInst, AiSidebarState& state)
+void CreateAiSidebar(HWND hMainWindow, HINSTANCE hInst, AiSidebarState& state, BackgroundWorker& worker)
 {
     DebugLog(L"Creating AI sidebar");
 
     state.hMainWindow = hMainWindow;
+    state.worker = &worker;
 
-    // --- Toggle tab: thin vertical button on the right edge of main window ---
+    // Toggle tab: thin vertical button on the right edge of the main window
     RECT clientRect;
     GetClientRect(hMainWindow, &clientRect);
     int tabX = clientRect.right - TOGGLE_TAB_WIDTH - 2;
-    int tabY = clientRect.bottom / 2 - 50;  // centered vertically
+    int tabY = clientRect.bottom / 2 - 50;
 
     state.hToggleTab = CreateWindowW(L"BUTTON", L"AI\n>>",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_MULTILINE,
         tabX, tabY, TOGGLE_TAB_WIDTH, 100,
         hMainWindow, (HMENU)ID_AI_TOGGLE, hInst, NULL);
 
-    DebugLog(L"Toggle tab created");
-
-    // --- Slide-out panel: separate popup tool window ---
+    // Slide-out panel: separate popup tool window, zero width until opened
     RECT mainRect = GetMainWindowScreenRect(hMainWindow);
-    int panelX = mainRect.right;   // starts hidden behind the right edge
+    int panelX = mainRect.right;
     int panelY = mainRect.top;
     int panelH = mainRect.bottom - mainRect.top;
 
     state.hPanel = CreateWindowExW(
-        WS_EX_TOOLWINDOW,          // no taskbar entry
+        WS_EX_TOOLWINDOW,
         AI_PANEL_CLASS, L"",
         WS_POPUP | WS_BORDER,
-        panelX, panelY, 0, panelH, // width 0 — hidden initially
-        hMainWindow,                // owner
+        panelX, panelY, 0, panelH,
+        hMainWindow,
         NULL, hInst, NULL);
 
     if (!state.hPanel) {
@@ -124,38 +187,30 @@ void CreateAiSidebar(HWND hMainWindow, HINSTANCE hInst, AiSidebarState& state)
         return;
     }
 
-    // Store state pointer on the panel window for the WndProc
-    SetWindowLongPtr(state.hPanel, GWLP_USERDATA, (LONG_PTR)&state);
+    SetWindowLongPtrW(state.hPanel, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
 
-    // --- Create child controls inside the panel ---
     int m = PANEL_MARGIN;
     int w = state.panelWidth - 2 * m;
     int btnH = 28;
     int y = m;
 
-    // Title
     state.hTitleLabel = CreateWindowW(L"STATIC", L"  AI Assistant",
         WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
         m, y, w, 30,
         state.hPanel, (HMENU)ID_AI_TITLE, hInst, NULL);
     y += 34;
 
-    // Status label
     state.hStatusLabel = CreateWindowW(L"STATIC", L"  Not connected",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         m, y, w, 18,
         state.hPanel, (HMENU)ID_AI_STATUS, hInst, NULL);
     y += 22;
 
-    // Separator line (thin static)
-    CreateWindowW(L"STATIC", L"",
-        WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
-        m, y, w, 2,
-        state.hPanel, NULL, hInst, NULL);
+    CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
+        m, y, w, 2, state.hPanel, NULL, hInst, NULL);
     y += 6;
 
-    // Quick action buttons row
-    int btnW = (w - 2 * 4) / 3;  // 3 buttons with 4px gaps
+    int btnW = (w - 2 * 4) / 3;
     state.hTriageButton = CreateWindowW(L"BUTTON", L"Triage",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
         m, y, btnW, btnH,
@@ -172,23 +227,17 @@ void CreateAiSidebar(HWND hMainWindow, HINSTANCE hInst, AiSidebarState& state)
         state.hPanel, (HMENU)ID_AI_AUDIT, hInst, NULL);
     y += btnH + 6;
 
-    // Separator
-    CreateWindowW(L"STATIC", L"",
-        WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
-        m, y, w, 2,
-        state.hPanel, NULL, hInst, NULL);
+    CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
+        m, y, w, 2, state.hPanel, NULL, hInst, NULL);
     y += 6;
 
-    // Chat display — fills most of the remaining space
-    // We'll compute height based on panel height later in LayoutPanelControls
     state.hChatDisplay = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | WS_VSCROLL |
         ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_WANTRETURN,
-        m, y, w, 300,  // placeholder height, will be recalculated
+        m, y, w, 300,  // placeholder height, recalculated in LayoutPanelControls
         state.hPanel, (HMENU)ID_AI_CHAT, hInst, NULL);
     y += 300 + 4;
 
-    // Input field + Send button at the bottom
     int sendW = 55;
     int inputW = w - sendW - 4;
     state.hInputField = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
@@ -202,47 +251,41 @@ void CreateAiSidebar(HWND hMainWindow, HINSTANCE hInst, AiSidebarState& state)
         state.hPanel, (HMENU)ID_AI_SEND, hInst, NULL);
 
     state.expanded = false;
-
     DebugLog(L"AI sidebar panel created (collapsed)");
 
-    // Test LLM connection in background
-    AiSidebarState* pState = &state;
-    std::thread([pState]() {
-        DebugLog(L"Testing LLM connection...");
-        bool connected = GetLLMClient().TestConnection();
-        if (connected) {
-            SetAiStatusText(*pState, L"  Connected (Eva Qwen)");
-            DebugLog(L"LLM connection successful");
-        }
-        else {
-            std::string err = GetLLMClient().GetLastError();
-            SetAiStatusText(*pState, L"  Connection failed");
-            DebugLog((L"LLM connection failed: " + ToWide(err)).c_str());
-        }
-    }).detach();
+    TestConnectionInBackground(state);
 }
 
 // ---------------------------------------------------------------------------
-// AiPanelWndProc — handles messages for the popup panel window
+// AiPanelWndProc
 // ---------------------------------------------------------------------------
 static LRESULT CALLBACK AiPanelWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    AiSidebarState* pState = (AiSidebarState*)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    AiSidebarState* pState = reinterpret_cast<AiSidebarState*>(GetWindowLongPtrW(hWnd, GWLP_USERDATA));
 
     switch (msg)
     {
     case WM_COMMAND:
-    {
-        int wmId = LOWORD(wParam);
-        // Forward button clicks to the main window so WndProc handles them
+        // Forward button clicks to the main window so DispatchCommand handles them.
         if (pState && pState->hMainWindow) {
             SendMessageW(pState->hMainWindow, WM_COMMAND, wParam, lParam);
         }
         return 0;
+
+    case WM_APP_AI_RESPONSE: {
+        std::unique_ptr<AiResponsePayload> payload(reinterpret_cast<AiResponsePayload*>(lParam));
+        if (pState && payload) {
+            if (!payload->chatText.empty()) {
+                AppendToChatDisplay(*pState, payload->chatText);
+            }
+            if (!payload->statusText.empty()) {
+                SetAiStatusText(*pState, payload->statusText);
+            }
+        }
+        return 0;
     }
 
-    case WM_TIMER:
-    {
+    case WM_TIMER: {
         if (wParam != IDT_SLIDE_ANIM || !pState) break;
 
         RECT mainRect = GetMainWindowScreenRect(pState->hMainWindow);
@@ -251,7 +294,6 @@ static LRESULT CALLBACK AiPanelWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
         int currentW = panelRect.right - panelRect.left;
 
         if (pState->expanded) {
-            // Expanding: grow width toward target
             int targetW = pState->panelWidth;
             int newW = currentW + SLIDE_PX_STEP;
             if (newW >= targetW) {
@@ -259,13 +301,10 @@ static LRESULT CALLBACK AiPanelWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
                 KillTimer(hWnd, IDT_SLIDE_ANIM);
                 DebugLog(L"Slide-out animation complete");
             }
-            SetWindowPos(hWnd, NULL,
-                mainRect.right, mainRect.top,
-                newW, mainRect.bottom - mainRect.top,
-                SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hWnd, NULL, mainRect.right, mainRect.top,
+                newW, mainRect.bottom - mainRect.top, SWP_NOZORDER | SWP_NOACTIVATE);
         }
         else {
-            // Collapsing: shrink width toward 0
             int newW = currentW - SLIDE_PX_STEP;
             if (newW <= 0) {
                 newW = 0;
@@ -273,40 +312,28 @@ static LRESULT CALLBACK AiPanelWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
                 ShowWindow(hWnd, SW_HIDE);
                 DebugLog(L"Slide-in animation complete");
             }
-            SetWindowPos(hWnd, NULL,
-                mainRect.right, mainRect.top,
-                newW, mainRect.bottom - mainRect.top,
-                SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hWnd, NULL, mainRect.right, mainRect.top,
+                newW, mainRect.bottom - mainRect.top, SWP_NOZORDER | SWP_NOACTIVATE);
         }
         return 0;
     }
 
-    case WM_CTLCOLORSTATIC:
-    {
-        // Dark theme for static controls
-        HDC hdcStatic = (HDC)wParam;
-        SetTextColor(hdcStatic, RGB(220, 220, 225));
-        SetBkColor(hdcStatic, RGB(30, 30, 35));
-        static HBRUSH hBrush = CreateSolidBrush(RGB(30, 30, 35));
-        return (LRESULT)hBrush;
+    case WM_CTLCOLORSTATIC: {
+        HDC hdc = reinterpret_cast<HDC>(wParam);
+        SetTextColor(hdc, DarkColors::TextPrimary);
+        SetBkColor(hdc, DarkColors::Background);
+        return reinterpret_cast<LRESULT>(GetDarkBackgroundBrush());
     }
 
     case WM_CTLCOLOREDIT:
-    {
-        // Dark theme for edit controls
-        HDC hdcEdit = (HDC)wParam;
-        SetTextColor(hdcEdit, RGB(210, 210, 215));
-        SetBkColor(hdcEdit, RGB(45, 45, 50));
-        static HBRUSH hBrushEdit = CreateSolidBrush(RGB(45, 45, 50));
-        return (LRESULT)hBrushEdit;
-    }
+        return reinterpret_cast<LRESULT>(HandleDarkCtlColorEdit(reinterpret_cast<HDC>(wParam)));
     }
 
-    return DefWindowProc(hWnd, msg, wParam, lParam);
+    return DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
 // ---------------------------------------------------------------------------
-// LayoutPanelControls — recalculate chat display height based on panel size
+// Layout
 // ---------------------------------------------------------------------------
 static void LayoutPanelControls(AiSidebarState& state)
 {
@@ -319,66 +346,48 @@ static void LayoutPanelControls(AiSidebarState& state)
     int w = state.panelWidth - 2 * m;
     int btnH = 28;
 
-    // Calculate positions top-down to find where chat starts
     int y = m;
-    y += 34;    // title
-    y += 22;    // status
-    y += 6;     // separator
-    y += btnH + 6; // quick action buttons
-    y += 6;     // separator
+    y += 34;        // title
+    y += 22;        // status
+    y += 6;         // separator
+    y += btnH + 6;  // quick action buttons
+    y += 6;         // separator
     int chatTop = y;
 
-    // Bottom row: input + send
     int bottomY = panelH - m - btnH;
     int chatHeight = bottomY - chatTop - 4;
     if (chatHeight < 50) chatHeight = 50;
 
-    // Reposition chat display
     SetWindowPos(state.hChatDisplay, NULL, m, chatTop, w, chatHeight, SWP_NOZORDER);
 
-    // Reposition input field and send button
     int sendW = 55;
     int inputW = w - sendW - 4;
     SetWindowPos(state.hInputField, NULL, m, bottomY, inputW, btnH, SWP_NOZORDER);
     SetWindowPos(state.hSendButton, NULL, m + inputW + 4, bottomY, sendW, btnH, SWP_NOZORDER);
 }
 
-// ---------------------------------------------------------------------------
-// ToggleAiSidebar
-// ---------------------------------------------------------------------------
 void ToggleAiSidebar(AiSidebarState& state)
 {
     state.expanded = !state.expanded;
     DebugLog(state.expanded ? L"Sidebar expanding" : L"Sidebar collapsing");
 
-    // Update toggle tab text
     SetWindowTextW(state.hToggleTab, state.expanded ? L"AI\n<<" : L"AI\n>>");
 
     if (state.expanded) {
-        // Position at main window right edge, zero width, full height
         RECT mainRect = GetMainWindowScreenRect(state.hMainWindow);
-        SetWindowPos(state.hPanel, NULL,
-            mainRect.right, mainRect.top,
-            0, mainRect.bottom - mainRect.top,
-            SWP_NOZORDER | SWP_NOACTIVATE);
+        SetWindowPos(state.hPanel, NULL, mainRect.right, mainRect.top,
+            0, mainRect.bottom - mainRect.top, SWP_NOZORDER | SWP_NOACTIVATE);
         ShowWindow(state.hPanel, SW_SHOWNOACTIVATE);
-
-        // Layout controls for the target height
         LayoutPanelControls(state);
     }
 
-    // Start slide animation
     SetTimer(state.hPanel, IDT_SLIDE_ANIM, SLIDE_STEP_MS, NULL);
 }
 
-// ---------------------------------------------------------------------------
-// RepositionAiSidebar — keep sidebar flush with main window right edge
-// ---------------------------------------------------------------------------
 void RepositionAiSidebar(AiSidebarState& state)
 {
     if (!state.hPanel || !state.hMainWindow) return;
 
-    // Reposition the toggle tab on the main window's right edge
     RECT clientRect;
     GetClientRect(state.hMainWindow, &clientRect);
     int tabX = clientRect.right - TOGGLE_TAB_WIDTH - 2;
@@ -387,23 +396,19 @@ void RepositionAiSidebar(AiSidebarState& state)
 
     if (!state.expanded) return;
 
-    // Reposition the panel flush with the main window right edge
     RECT mainRect = GetMainWindowScreenRect(state.hMainWindow);
     RECT panelRect;
     GetWindowRect(state.hPanel, &panelRect);
     int currentW = panelRect.right - panelRect.left;
 
-    SetWindowPos(state.hPanel, NULL,
-        mainRect.right, mainRect.top,
-        currentW, mainRect.bottom - mainRect.top,
-        SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(state.hPanel, NULL, mainRect.right, mainRect.top,
+        currentW, mainRect.bottom - mainRect.top, SWP_NOZORDER | SWP_NOACTIVATE);
 
-    // Re-layout controls if panel height changed
     LayoutPanelControls(state);
 }
 
 // ---------------------------------------------------------------------------
-// AppendToChatDisplay
+// Display helpers (UI thread)
 // ---------------------------------------------------------------------------
 void AppendToChatDisplay(AiSidebarState& state, const std::wstring& text)
 {
@@ -411,13 +416,10 @@ void AppendToChatDisplay(AiSidebarState& state, const std::wstring& text)
 
     int len = GetWindowTextLengthW(state.hChatDisplay);
     SendMessageW(state.hChatDisplay, EM_SETSEL, len, len);
-    SendMessageW(state.hChatDisplay, EM_REPLACESEL, FALSE, (LPARAM)text.c_str());
+    SendMessageW(state.hChatDisplay, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(text.c_str()));
     SendMessageW(state.hChatDisplay, EM_SCROLLCARET, 0, 0);
 }
 
-// ---------------------------------------------------------------------------
-// ClearChatDisplay
-// ---------------------------------------------------------------------------
 void ClearChatDisplay(AiSidebarState& state)
 {
     if (state.hChatDisplay) {
@@ -425,9 +427,6 @@ void ClearChatDisplay(AiSidebarState& state)
     }
 }
 
-// ---------------------------------------------------------------------------
-// SetAiStatusText
-// ---------------------------------------------------------------------------
 void SetAiStatusText(AiSidebarState& state, const std::wstring& text)
 {
     if (state.hStatusLabel) {
@@ -435,20 +434,18 @@ void SetAiStatusText(AiSidebarState& state, const std::wstring& text)
     }
 }
 
-// ---------------------------------------------------------------------------
-// GetAiSidebarWidth
-// ---------------------------------------------------------------------------
 int GetAiSidebarWidth(const AiSidebarState& state)
 {
     return state.expanded ? state.panelWidth : 0;
 }
 
 // ---------------------------------------------------------------------------
-// SendUserMessage
+// Requests
 // ---------------------------------------------------------------------------
 void SendUserMessage(AiSidebarState& state, const std::wstring& message)
 {
     if (message.empty()) return;
+    if (!ConfirmSendAllowed(state)) return;
 
     DebugLog((L"Sending user message: " + message).c_str());
 
@@ -456,37 +453,20 @@ void SendUserMessage(AiSidebarState& state, const std::wstring& message)
     SetAiStatusText(state, L"  Thinking...");
     SetWindowTextW(state.hInputField, L"");
 
-    std::string userMsg = ToUtf8(message);
-    AiSidebarState* pState = &state;
-
-    std::thread([pState, userMsg]() {
-        std::vector<LLMMessage> messages = {
-            { "system", "You are a cybersecurity threat analyst assistant integrated into "
-              "Phantom Recon, an endpoint security scanner. You help triage scan results, "
-              "analyze malware indicators, and provide actionable security recommendations. "
-              "Be concise and technical. Focus on actionable intel." },
-            { "user", userMsg }
-        };
-
-        std::string response = GetLLMClient().SendChatCompletion(messages);
-
-        if (response.empty()) {
-            std::string err = GetLLMClient().GetLastError();
-            AppendToChatDisplay(*pState, L"\r\n[AI Error]: " + ToWide(err) + L"\r\n");
-            SetAiStatusText(*pState, L"  Error");
-        }
-        else {
-            AppendToChatDisplay(*pState, L"\r\n[AI]: " + ToWide(response) + L"\r\n");
-            SetAiStatusText(*pState, L"  Ready");
-        }
-    }).detach();
+    std::vector<LLMMessage> messages = {
+        { "system", "You are a cybersecurity threat analyst assistant integrated into "
+          "Phantom Recon, an endpoint security scanner. You help triage scan results, "
+          "analyze malware indicators, and provide actionable security recommendations. "
+          "Be concise and technical. Focus on actionable intel." },
+        { "user", WideToUtf8(message) }
+    };
+    RunLlmRequest(state, messages, L"\r\n[AI]: ");
 }
 
-// ---------------------------------------------------------------------------
-// TriageSelectedFile
-// ---------------------------------------------------------------------------
 void TriageSelectedFile(AiSidebarState& state, const BaselineEntry& entry)
 {
+    if (!ConfirmSendAllowed(state)) return;
+
     DebugLog((L"Triaging file: " + entry.path).c_str());
 
     AppendToChatDisplay(state, L"\r\n[Triage]: Analyzing " + entry.path + L"...\r\n");
@@ -496,26 +476,41 @@ void TriageSelectedFile(AiSidebarState& state, const BaselineEntry& entry)
         entry.signature, entry.packingStatus, entry.suspiciousImports,
         entry.sigWarnings, entry.packIndicators, entry.entropy);
 
-    AiSidebarState* pState = &state;
+    std::vector<LLMMessage> messages = {
+        { "system", "You are a cybersecurity threat analyst assistant. "
+          "Analyze the following file scan result and provide a detailed threat assessment. "
+          "Be technical, concise, and actionable." },
+        { "user", prompt }
+    };
+    RunLlmRequest(state, messages, L"\r\n[AI Triage]:\r\n");
+}
 
-    std::thread([pState, prompt]() {
-        std::vector<LLMMessage> messages = {
-            { "system", "You are a cybersecurity threat analyst assistant. "
-              "Analyze the following file scan result and provide a detailed threat assessment. "
-              "Be technical, concise, and actionable." },
-            { "user", prompt }
-        };
+void RequestScanSummary(AiSidebarState& state, int filesProcessed, int executablesFound)
+{
+    if (!ConfirmSendAllowed(state)) return;
 
-        std::string response = GetLLMClient().SendChatCompletion(messages);
+    AppendToChatDisplay(state, L"\r\n[Summary]: Generating scan summary...\r\n");
+    SetAiStatusText(state, L"  Analyzing scan...");
 
-        if (response.empty()) {
-            std::string err = GetLLMClient().GetLastError();
-            AppendToChatDisplay(*pState, L"\r\n[AI Error]: " + ToWide(err) + L"\r\n");
-            SetAiStatusText(*pState, L"  Error");
-        }
-        else {
-            AppendToChatDisplay(*pState, L"\r\n[AI Triage]:\r\n" + ToWide(response) + L"\r\n");
-            SetAiStatusText(*pState, L"  Ready");
-        }
-    }).detach();
+    std::string prompt = BuildScanSummaryPrompt(filesProcessed, executablesFound, 0, 0, 0, 0);
+    std::vector<LLMMessage> messages = {
+        { "system", "You are a cybersecurity analyst. Analyze scan results concisely." },
+        { "user", prompt }
+    };
+    RunLlmRequest(state, messages, L"\r\n[AI Summary]:\r\n");
+}
+
+void RequestAuditAnalysis(AiSidebarState& state, const std::wstring& auditText)
+{
+    if (!ConfirmSendAllowed(state)) return;
+
+    AppendToChatDisplay(state, L"\r\n[Audit]: Analyzing security audit...\r\n");
+    SetAiStatusText(state, L"  Analyzing audit...");
+
+    std::string prompt = BuildSecurityAuditPrompt(WideToUtf8(auditText));
+    std::vector<LLMMessage> messages = {
+        { "system", "You are a cybersecurity analyst. Analyze this audit report." },
+        { "user", prompt }
+    };
+    RunLlmRequest(state, messages, L"\r\n[AI Audit Analysis]:\r\n");
 }

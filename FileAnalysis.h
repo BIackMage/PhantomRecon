@@ -46,3 +46,9 @@ std::wstring GetFileHidden(const std::wstring& filePath);
 
 // DACL permissions summary (owner + access entries)
 std::wstring GetFilePermissions(const std::wstring& filePath);
+
+// File size in bytes, or -1 if the file cannot be read.
+int64_t GetFileSizeBytes(const std::wstring& filePath);
+
+// Shannon entropy of the whole file in bits per byte (0.0 to 8.0). 0.0 if unreadable.
+double CalculateFileEntropy(const std::wstring& filePath);

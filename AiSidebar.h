@@ -2,17 +2,23 @@
 
 #include <windows.h>
 #include <string>
+#include "BackgroundWorker.h"
 #include "ScanTypes.h"
 
 // ---------------------------------------------------------------------------
-// AiSidebar — modern slide-out AI triage panel.
+// AiSidebar: slide-out AI triage panel.
 //
 // The sidebar is a separate WS_EX_TOOLWINDOW popup that sits flush against the
-// right edge of the main window.  It slides out/in with animation and tracks
-// the main window's position when it moves or resizes.
+// right edge of the main window. It slides out/in with animation and tracks the
+// main window's position when it moves or resizes. A thin vertical toggle tab on
+// the main window's right edge opens and closes it.
 //
-// A thin vertical toggle tab lives on the right edge of the main window's
-// client area so the user always has a visible handle to open/close the panel.
+// Threading: every LLM call runs on the shared BackgroundWorker and posts a
+// WM_APP_AI_RESPONSE to the panel window. Only AiPanelWndProc touches the
+// controls. See CLAUDE.md.
+//
+// Privacy: before anything is sent to an endpoint that is not on this machine,
+// the user is asked once per session. See ConfirmSendAllowed in AiSidebar.cpp.
 // ---------------------------------------------------------------------------
 
 struct AiSidebarState {
@@ -29,38 +35,46 @@ struct AiSidebarState {
     HWND hAuditButton = NULL;       // quick action: security audit analysis
     HWND hStatusLabel = NULL;       // connection status text
     HWND hTitleLabel = NULL;        // panel title label
+
+    BackgroundWorker* worker = nullptr;  // owned by AppState; set by CreateAiSidebar
+    bool remoteSendApproved = false;     // user said yes to a non-local endpoint this session
 };
 
-// Register the sidebar window class (call once at startup)
+// Register the sidebar window class (call once at startup).
 void RegisterAiSidebarClass(HINSTANCE hInst);
 
 // Create the sidebar panel and the toggle tab on the main window.
-void CreateAiSidebar(HWND hMainWindow, HINSTANCE hInst, AiSidebarState& state);
+void CreateAiSidebar(HWND hMainWindow, HINSTANCE hInst, AiSidebarState& state, BackgroundWorker& worker);
 
 // Toggle the sidebar open/closed with slide animation.
 void ToggleAiSidebar(AiSidebarState& state);
 
-// Reposition the sidebar to stay flush with the main window.
-// Call this from WM_MOVE and WM_SIZE handlers.
+// Reposition the sidebar to stay flush with the main window. Call from WM_MOVE / WM_SIZE.
 void RepositionAiSidebar(AiSidebarState& state);
 
-// Append text to the chat display
+// Append text to the chat display. UI thread only.
 void AppendToChatDisplay(AiSidebarState& state, const std::wstring& text);
 
-// Clear the chat display
+// Clear the chat display. UI thread only.
 void ClearChatDisplay(AiSidebarState& state);
 
-// Set the connection status text
+// Set the connection status text. UI thread only.
 void SetAiStatusText(AiSidebarState& state, const std::wstring& text);
 
-// Get the current width of the sidebar (0 if collapsed)
+// Current width of the sidebar (0 if collapsed).
 int GetAiSidebarWidth(const AiSidebarState& state);
 
-// Send a user message to the LLM (async) and display the response
+// Send a typed message to the LLM and display the response when it arrives.
 void SendUserMessage(AiSidebarState& state, const std::wstring& message);
 
-// Quick action: triage a specific file from scan results
+// Quick action: triage one file from the scan results.
 void TriageSelectedFile(AiSidebarState& state, const BaselineEntry& entry);
+
+// Quick action: summarise the scan counters.
+void RequestScanSummary(AiSidebarState& state, int filesProcessed, int executablesFound);
+
+// Quick action: explain the posture audit text shown in the system info panel.
+void RequestAuditAnalysis(AiSidebarState& state, const std::wstring& auditText);
 
 // Control IDs for sidebar widgets
 #define ID_AI_TOGGLE     2001

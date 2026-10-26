@@ -109,8 +109,14 @@ read every service binary and every scheduled task.
 
 | File | Role |
 |------|------|
-| `PhantomRecon.cpp` | Window, menus, scan threads, CSV writer |
-| `FileAnalysis.cpp` | Signatures, certificate chain, version info, attributes, DACL |
+| `PhantomRecon.cpp` | Entry point, window class, message dispatcher and handlers |
+| `MainCommands.cpp` | One function per menu and button command |
+| `ScanEngine.cpp` | File analysis driver, directory walk, CSV writer, scan thread |
+| `AppState.h` | The one struct that holds all application state |
+| `AppMessages.h` | Messages background threads post to the UI, and their payloads |
+| `BackgroundWorker.cpp` | Joinable thread pool used by every background job |
+| `SystemInfo.cpp` | Computer, CPU, RAM and disk text |
+| `FileAnalysis.cpp` | Signatures, certificate chain, version info, attributes, DACL, entropy |
 | `MalwareScoring.cpp` | PE import parsing, packer detection, composite score |
 | `ScoringConfig.cpp` | INI load and default write for all weights |
 | `Baseline.cpp` | `.prbl` read and write, in-memory lookup, comparison |
@@ -118,9 +124,11 @@ read every service binary and every scheduled task.
 | `SecurityChecks.cpp` | Core posture checks and report writer |
 | `SecurityChecksExtra.cpp` | Tasks, startup, PowerShell, firewall, audit policy, updates |
 | `HashUtils.cpp` | MD5 and SHA-256 |
-| `GuiComponents.cpp` | Progress bar and results list view |
+| `GuiComponents.cpp` | Progress bar, results list view, file dialogs, CSV parser |
 | `AiSidebar.cpp`, `LLMClient.cpp` | Optional triage panel and HTTP client |
 | `SettingsDialog.cpp`, `DarkMode.cpp` | Settings dialog, dark theme |
+
+Rules for changing the code are in [CLAUDE.md](CLAUDE.md). They apply to people too.
 
 ## Contributing
 

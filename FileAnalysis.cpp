@@ -11,6 +11,8 @@
 #include <iostream>
 #include <algorithm>
 #include <iomanip>
+#include <cmath>
+#include <vector>
 
 #pragma comment(lib, "wintrust.lib")
 #pragma comment(lib, "crypt32.lib")
@@ -481,6 +483,58 @@ std::wstring GetFileDeveloper(const std::wstring& filePath)
     if (companyNameLen == 0) return L"Unknown";
 
     return std::wstring(static_cast<wchar_t*>(pCompanyName));
+}
+
+
+// ---------------------------------------------------------------------------
+// Size and entropy
+// ---------------------------------------------------------------------------
+int64_t GetFileSizeBytes(const std::wstring& filePath)
+{
+    WIN32_FILE_ATTRIBUTE_DATA info = {};
+    if (!GetFileAttributesExW(filePath.c_str(), GetFileExInfoStandard, &info)) {
+        OutputDebugStringW((L"[FileAnalysis] GetFileSizeBytes failed: " + filePath + L"\n").c_str());
+        return -1;
+    }
+    ULARGE_INTEGER size;
+    size.LowPart = info.nFileSizeLow;
+    size.HighPart = info.nFileSizeHigh;
+    return static_cast<int64_t>(size.QuadPart);
+}
+
+double CalculateFileEntropy(const std::wstring& filePath)
+{
+    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ,
+        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        return 0.0;
+    }
+
+    unsigned long long counts[256] = {};
+    unsigned long long total = 0;
+
+    std::vector<BYTE> buffer(64 * 1024);
+    DWORD bytesRead = 0;
+    while (ReadFile(hFile, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, NULL) && bytesRead > 0) {
+        for (DWORD i = 0; i < bytesRead; ++i) {
+            counts[buffer[i]]++;
+        }
+        total += bytesRead;
+    }
+    CloseHandle(hFile);
+
+    if (total == 0) {
+        return 0.0;
+    }
+
+    double entropy = 0.0;
+    for (int i = 0; i < 256; ++i) {
+        if (counts[i] > 0) {
+            double probability = static_cast<double>(counts[i]) / static_cast<double>(total);
+            entropy -= probability * std::log2(probability);
+        }
+    }
+    return entropy;
 }
 
 

@@ -2,21 +2,18 @@
 
 #include <windows.h>
 #include <string>
+#include "BackgroundWorker.h"
 #include "LLMClient.h"
 
 // ---------------------------------------------------------------------------
-// SettingsDialog — modal settings dialog for configuring LLM connection
-// and other application preferences.
+// SettingsDialog: modal window for the LLM connection settings.
 //
-// Displays:
-//   - LLM endpoint URL
-//   - Model name
-//   - Max tokens
-//   - Temperature
-//   - Test Connection button with status feedback
-//   - Save / Cancel buttons
+// Shows endpoint URL, model name, max tokens, temperature, a Test Connection
+// button with a status line, and Save / Cancel. Settings persist to
+// phantom_recon_settings.ini next to the exe.
 //
-// Settings are persisted to an INI file (phantom_recon_settings.ini).
+// The connection test runs on the shared BackgroundWorker and posts
+// WM_APP_STATUS_TEXT back to the dialog. The dialog never blocks the UI.
 // ---------------------------------------------------------------------------
 
 struct AppSettings {
@@ -27,17 +24,17 @@ struct AppSettings {
     double       llmTemperature = LLMConfig{}.temperature;
 };
 
-// Show the settings dialog (modal). Returns true if user saved changes.
-bool ShowSettingsDialog(HWND hParent, HINSTANCE hInst);
+// Show the settings dialog (modal). Returns true if the user saved changes.
+bool ShowSettingsDialog(HWND hParent, HINSTANCE hInst, BackgroundWorker& worker);
 
-// Load settings from INI file. Returns defaults if file doesn't exist.
+// Load settings from the INI file. Returns defaults if the file does not exist.
 AppSettings LoadAppSettings();
 
-// Save settings to INI file.
+// Save settings to the INI file.
 void SaveAppSettings(const AppSettings& settings);
 
 // Apply loaded settings to the LLM client singleton.
 void ApplySettingsToLLMClient(const AppSettings& settings);
 
-// Settings menu ID
+// Settings menu ID (inserted into the File menu at runtime)
 #define ID_SETTINGS 32780
