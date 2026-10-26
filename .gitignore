@@ -1,0 +1,48 @@
+# Visual Studio build output
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+.vs/
+*.ilk
+*.pdb
+*.idb
+*.obj
+*.pch
+*.res
+*.tlog
+*.log
+*.recipe
+*.lastbuildstate
+*.FileListAbsolute.txt
+*.ipch
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.VC.opendb
+
+# Per-user Visual Studio state (holds local debugger settings and paths)
+*.vcxproj.user
+*.suo
+*.user
+*.aps
+
+# Runtime artifacts the program writes next to the exe
+*.prbl
+phantom_recon_settings.ini
+phantom_recon_scoring.ini
+security_audit_report.txt
+output.csv
+*.csv
+
+# Private planning notes kept outside the repo
+*.private.md
+*.private.txt
+
+# Editor and OS noise
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini

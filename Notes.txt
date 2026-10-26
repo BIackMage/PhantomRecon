@@ -1,0 +1,35 @@
+Phantom Recon - C++ program
+- Enumerates the computer's Hard Drive to look for .exe files for full mode scan
+- Fast Mode only checks installed programs (via windows) for fast mode
+It will ideally do the following
+- will check file location, size, md5, and other pertinent info to try to verify it's legit
+- will check to see if there's an updated version available
+- will do static analysis to assign malware score based on specific features (tbd but like function calls, etc)
+- will look at CVE's identified for both this version and the update (if available)
+** i'm open to additional suggestions.  This is intended to be a defensive endpoint auditing and threat-hunting application
+
+
++ means it's done, - means TODO
++ File Path:
++ File size
++ MD5
++ File Signature (Authenticode via WinVerifyTrust + signer name extraction)
++ File Metadata -> version info, developer info (via GetFileVersionInfo)
++ File Attributes / Permissions -> read only? hidden? permissions? (DACL/owner summary)
++ Entropy
++ Static Analysis (PE import table scanning, heuristic malware scoring 0-10)
++ call the system info functions and populate the left side!!!
++ add features to look for things in GPEN,
+    + unquoted service binpaths
+    + dll search order hijacking (i.e. unquoted path here too)
+    + writable windows service exe's
+    + alwaysinstallelevated registry key
+    + unattended install files (unattend.exe, etc... possible creds left in them)
+    - group policy prefs (win 2008 domain environs)
++ check if LsaISO is running to protect from credential-dumping tools
++ check group policy to
+	+ disable nbt-ns, llmnr, mdns
+	+ force smb signing (client side is best)
+	+ disable autodetect proxy settings
+- create wpad dns entry to the corporate proxy
+- private vlans to prevent end-user systems from communicating with eachother (steve and sally laptops shouldn't talk to each other)
