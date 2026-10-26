@@ -15,6 +15,8 @@
 #include "WmiQuery.h"
 
 #include <windows.h>
+#include <lm.h>
+#include <lmjoin.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <algorithm>
@@ -22,6 +24,7 @@
 #include <set>
 #include <sstream>
 
+#pragma comment(lib, "netapi32.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib")
 
@@ -38,6 +41,7 @@ struct PersistenceEntry {
     std::wstring name;
     std::wstring command;
     std::wstring program;
+    std::wstring payload;     // the DLL or script a host program (rundll32, wscript, cmd /c ...) runs
     std::vector<std::wstring> reasons;
     Level        level = Level::None;
     bool         isNew = false;
@@ -50,7 +54,39 @@ static void Flag(PersistenceEntry& e, Level level, const std::wstring& why)
     if (static_cast<int>(level) > static_cast<int>(e.level)) e.level = level;
 }
 
-// Resolve the program, check its signature and location.
+// The file a Windows host program runs for this entry ("rundll32 C:\x\e.dll,Start",
+// "wscript C:\x\s.vbs", "powershell -File C:\x\s.ps1", "cmd /c C:\x\e.exe"). Checking
+// only rundll32.exe or wscript.exe would always find a signed Windows program.
+static void InspectPayload(PersistenceEntry& e)
+{
+    std::wstring payload = e.command.empty() ? L"" : ScriptHostPayload(e.command);
+    if (payload.empty() || EqualsI(payload, e.program)) return;
+    if (payload.find(L'\\') == std::wstring::npos) {
+        wchar_t full[MAX_PATH] = {};
+        if (!SearchPathW(NULL, payload.c_str(), NULL, MAX_PATH, full, NULL)) return;   // depends on a working folder we cannot know
+        payload = full;
+    }
+    e.payload = payload;
+    DebugLog(L"InspectPayload: " + e.name + L" runs " + payload);
+    if (!FileExists(payload)) {
+        Flag(e, Level::Review, L"the file it runs is missing: " + payload);
+        return;
+    }
+    if (IsUserDropLocation(payload)) Flag(e, Level::High, L"it runs " + payload + L", which is in a user drop folder");
+    if (SignatureExpected(payload)) {
+        SignatureSummary sig = GetSignatureSummary(payload);
+        if (!sig.valid) {
+            Flag(e, IsUnderWindowsDirectory(payload) ? Level::High : Level::Review,
+                 L"the file it runs is not validly signed (" + sig.status + L"): " + payload);
+        }
+        e.microsoft = e.microsoft && sig.microsoft;
+    }
+    else if (!IsProtectedWindowsPath(payload)) {
+        e.microsoft = false;   // a script outside Windows' own folders is not Microsoft's, whatever runs it
+    }
+}
+
+// Resolve the program, check its signature and location, then the file it runs.
 static void Inspect(PersistenceEntry& e)
 {
     DebugLog(L"Inspect: " + e.source + L" | " + e.name + L" | " + e.command);
@@ -64,19 +100,25 @@ static void Inspect(PersistenceEntry& e)
     int strength = e.command.empty() ? 0 : CommandLineSuspicion(e.command, &why);
     if (strength > 0) Flag(e, strength == 2 ? Level::High : Level::Review, why);
 
-    if (e.program.empty() || e.program.find(L'\\') == std::wstring::npos) return;
-    if (!FileExists(e.program)) {
-        Flag(e, Level::Review, L"program file is missing");
-        return;
+    if (!e.program.empty() && e.program.find(L'\\') != std::wstring::npos) {
+        if (!FileExists(e.program)) {
+            Flag(e, Level::Review, L"program file is missing");
+        }
+        else {
+            if (IsUserDropLocation(e.program)) Flag(e, Level::High, L"program is in a user drop folder");
+            // Scripts, shortcuts and manifests are not Authenticode-signed as a rule, so
+            // "unsigned" would say nothing about them.
+            if (SignatureExpected(e.program)) {
+                SignatureSummary sig = GetSignatureSummary(e.program);
+                e.microsoft = sig.microsoft;
+                if (!sig.valid) {
+                    Flag(e, IsUnderWindowsDirectory(e.program) ? Level::High : Level::Review,
+                         L"not validly signed (" + sig.status + L")");
+                }
+            }
+        }
     }
-    if (IsUserDropLocation(e.program)) Flag(e, Level::High, L"program is in a user drop folder");
-
-    SignatureSummary sig = GetSignatureSummary(e.program);
-    e.microsoft = sig.microsoft;
-    if (!sig.valid) {
-        Flag(e, IsUnderWindowsDirectory(e.program) ? Level::High : Level::Review,
-             L"not validly signed (" + sig.status + L")");
-    }
+    InspectPayload(e);
 }
 
 // ---------------------------------------------------------------------------
@@ -168,10 +210,27 @@ static void CollectStartupFolders(std::vector<PersistenceEntry>& out)
                 e.program = ResolveShortcut(full, args);
                 e.command = e.program + (args.empty() ? L"" : L" " + args);
             }
+            else if (ExtensionOf(full) == L".url") {
+                // An Internet shortcut is a text file; what it opens is its URL= line. A
+                // signature check of the .url itself would always say "Unsigned".
+                std::wstring text, url;
+                if (ReadTextFile(full, text, 64 * 1024)) {
+                    for (const std::wstring& line : SplitAnyW(text, L"\r\n")) {
+                        std::wstring t = TrimW(line);
+                        if (StartsWithI(t, L"URL=")) {
+                            url = TrimW(t.substr(4));
+                            break;
+                        }
+                    }
+                }
+                DebugLog(L"Startup Internet shortcut " + full + L" opens " + url);
+                e.command = url.empty() ? full : url;
+                if (StartsWithI(url, L"file:")) e.program = FileUrlToPath(url);   // opens a local file: check that file
+            }
             else {
                 e.program = full;
                 e.command = full;
-                if (ExtensionOf(full) != L".url") Flag(e, Level::Review, L"a program or script placed directly in the Startup folder");
+                Flag(e, Level::Review, L"a program or script placed directly in the Startup folder");
             }
             Inspect(e);
             out.push_back(e);
@@ -228,12 +287,19 @@ static void CollectWinlogon(std::vector<PersistenceEntry>& out)
 static void CollectIfeo(std::vector<PersistenceEntry>& out)
 {
     const std::wstring base = L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options";
+    // On current Windows both registry views can show the same key. One debugger
+    // value is one entry, whichever view it was read through.
+    std::set<std::wstring> seen;
     for (REGSAM view : { static_cast<REGSAM>(KEY_WOW64_64KEY), static_cast<REGSAM>(KEY_WOW64_32KEY) }) {
         for (const std::wstring& exe : RegEnumSubKeys(HKEY_LOCAL_MACHINE, base, view)) {
             std::wstring debugger = RegReadString(HKEY_LOCAL_MACHINE, base + L"\\" + exe, L"Debugger", true, view);
             if (TrimW(debugger).empty()) continue;
+            if (!seen.insert(ToLowerW(exe + L"|" + TrimW(debugger))).second) {
+                DebugLog(L"IFEO " + exe + L": same Debugger value in the other registry view, listed once");
+                continue;
+            }
             PersistenceEntry e;
-            e.source = L"Image File Execution Options";
+            e.source = view == KEY_WOW64_32KEY ? L"Image File Execution Options (32-bit)" : L"Image File Execution Options";
             e.location = L"HKLM\\" + base + L"\\" + exe;
             e.name = exe;
             e.command = debugger;
@@ -443,9 +509,14 @@ static void CollectOfficeAddins(std::vector<PersistenceEntry>& out)
         for (const Hive& h : hives) {
             std::wstring base = std::wstring(L"Software\\Microsoft\\Office\\") + app + L"\\Addins";
             for (const std::wstring& progId : RegEnumSubKeys(h.root, base, h.view)) {
+                // Every registered add-in is listed, whatever its LoadBehavior: 3 loads at
+                // startup, 2 is set to load at startup, 8, 9 and 16 load on demand (the
+                // first time a ribbon button needs them), and 0 can be switched back on
+                // from Office's own menu.
                 DWORD load = 0;
-                RegReadDword(h.root, base + L"\\" + progId, L"LoadBehavior", load, h.view);
-                if ((load & 1) == 0 && load != 0) continue;   // not set to load
+                bool hasLoad = RegReadDword(h.root, base + L"\\" + progId, L"LoadBehavior", load, h.view);
+                DebugLog(L"Office add-in " + progId + L" (" + app + L", " + h.label + L") LoadBehavior " +
+                         (hasLoad ? std::to_wstring(load) : std::wstring(L"not set")));
                 std::wstring manifest = RegReadString(h.root, base + L"\\" + progId, L"Manifest", true, h.view);
                 std::wstring friendly = RegReadString(h.root, base + L"\\" + progId, L"FriendlyName", true, h.view);
                 PersistenceEntry e;
@@ -453,10 +524,13 @@ static void CollectOfficeAddins(std::vector<PersistenceEntry>& out)
                 e.location = std::wstring(h.label) + L"\\" + base;
                 e.name = friendly.empty() ? progId : friendly + L" (" + progId + L")";
                 if (!manifest.empty()) {
-                    std::wstring path = manifest;
-                    size_t bar = path.find(L'|');
-                    if (bar != std::wstring::npos) path = path.substr(0, bar);
-                    if (StartsWithI(path, L"file:///")) path = ReplaceAllW(path.substr(8), L"/", L"\\");
+                    std::wstring path = FileUrlToPath(manifest);
+                    // A VSTO manifest is XML and never Authenticode-signed. The code it loads
+                    // is the DLL beside it with the same name; check that when it is there.
+                    if (ExtensionOf(path) == L".vsto") {
+                        std::wstring dll = path.substr(0, path.size() - 5) + L".dll";
+                        if (FileExists(dll)) path = dll;
+                    }
                     e.program = path;
                     e.command = manifest;
                 }
@@ -540,12 +614,10 @@ static void CollectChromiumExtensions(const std::wstring& browser, const std::ws
             std::wstring manifest;
             if (!ReadTextFile(JoinPath(versionDir, L"manifest.json"), manifest, 512 * 1024)) continue;
             std::wstring name = JsonStringValue(manifest, L"name");
-            if (name.rfind(L"__MSG_", 0) == 0) {
-                std::wstring key = name.substr(6);
-                if (!key.empty() && key.back() == L'_') {
-                    key.pop_back();
-                    key.pop_back();
-                }
+            // "__MSG_key__" names a string in _locales. A malformed reference such as
+            // "__MSG__" has no key and is shown as written.
+            std::wstring key = ExtensionMessageKey(name);
+            if (!key.empty()) {
                 std::wstring messages;
                 if (ReadTextFile(JoinPath(versionDir, L"_locales\\en\\messages.json"), messages, 512 * 1024) ||
                     ReadTextFile(JoinPath(versionDir, L"_locales\\en_US\\messages.json"), messages, 512 * 1024)) {
@@ -562,6 +634,45 @@ static void CollectChromiumExtensions(const std::wstring& browser, const std::ws
         FindClose(he);
     } while (FindNextFileW(hp, &pd));
     FindClose(hp);
+}
+
+// Is an organization managing this PC? Forced browser extensions are normal then.
+// Domain join, Microsoft Entra ID join, or enrolment in a device management service
+// (Intune or another MDM). Windows' own built-in enrolments ("Deploy Authority",
+// "Cloud Authority", "Local Authority" and ones without a provider) do not count.
+static bool IsManagedPc(std::wstring& how)
+{
+    if (!GetJoinedDomainName().empty()) {
+        how = L"joined to an Active Directory domain";
+        DebugLog(L"IsManagedPc: domain joined");
+        return true;
+    }
+    PDSREG_JOIN_INFO info = NULL;
+    if (SUCCEEDED(NetGetAadJoinInformation(NULL, &info)) && info) {
+        bool joined = info->joinType == DSREG_DEVICE_JOIN;
+        NetFreeAadJoinInformation(info);
+        if (joined) {
+            how = L"joined to Microsoft Entra ID";
+            DebugLog(L"IsManagedPc: Entra ID joined");
+            return true;
+        }
+    }
+    const std::wstring enrollments = L"SOFTWARE\\Microsoft\\Enrollments";
+    for (const std::wstring& id : RegEnumSubKeys(HKEY_LOCAL_MACHINE, enrollments)) {
+        std::wstring key = enrollments + L"\\" + id;
+        std::wstring provider = TrimW(RegReadString(HKEY_LOCAL_MACHINE, key, L"ProviderID"));
+        DWORD state = 0;
+        if (!RegReadDword(HKEY_LOCAL_MACHINE, key, L"EnrollmentState", state) || state != 1) continue;
+        if (provider.empty() || EqualsI(provider, L"Deploy Authority") || EqualsI(provider, L"Cloud Authority") ||
+            EqualsI(provider, L"Local Authority")) {
+            continue;
+        }
+        how = L"enrolled in device management (" + provider + L")";
+        DebugLog(L"IsManagedPc: MDM enrolment " + provider);
+        return true;
+    }
+    DebugLog(L"IsManagedPc: no domain, Entra ID join or device management found");
+    return false;
 }
 
 static void CollectBrowserExtensions(std::vector<PersistenceEntry>& out)
@@ -595,7 +706,8 @@ static void CollectBrowserExtensions(std::vector<PersistenceEntry>& out)
     }
 
     // Extensions forced in by policy. Companies do this on purpose; adware does it too.
-    bool domainJoined = !GetJoinedDomainName().empty();
+    std::wstring managedHow;
+    bool managed = IsManagedPc(managedHow);
     struct Policy { HKEY root; const wchar_t* key; const wchar_t* browser; };
     const Policy policies[] = {
         { HKEY_LOCAL_MACHINE, L"SOFTWARE\\Policies\\Google\\Chrome\\ExtensionInstallForcelist", L"Chrome" },
@@ -609,8 +721,9 @@ static void CollectBrowserExtensions(std::vector<PersistenceEntry>& out)
             e.source = std::wstring(p.browser) + L" forced extension (policy)";
             e.location = RegRootName(p.root) + L"\\" + p.key;
             e.name = v.text;
-            Flag(e, domainJoined ? Level::Review : Level::High,
-                 domainJoined ? L"installed by policy (normal for company PCs)" : L"forced in by policy on a PC no company manages");
+            Flag(e, managed ? Level::Review : Level::High,
+                 managed ? L"installed by policy; this PC is " + managedHow + L", so that is normal for it"
+                         : std::wstring(L"forced in by policy on a PC no organization manages (no domain, Entra ID or device management)"));
             out.push_back(e);
         }
     }
@@ -619,27 +732,54 @@ static void CollectBrowserExtensions(std::vector<PersistenceEntry>& out)
 static void CollectServices(std::vector<PersistenceEntry>& out)
 {
     std::wstring error;
+    int hosted = 0;
     for (const ServiceInfo& s : EnumerateServices(&error)) {
         if (s.startType == SERVICE_DISABLED || s.exePath.empty()) continue;
-        if (!(s.serviceType & SERVICE_WIN32_OWN_PROCESS)) continue;   // shared svchost services are Windows'
-        if (IsUnderWindowsDirectory(s.exePath)) continue;
+        // Every service is inspected, Windows' own included: a service in C:\Windows
+        // can be replaced or added like any other.
         PersistenceEntry e;
         e.source = L"Service";
         e.location = L"HKLM\\SYSTEM\\CurrentControlSet\\Services\\" + s.name;
         e.name = s.name + (s.displayName.empty() ? L"" : L" (" + s.displayName + L")");
         e.command = s.binaryPathRaw;
         e.program = s.exePath;
-        Inspect(e);
+
+        // A service hosted by the real svchost.exe runs the DLL named by ServiceDll;
+        // that DLL is the code to check, not svchost.exe.
+        bool svchostHosted = EqualsI(FileNameOf(s.exePath), L"svchost.exe") && IsProtectedWindowsPath(s.exePath);
+        if (svchostHosted) {
+            std::wstring key = L"SYSTEM\\CurrentControlSet\\Services\\" + s.name;
+            std::wstring dll = TrimW(RegReadString(HKEY_LOCAL_MACHINE, key + L"\\Parameters", L"ServiceDll"));
+            if (dll.empty()) dll = TrimW(RegReadString(HKEY_LOCAL_MACHINE, key, L"ServiceDll"));
+            while (!dll.empty() && dll.front() == L'"') dll.erase(dll.begin());
+            while (!dll.empty() && dll.back() == L'"') dll.pop_back();
+            if (dll.empty()) continue;   // nothing beyond svchost.exe itself, which runs for every such service
+            hosted++;
+            e.source = L"Service DLL (svchost)";
+            e.program = dll;
+            e.command = s.binaryPathRaw + L"  [ServiceDll " + dll + L"]";
+            Inspect(e);
+            if (!IsUnderWindowsDirectory(dll)) {
+                Flag(e, Level::Review, L"the shared Windows service host (svchost.exe) loads this DLL from outside the Windows folder");
+            }
+        }
+        else {
+            Inspect(e);
+        }
         out.push_back(e);
     }
+    DebugLog(L"CollectServices: " + std::to_wstring(hosted) + L" svchost service DLL(s) inspected" +
+             (error.empty() ? L"" : L"; " + error));
 }
 
 // ---------------------------------------------------------------------------
 // Snapshot of entries between audits
 // ---------------------------------------------------------------------------
+// Whitespace inside a command (tabs, double spaces, the line breaks of a WMI script)
+// is folded, so a key always reads back exactly as it was written.
 static std::wstring SnapshotKey(const PersistenceEntry& e)
 {
-    return ToLowerW(e.source + L"|" + e.name + L"|" + e.command);
+    return NormalizeSnapshotKey(e.source + L"|" + e.name + L"|" + e.command);
 }
 
 static std::set<std::wstring> LoadSnapshot(const std::wstring& path, bool& existed)
@@ -649,7 +789,8 @@ static std::set<std::wstring> LoadSnapshot(const std::wstring& path, bool& exist
     existed = ReadTextFile(path, text);
     if (!existed) return keys;
     for (const std::wstring& line : SplitW(text, L'\n')) {
-        if (!line.empty() && line[0] != L'#') keys.insert(line);
+        std::wstring key = NormalizeSnapshotKey(line);   // also drops a CR left by an editor
+        if (!key.empty() && key[0] != L'#') keys.insert(key);
     }
     return keys;
 }
@@ -708,19 +849,22 @@ SecurityCheckResult CheckPersistence(const AuditContext& context)
             newCount++;
             Flag(e, Level::Review, L"NEW since the last audit");
         }
-        if (context.baseline && !e.program.empty() && FileExists(e.program)) {
-            const BaselineEntry* b = context.baseline->FindEntry(e.program);
+        // The program and the file a host program runs are both compared with the baseline.
+        for (const std::wstring& file : { e.program, e.payload }) {
+            if (!context.baseline || file.empty() || !FileExists(file)) continue;
+            const wchar_t* what = file == e.payload ? L"the file it runs" : L"program";
+            const BaselineEntry* b = context.baseline->FindEntry(file);
             if (!b) {
                 // Only meaningful when the baseline recorded that folder; a baseline of
                 // one folder says nothing about programs elsewhere.
-                if (!e.microsoft && context.baseline->CoversFolderOf(e.program)) {
-                    Flag(e, Level::Review, L"program is not in the baseline, but its folder is");
+                if (!e.microsoft && context.baseline->CoversFolderOf(file)) {
+                    Flag(e, Level::Review, std::wstring(what) + L" is not in the baseline, but its folder is");
                 }
             }
             else {
-                std::wstring sha = ComputeFileSHA256(ToExtendedPath(e.program));
+                std::wstring sha = ComputeFileSHA256(ToExtendedPath(file));
                 if (!sha.empty() && !b->sha256.empty() && !EqualsI(sha, b->sha256)) {
-                    Flag(e, e.microsoft ? Level::Review : Level::High, L"program changed since the baseline");
+                    Flag(e, e.microsoft ? Level::Review : Level::High, std::wstring(what) + L" changed since the baseline");
                 }
             }
         }

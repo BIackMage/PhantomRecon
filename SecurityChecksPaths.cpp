@@ -123,9 +123,8 @@ SecurityCheckResult CheckDllSearchPaths()
     std::wstring systemPath = RegReadString(HKEY_LOCAL_MACHINE,
         L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment", L"Path", true);
     for (const std::wstring& raw : SplitW(systemPath, L';')) {
-        std::wstring dir = TrimW(raw);
-        while (!dir.empty() && (dir.back() == L'\\' || dir.back() == L'"')) dir.pop_back();
-        if (!dir.empty() && dir.front() == L'"') dir.erase(dir.begin());
+        // "C:\" stays "C:\": cut to "C:" it would mean the current folder of drive C.
+        std::wstring dir = CleanPathListEntry(raw);
         if (dir.empty() || !DirectoryExists(dir)) continue;
         std::wstring who;
         if (LowPrivilegeWritable(dir, true, &who)) {
@@ -141,7 +140,8 @@ SecurityCheckResult CheckDllSearchPaths()
     std::set<std::wstring> known = KnownDlls();
     CappedList programLines(40);
     for (const PrivilegedProgram& p : PrivilegedPrograms(notChecked)) {
-        if (IsPackagedAppPath(p.image) || IsUnderWindowsDirectory(p.image)) continue;
+        // Windows' own folders are skipped, except the ones normal users can write to.
+        if (IsPackagedAppPath(p.image) || IsProtectedWindowsPath(p.image)) continue;
         std::wstring dir = DirectoryOf(p.image);
         std::wstring key = ToLowerW(dir);
         if (dir.empty() || !seen.insert(key).second) continue;   // already reported as a service folder

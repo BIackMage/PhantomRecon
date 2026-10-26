@@ -4,12 +4,16 @@
 #include "AppPaths.h"
 #include "CheckHelpers.h"
 #include "FileAnalysis.h"
+#include "SystemInfo.h"
 #include "TextUtils.h"
 #include "WmiQuery.h"
 
 #include <windows.h>
 #include <comdef.h>
+#include <sddl.h>
 #include <taskschd.h>
+#include <map>
+#include <set>
 #include <sstream>
 
 #pragma comment(lib, "taskschd.lib")
@@ -35,6 +39,7 @@ struct TaskInfo {
     std::vector<std::wstring> triggers;
     std::vector<TaskAction>   actions;
     bool         comHandler = false;
+    bool         definitionRead = false;   // false: Windows listed the task but would not show what it runs
 };
 
 static std::wstring Bstr(BSTR b)
@@ -70,7 +75,11 @@ static void ReadTask(IRegisteredTask* task, TaskInfo& info)
     if (SUCCEEDED(task->get_Enabled(&enabled))) info.enabled = enabled == VARIANT_TRUE;
 
     ITaskDefinition* def = NULL;
-    if (FAILED(task->get_Definition(&def)) || !def) return;
+    if (FAILED(task->get_Definition(&def)) || !def) {
+        DebugLog(L"Definition not readable: " + info.path);
+        return;
+    }
+    info.definitionRead = true;
 
     IRegistrationInfo* reg = NULL;
     if (SUCCEEDED(def->get_RegistrationInfo(&reg)) && reg) {
@@ -168,15 +177,65 @@ static void WalkFolder(ITaskFolder* folder, std::vector<TaskInfo>& out, int& den
     }
 }
 
-static bool IsSystemAccount(const std::wstring& user)
+// True for the LocalSystem account in any spelling the Task Scheduler stores:
+// "SYSTEM", "NT AUTHORITY\SYSTEM", "S-1-5-18", or a localized name such as
+// "NT-AUTORITAET\SYSTEM" or "AUTORITE NT\Systeme". Other names are resolved to a SID
+// once per audit (cache) and compared with LocalSystem's.
+static bool IsSystemAccount(const std::wstring& userIn, std::map<std::wstring, bool>& cache)
 {
+    std::wstring user = TrimW(userIn);
     std::wstring u = ToLowerW(user);
-    return u == L"system" || u == L"s-1-5-18" || u == L"nt authority\\system" || u == L"localsystem";
+    if (u.empty()) return false;
+    if (u == L"system" || u == L"s-1-5-18" || u == L"nt authority\\system" || u == L"localsystem") return true;
+    auto known = cache.find(u);
+    if (known != cache.end()) return known->second;
+
+    bool system = false;
+    PSID stringSid = NULL;
+    if (u.rfind(L"s-1-", 0) == 0) {
+        if (ConvertStringSidToSidW(user.c_str(), &stringSid)) {
+            system = IsWellKnownSid(stringSid, WinLocalSystemSid) != FALSE;
+            LocalFree(stringSid);
+        }
+    }
+    else {
+        BYTE sid[SECURITY_MAX_SID_SIZE] = {};
+        DWORD sidSize = sizeof(sid);
+        wchar_t domain[256] = {};
+        DWORD domainSize = 256;
+        SID_NAME_USE use;
+        if (LookupAccountNameW(NULL, user.c_str(), sid, &sidSize, domain, &domainSize, &use)) {
+            system = IsWellKnownSid(sid, WinLocalSystemSid) != FALSE;
+        }
+    }
+    if (system) DebugLog(L"Task account " + user + L" is LocalSystem");
+    cache[u] = system;
+    return system;
 }
 
-static bool IsMicrosoftAuthor(const std::wstring& author)
+// Every registered task is also a file under %SystemRoot%\System32\Tasks, named like
+// the task path. A normal user may list the names, while the Task Scheduler API leaves
+// out tasks that user may not read. unlisted counts folders that could not be listed.
+static void ListTaskFiles(const std::wstring& dir, const std::wstring& relative, std::vector<std::wstring>& out,
+                          int depth, int& unlisted)
 {
-    return author.empty() || ContainsI(author, L"Microsoft") || author[0] == L'$' || author[0] == L'@';
+    if (depth > 12) return;
+    WIN32_FIND_DATAW fd = {};
+    HANDLE h = FindFirstFileW(JoinPath(dir, L"*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) {
+        DebugLog(L"Cannot list task folder " + dir + L" (error " + std::to_wstring(GetLastError()) + L")");
+        unlisted++;
+        return;
+    }
+    do {
+        std::wstring name = fd.cFileName;
+        if (name == L"." || name == L"..") continue;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+        std::wstring rel = relative + L"\\" + name;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ListTaskFiles(JoinPath(dir, name), rel, out, depth + 1, unlisted);
+        else out.push_back(rel);
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
 }
 
 SecurityCheckResult CheckScheduledTasks()
@@ -206,6 +265,7 @@ SecurityCheckResult CheckScheduledTasks()
     service->Release();
     DebugLog(L"Read " + std::to_wstring(tasks.size()) + L" tasks");
 
+    std::map<std::wstring, bool> accountCache;
     std::wstringstream flagged;
     std::wstringstream inventory;
     int high = 0, medium = 0;
@@ -225,8 +285,10 @@ SecurityCheckResult CheckScheduledTasks()
             bool severe = false;
 
             // Windows' own tasks run Windows programs with hidden windows all the time;
-            // only strong signs count for them.
-            bool windowsOwnTask = microsoftFolder && IsUnderWindowsDirectory(program);
+            // only strong signs count for them. A Windows folder that normal users can
+            // write to (Tasks, Temp, Tracing) does not count as Windows' own.
+            bool windowsProgram = IsProtectedWindowsPath(program);
+            bool windowsOwnTask = microsoftFolder && windowsProgram;
             int strength = CommandLineSuspicion(command, &why);
             if (strength == 2 || (strength == 1 && !windowsOwnTask)) {
                 reasons.push_back(why);
@@ -240,12 +302,58 @@ SecurityCheckResult CheckScheduledTasks()
             if (program.find(L'\\') != std::wstring::npos && !exists) {
                 reasons.push_back(L"program file is missing");
             }
-            if (exists && !IsUnderWindowsDirectory(program)) {
-                SignatureSummary sig = GetSignatureSummary(program);
-                if (!sig.valid) reasons.push_back(L"program is not validly signed (" + sig.status + L")");
+            SignatureSummary sig;
+            bool sigRead = false;
+            if (exists && SignatureExpected(program)) {
+                sig = GetSignatureSummary(program);
+                sigRead = true;
+                if (!sig.valid && !windowsProgram) reasons.push_back(L"program is not validly signed (" + sig.status + L")");
             }
-            if (IsSystemAccount(t.userId) && !IsMicrosoftAuthor(t.author) && !microsoftFolder) {
-                reasons.push_back(L"runs as SYSTEM, created by " + t.author);
+
+            // The file a host program runs: "rundll32 C:\x\e.dll", "wscript C:\x\s.vbs",
+            // "powershell -File C:\x\s.ps1", "cmd /c C:\x\e.exe".
+            std::wstring payload = ScriptHostPayload(command);
+            if (!payload.empty() && payload.find(L'\\') == std::wstring::npos) {
+                wchar_t full[MAX_PATH] = {};
+                payload = SearchPathW(NULL, payload.c_str(), NULL, MAX_PATH, full, NULL) ? std::wstring(full) : L"";
+            }
+            if (EqualsI(payload, program)) payload.clear();
+            bool payloadMicrosoft = true;
+            if (!payload.empty()) {
+                DebugLog(L"Task " + t.path + L" runs " + payload);
+                if (!FileExists(payload)) {
+                    reasons.push_back(L"the file it runs is missing: " + payload);
+                    payloadMicrosoft = false;
+                }
+                else if (IsUserDropLocation(payload)) {
+                    reasons.push_back(L"it runs " + payload + L", which is in a user drop folder");
+                    severe = true;
+                    payloadMicrosoft = false;
+                }
+                else if (SignatureExpected(payload)) {
+                    SignatureSummary payloadSig = GetSignatureSummary(payload);
+                    payloadMicrosoft = payloadSig.microsoft;
+                    if (!payloadSig.valid && !IsProtectedWindowsPath(payload)) {
+                        reasons.push_back(L"the file it runs is not validly signed (" + payloadSig.status + L"): " + payload);
+                    }
+                }
+                else {
+                    payloadMicrosoft = IsProtectedWindowsPath(payload);
+                }
+            }
+
+            // A SYSTEM task outside \Microsoft\ is Windows' own only when the author says
+            // Microsoft and what it runs is signed by Microsoft. The author is free text
+            // and is often left empty, so it alone proves nothing.
+            if (!microsoftFolder && IsSystemAccount(t.userId, accountCache)) {
+                if (exists && !sigRead) {
+                    sig = GetSignatureSummary(program);
+                    sigRead = true;
+                }
+                bool microsoftCode = sigRead && sig.microsoft && payloadMicrosoft;
+                if (!IsMicrosoftTaskAuthor(t.author) || !microsoftCode) {
+                    reasons.push_back(L"runs as SYSTEM, created by " + (t.author.empty() ? std::wstring(L"(no author recorded)") : t.author));
+                }
             }
 
             if (!reasons.empty() && t.enabled) {
@@ -262,16 +370,60 @@ SecurityCheckResult CheckScheduledTasks()
         }
     }
 
+    // Tasks that exist but were not read: Windows hides tasks a normal user may not
+    // read, and a task whose security entry was removed from the registry is hidden
+    // from everyone while it keeps running.
+    std::set<std::wstring> readPaths;
+    for (const TaskInfo& t : tasks) {
+        if (t.definitionRead) readPaths.insert(ToLowerW(t.path));
+    }
+    std::wstring tasksDir = ExpandEnvironment(L"%SystemRoot%\\System32\\Tasks");
+    std::vector<std::wstring> taskFiles;
+    int unlistedFolders = 0;
+    bool haveDir = DirectoryExists(tasksDir);
+    if (haveDir) ListTaskFiles(tasksDir, L"", taskFiles, 0, unlistedFolders);
+    CappedList unreadOther(30), unreadMicrosoft(30);
+    for (const std::wstring& f : taskFiles) {
+        if (readPaths.count(ToLowerW(f))) continue;
+        if (StartsWithI(f, L"\\Microsoft\\")) unreadMicrosoft.Add(L"  " + f + L"\n");
+        else unreadOther.Add(L"  " + f + L"\n");
+    }
+    size_t unread = unreadOther.Total() + unreadMicrosoft.Total();
+    bool elevated = IsProcessElevated();
+    DebugLog(std::to_wstring(taskFiles.size()) + L" task files on disk, " + std::to_wstring(unread) + L" not readable through the API");
+
     std::wstringstream detail;
     detail << tasks.size() << L" task(s) read";
+    if (haveDir) detail << L", " << taskFiles.size() << L" task file(s) on disk";
     if (denied > 0) detail << L", " << denied << L" folder(s) not readable without administrator rights";
     detail << L".\n";
+    if (!haveDir) {
+        detail << L"The task folder " << tasksDir << L" could not be read, so tasks hidden from this account may be missed.\n";
+    }
+    else if (unlistedFolders > 0) {
+        detail << unlistedFolders << L" folder(s) under " << tasksDir << L" could not be listed by this account, so tasks in them may be missed.\n";
+    }
+    if (unread > 0) {
+        if (elevated) {
+            detail << unread << L" task file(s) exist that the Task Scheduler does not show even to an administrator. "
+                   << L"A task hidden this way still runs. Look at these files:\n";
+            detail << unreadOther.Text() << unreadMicrosoft.Text();
+        }
+        else {
+            detail << unread << L" task(s) exist that Windows does not let this account read (" << unreadMicrosoft.Total()
+                   << L" of them under \\Microsoft\\). Run as administrator to check what they run.\n";
+            if (!unreadOther.Empty()) detail << L"Not readable, outside \\Microsoft\\:\n" << unreadOther.Text();
+        }
+    }
     if (high + medium > 0) detail << L"Flagged:\n" << flagged.str();
     std::wstring inv = inventory.str();
     if (!inv.empty()) detail << L"Tasks outside \\Microsoft\\:\n" << inv;
 
+    // Tasks that could not be checked are not a pass: as a normal user the ones outside
+    // \Microsoft\ are unknown; as administrator any task hidden from the API is suspect.
+    bool uncheckedTasks = elevated ? unread > 0 : !unreadOther.Empty();
     if (high > 0) result.status = CHECK_FAIL;
-    else if (medium > 0) result.status = CHECK_WARNING;
+    else if (medium > 0 || uncheckedTasks) result.status = CHECK_WARNING;
     else result.status = CHECK_PASS;
     result.detail = detail.str();
     return result;
