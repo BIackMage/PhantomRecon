@@ -150,6 +150,12 @@ TEST(Score_Math)
     CHECK_EQ(HardeningLabel(10), std::wstring(L"Weak"));
 }
 
+static const std::set<std::wstring>& AllowedStatuses()
+{
+    static const std::set<std::wstring> allowed = { CHECK_PASS, CHECK_FAIL, CHECK_WARNING, CHECK_INFO, CHECK_ERROR, CHECK_NA };
+    return allowed;
+}
+
 // Runs the real audit on this PC. It does not judge the results (every PC is
 // different); it checks that every check returns a well-formed answer.
 TEST(Audit_RunsEveryCheck)
@@ -163,25 +169,49 @@ TEST(Audit_RunsEveryCheck)
         lastTotal = total;
     };
     std::vector<SecurityCheckResult> results = RunAllSecurityChecks(context);
-    CHECK_EQ(results.size(), GetRegisteredChecks().size());
+    const std::vector<RegisteredCheck>& checks = GetRegisteredChecks();
+    REQUIRE(results.size() == checks.size());
     CHECK_EQ(lastDone, lastTotal);
 
-    static const std::set<std::wstring> allowed = { CHECK_PASS, CHECK_FAIL, CHECK_WARNING, CHECK_INFO, CHECK_ERROR, CHECK_NA };
     int errors = 0;
-    for (const SecurityCheckResult& r : results) {
+    for (size_t i = 0; i < results.size(); ++i) {
+        const SecurityCheckResult& r = results[i];
         std::string id = tf::Narrow(r.id);
+        if (r.id != checks[i].id) tf::Fail(__FILE__, __LINE__, "result " + std::to_string(i) + " is " + id + ", expected " + tf::Narrow(checks[i].id));
         if (!FindCheckInfo(r.id)) tf::Fail(__FILE__, __LINE__, "result with unknown id " + id);
-        if (allowed.find(r.status) == allowed.end()) tf::Fail(__FILE__, __LINE__, "bad status for " + id + ": " + tf::Narrow(r.status));
-        if (r.name.empty()) tf::Fail(__FILE__, __LINE__, "no name for " + id);
-        if (r.detail.empty()) tf::Fail(__FILE__, __LINE__, "no detail for " + id);
-        if (r.detail.size() > 20200) tf::Fail(__FILE__, __LINE__, "detail too long for " + id + ": " + std::to_string(r.detail.size()));
-        if (HasTypographicPunctuation(r.detail)) tf::Fail(__FILE__, __LINE__, "typographic punctuation in " + id);
+        if (AllowedStatuses().find(r.status) == AllowedStatuses().end()) tf::Fail(__FILE__, __LINE__, "bad status for " + id + ": " + tf::Narrow(r.status));
         if (r.status == CHECK_ERROR) {
             ++errors;
             std::printf("    note: %s returned ERROR: %s\n", id.c_str(), tf::Narrow(r.detail).c_str());
         }
     }
-    CHECK(errors <= 2);   // a check may fail on an unusual PC, but not most of them
+    // A check may fail on an unusual PC, but not most of them. Missing Defender data
+    // (another antivirus, a server without it) is N/A with a reason, not ERROR.
+    CHECK(errors <= 2);
+
+    // The runner fills a missing name, cuts long evidence and replaces typographic
+    // punctuation, so its output cannot show whether a check does its own part. Call
+    // each check directly and judge what it returns before that safety net.
+    for (const RegisteredCheck& c : checks) {
+        std::string id = tf::Narrow(c.id);
+        SecurityCheckResult raw;
+        try {
+            raw = c.run(context);
+        }
+        catch (const std::exception& e) {
+            std::printf("    note: %s threw on its own: %s\n", id.c_str(), e.what());
+            continue;
+        }
+        if (raw.id != c.id) tf::Fail(__FILE__, __LINE__, id + " returned the id \"" + tf::Narrow(raw.id) + "\"");
+        if (raw.name.empty()) tf::Fail(__FILE__, __LINE__, "no name from " + id);
+        if (raw.detail.empty()) tf::Fail(__FILE__, __LINE__, "no detail from " + id);
+        if (AllowedStatuses().find(raw.status) == AllowedStatuses().end()) tf::Fail(__FILE__, __LINE__, "bad status from " + id + ": " + tf::Narrow(raw.status));
+        // Each check caps its own lists (CLAUDE.md, invariant 9); LimitDetail is only the backstop.
+        if (raw.detail.size() > 20000) tf::Fail(__FILE__, __LINE__, id + " does not cap its evidence: " + std::to_string(raw.detail.size()) + " characters");
+        // Typographic punctuation can come from names on this PC (a program called
+        // "Bob's Tool" with a curly quote), which the runner replaces; worth a note only.
+        if (HasTypographicPunctuation(raw.detail)) std::printf("    note: %s evidence has typographic punctuation (replaced by the runner)\n", id.c_str());
+    }
 
     HardeningScore score = ComputeHardeningScore(results);
     CHECK(score.score >= 0 && score.score <= 100);
@@ -261,7 +291,16 @@ TEST(Reports_HtmlEscapesEverything)
     CHECK(html.find(L"a&amp;b") != std::wstring::npos);
     CHECK(html.find(L"<!DOCTYPE html>") != std::wstring::npos || html.find(L"<!doctype html>") != std::wstring::npos);
     CHECK(!HasTypographicPunctuation(html));
-    CHECK(html.find(L"http://") == std::wstring::npos || html.find(L"src=\"http") == std::wstring::npos);   // no external files
+
+    // Self-contained: no address of any kind (the sample data has none either), and
+    // nothing that would load a file from elsewhere.
+    std::wstring lower = ToLowerW(html);
+    for (const wchar_t* bad : { L"http://", L"https://", L"src=\"//", L"src='//", L"href=\"//", L"href='//", L"url(", L"@import",
+                                L"<link", L"<iframe", L"<object", L"<embed", L"<base", L"<img" }) {
+        if (lower.find(bad) != std::wstring::npos) tf::Fail(__FILE__, __LINE__, "HTML report contains " + tf::Narrow(bad));
+    }
+    // The check above must be able to fail: the same search finds an https link.
+    CHECK(ToLowerW(L"<script src=\"HTTPS://cdn.example/x.js\">").find(L"https://") != std::wstring::npos);
 }
 
 TEST(Reports_Redaction)
@@ -277,8 +316,18 @@ TEST(Reports_Redaction)
     CHECK_EQ(r.rows.size(), d.rows.size());
     CHECK(r.rows[0].entry.path.find(L"<user>") != std::wstring::npos);
     CHECK(r.rows[0].entry.path.find(terms.profileDirectory) == std::wstring::npos);
-    if (terms.computerName.size() >= 3) CHECK(r.audit[0].detail.find(L"<host>") != std::wstring::npos);
-    if (terms.userName.size() >= 3) CHECK(!ContainsI(r.audit[0].detail, L" by " + terms.userName));
+    // When the user is named like the PC (alice on ALICE), one term covers both and the
+    // name becomes <user> in both places; either way the name itself must be gone.
+    bool sameName = EqualsI(terms.computerName, terms.userName);
+    const std::wstring& detail = r.audit[0].detail;
+    if (!terms.computerName.empty()) {
+        CHECK(detail.find(sameName ? L"Seen on <user>" : L"Seen on <host>") != std::wstring::npos);
+        CHECK(!ContainsI(detail, L"Seen on " + terms.computerName));
+    }
+    if (!terms.userName.empty()) {
+        CHECK(detail.find(L" by <user>") != std::wstring::npos);
+        CHECK(!ContainsI(detail, L" by " + terms.userName));
+    }
     std::wstring json = BuildJsonReport(r);
     CHECK(json.find(terms.profileDirectory) == std::wstring::npos);
 

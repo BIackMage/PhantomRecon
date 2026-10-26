@@ -31,15 +31,27 @@ TEXT_SUFFIXES = {".cpp", ".h", ".md", ".rc", ".txt", ".py", ".yml", ".yaml", ".p
 
 
 def tracked_files(root: pathlib.Path):
-    out = subprocess.run(["git", "ls-files", "-co", "--exclude-standard"], cwd=root, capture_output=True, text=True,
+    # -z: NUL-separated raw names. Without it git quotes and escapes any name with a
+    # non-ASCII letter ("docs/caf\303\251.md"), the path does not exist, and the file
+    # was silently skipped.
+    out = subprocess.run(["git", "ls-files", "-z", "-co", "--exclude-standard"], cwd=root, capture_output=True,
                          check=True).stdout
-    for name in out.splitlines():
-        path = root / name
+    for raw in out.split(b"\0"):
+        if not raw:
+            continue
+        path = root / raw.decode("utf-8", errors="surrogateescape")
         if path.suffix.lower() in TEXT_SUFFIXES or path.name in TEXT_SUFFIXES:
             yield path
 
 
 def main() -> int:
+    # The Windows console is often cp1252; a file name or line with a letter it
+    # cannot show must not crash the check halfway through.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
     fix = "--fix" in sys.argv
     root = pathlib.Path(__file__).resolve().parent.parent
     problems = 0

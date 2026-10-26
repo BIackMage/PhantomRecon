@@ -88,8 +88,9 @@ parts, and the program asks before sending to any other address.
 3. Run `PhantomRecon.exe`.
 
 The programs are not code-signed (a signing certificate costs money this project does
-not have), so Windows SmartScreen may warn the first time. The SHA-256 check is how you
-know the zip is the one built by this repository's release workflow.
+not have), so Windows SmartScreen may warn the first time. The SHA-256 check shows that
+your download is complete and is the same file as the one on the release page. It does
+not prove who built that file: it is only as trustworthy as the release page itself.
 
 ### First steps
 
@@ -179,9 +180,14 @@ msbuild PhantomRecon.sln /p:Configuration=Release /p:Platform=x64
 | `cli\PhantomRecon.Cli` | `PhantomReconCli.exe`, the console program |
 | `tests\PhantomRecon.Tests` | `PhantomReconTests.exe`, the automated tests |
 
-GitHub Actions builds and tests every push. A version tag (`v1.0.0`) builds the release
-zip and its SHA-256. `tools/make_winget_manifest.py` turns a release into a winget
-manifest.
+GitHub Actions builds and tests every push to any branch and every pull request; a
+change to documentation only gets the text checks. The tests run twice, as
+administrator and as a normal user, followed by a command-line smoke test and a check
+that the window program starts and closes. A version tag (`v1.0.0`, or `v1.0.0-rc.1`
+for a release candidate) runs all of that, then makes a draft release with the zip,
+its debug symbols and their SHA-256 files for the maintainer to check and publish; the
+winget manifests are kept with the workflow run. Every workflow step is a Python script
+in `tools/`, so the same checks run on a PC.
 
 The rules for changing the code are in [CLAUDE.md](CLAUDE.md). They apply to people too.
 

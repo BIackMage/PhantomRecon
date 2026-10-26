@@ -3,6 +3,7 @@
 
 #include "FileIO.h"
 #include "StringConv.h"
+#include "TextUtils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -182,7 +183,7 @@ bool ScoringConfig::LoadFromFile(const std::wstring& filePath)
             size_t end = line.find(']');
             if (end != std::string::npos) {
                 currentSection = TrimString(line.substr(1, end - 1));
-                std::transform(currentSection.begin(), currentSection.end(), currentSection.begin(), ::tolower);
+                currentSection = ToLowerA(currentSection);   // ASCII only; ::tolower on a signed char was undefined
             }
             continue;
         }

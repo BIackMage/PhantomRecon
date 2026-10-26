@@ -17,10 +17,12 @@ import pathlib
 import re
 import sys
 
+from release_common import REPO_URL, log, zip_name
+
 PUBLISHER = "BIackMage"
 PACKAGE = "PhantomRecon"
 IDENTIFIER = f"{PUBLISHER}.{PACKAGE}"
-REPO = "https://github.com/BIackMage/PhantomRecon"
+REPO = REPO_URL
 MANIFEST_VERSION = "1.6.0"
 
 
@@ -70,7 +72,7 @@ def locale_manifest(version: str) -> str:
 
 
 def installer_manifest(version: str, sha256: str) -> str:
-    url = f"{REPO}/releases/download/v{version}/PhantomRecon-{version}-x64.zip"
+    url = f"{REPO}/releases/download/v{version}/{zip_name(version)}"
     return (
         f"PackageIdentifier: {IDENTIFIER}\n"
         f"PackageVersion: {version}\n"
@@ -89,25 +91,32 @@ def installer_manifest(version: str, sha256: str) -> str:
     )
 
 
+def write_manifests(version: str, sha256: str, out: pathlib.Path) -> pathlib.Path:
+    """Write the three manifests under out and return their folder. The release
+    workflow calls this through package_release.py, so the zip name and the
+    download URL come from the same place (release_common.zip_name)."""
+    check_inputs(version, sha256)
+    folder = pathlib.Path(out) / PUBLISHER[0].lower() / PUBLISHER / PACKAGE / version
+    folder.mkdir(parents=True, exist_ok=True)
+    files = {
+        f"{IDENTIFIER}.yaml": version_manifest(version),
+        f"{IDENTIFIER}.locale.en-US.yaml": locale_manifest(version),
+        f"{IDENTIFIER}.installer.yaml": installer_manifest(version, sha256),
+    }
+    for name, text in files.items():
+        path = folder / name
+        path.write_text(text, encoding="utf-8", newline="\n")
+        log(f"wrote {path}")
+    return folder
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("version")
     parser.add_argument("sha256")
     parser.add_argument("--out", default="manifests")
     args = parser.parse_args()
-    check_inputs(args.version, args.sha256)
-
-    folder = pathlib.Path(args.out) / PUBLISHER[0].lower() / PUBLISHER / PACKAGE / args.version
-    folder.mkdir(parents=True, exist_ok=True)
-    files = {
-        f"{IDENTIFIER}.yaml": version_manifest(args.version),
-        f"{IDENTIFIER}.locale.en-US.yaml": locale_manifest(args.version),
-        f"{IDENTIFIER}.installer.yaml": installer_manifest(args.version, args.sha256),
-    }
-    for name, text in files.items():
-        path = folder / name
-        path.write_text(text, encoding="utf-8", newline="\n")
-        print(f"wrote {path}")
+    folder = write_manifests(args.version, args.sha256, pathlib.Path(args.out))
     print("Check with: winget validate --manifest", folder)
     return 0
 

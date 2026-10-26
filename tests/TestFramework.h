@@ -7,7 +7,8 @@
 //
 // CHECK records a failure and keeps going. REQUIRE stops the test. Every test
 // runs in its own scratch folder (TestDir()), deleted afterwards. The runner
-// prints one line per test and a total, and exits 1 when anything failed.
+// prints a RUN line before each test and a PASS or FAIL line after it, then the
+// totals. Exit codes are listed at the top of TestMain.cpp.
 // ---------------------------------------------------------------------------
 
 #include <functional>
@@ -31,10 +32,15 @@ struct Registrar {
 struct RequireFailed {};
 
 void Fail(const char* file, int line, const std::string& message);
-int  RunAll(const std::vector<std::string>& filters);
+int  RunAll(const std::vector<std::string>& filters, unsigned timeoutSeconds);
 
 // Scratch folder for the running test, with a trailing backslash.
 std::wstring TestDir();
+
+// The program's data folder for this run (what AppFilePath returns a path in), with a
+// trailing backslash. Empty and shared by every test of the run; a test that writes a
+// file here must delete it again.
+std::wstring DataDir();
 
 // Narrow text for messages.
 std::string Narrow(const std::wstring& s);
