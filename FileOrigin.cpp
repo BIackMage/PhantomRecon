@@ -82,6 +82,53 @@ static bool CreatedWithinDays(const std::wstring& path, int days)
     return ageDays <= static_cast<ULONGLONG>(days);
 }
 
+// Per-stream findings, at most kMaxOriginStreamWarnings of them, then one line
+// for the rest. Programs and scripts first, so a hidden program is never the
+// one left out. includePresent: also list ordinary non-routine streams.
+static void AddStreamWarnings(FileOriginInfo& info, bool includePresent)
+{
+    size_t listed = 0;
+    int64_t notListedExecutable = 0;
+    int64_t notListedOther = 0;
+    for (const AltStream& s : info.streams) {
+        if (!s.executable) continue;
+        if (listed < kMaxOriginStreamWarnings) {
+            info.warnings.push_back(L"ADS_EXECUTABLE: Stream \"" + s.name + L"\" (" + std::to_wstring(s.size) + L" bytes) holds a program or script");
+            listed++;
+        }
+        else {
+            notListedExecutable++;
+        }
+    }
+    if (includePresent) {
+        for (const AltStream& s : info.streams) {
+            if (s.executable || IsRoutineStreamName(s.name)) continue;
+            if (listed < kMaxOriginStreamWarnings) {
+                info.warnings.push_back(L"ADS_PRESENT: Stream \"" + s.name + L"\" (" + std::to_wstring(s.size) + L" bytes)");
+                listed++;
+            }
+            else {
+                notListedOther++;
+            }
+        }
+    }
+    if (notListedExecutable > 0) {
+        info.warnings.push_back(L"ADS_EXECUTABLE: " + std::to_wstring(notListedExecutable) +
+            L" more streams hold a program or script (not listed)");
+    }
+    if (notListedOther > 0) {
+        info.warnings.push_back(L"ADS_PRESENT: " + std::to_wstring(notListedOther) + L" more streams (not listed)");
+    }
+    int64_t notInspected = info.streamCount - static_cast<int64_t>(info.streams.size());
+    if (notInspected > 0) {
+        info.warnings.push_back(L"ADS_MANY: The file has " + std::to_wstring(info.streamCount) +
+            L" extra data streams; only the first " + std::to_wstring(info.streams.size()) + L" were inspected");
+    }
+    if (listed > 0 || notInspected > 0) {
+        OutputDebugStringW((L"[FileOrigin] Stream findings listed: " + std::to_wstring(listed) + L"\n").c_str());
+    }
+}
+
 FileOriginInfo AnalyzeFileOrigin(const std::wstring& path, bool isExecutable)
 {
     FileOriginInfo info;
@@ -108,6 +155,8 @@ FileOriginInfo AnalyzeFileOrigin(const std::wstring& path, bool isExecutable)
                 continue;
             }
 
+            info.streamCount++;
+            if (info.streams.size() >= kMaxOriginStreamsInspected) continue;
             AltStream s;
             s.name = name;
             s.size = data.StreamSize.QuadPart;
@@ -119,13 +168,13 @@ FileOriginInfo AnalyzeFileOrigin(const std::wstring& path, bool isExecutable)
         } while (FindNextStreamW(hFind, &data));
         FindClose(hFind);
     }
+    if (info.streamCount > static_cast<int64_t>(info.streams.size())) {
+        OutputDebugStringW((L"[FileOrigin] " + std::to_wstring(info.streamCount) + L" streams, inspected " +
+            std::to_wstring(info.streams.size()) + L"\n").c_str());
+    }
 
     if (!isExecutable) {
-        for (const AltStream& s : info.streams) {
-            if (s.executable) {
-                info.warnings.push_back(L"ADS_EXECUTABLE: Stream \"" + s.name + L"\" (" + std::to_wstring(s.size) + L" bytes) holds a program or script");
-            }
-        }
+        AddStreamWarnings(info, false);
         return info;
     }
 
@@ -146,13 +195,6 @@ FileOriginInfo AnalyzeFileOrigin(const std::wstring& path, bool isExecutable)
         }
     }
 
-    for (const AltStream& s : info.streams) {
-        if (s.executable) {
-            info.warnings.push_back(L"ADS_EXECUTABLE: Stream \"" + s.name + L"\" (" + std::to_wstring(s.size) + L" bytes) holds a program or script");
-        }
-        else if (!IsRoutineStreamName(s.name)) {
-            info.warnings.push_back(L"ADS_PRESENT: Stream \"" + s.name + L"\" (" + std::to_wstring(s.size) + L" bytes)");
-        }
-    }
+    AddStreamWarnings(info, true);
     return info;
 }

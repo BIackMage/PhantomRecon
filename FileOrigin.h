@@ -21,11 +21,20 @@ struct AltStream {
     bool         executable = false;   // starts with MZ, #!, or common script text
 };
 
+// Streams inspected per file. Any user can attach thousands of streams to a
+// file; past this many they are only counted.
+const size_t kMaxOriginStreamsInspected = 256;
+
+// Per-stream findings (ADS_EXECUTABLE, ADS_PRESENT) listed per file before the
+// rest are summed up in one line, so the warning text stays bounded.
+const size_t kMaxOriginStreamWarnings = 32;
+
 struct FileOriginInfo {
     int          zoneId = -1;          // -1 when there is no Zone.Identifier
     std::wstring hostUrl;
     std::wstring referrerUrl;
-    std::vector<AltStream>    streams;   // excluding Zone.Identifier
+    std::vector<AltStream>    streams;   // excluding Zone.Identifier; the first kMaxOriginStreamsInspected
+    int64_t      streamCount = 0;        // every stream excluding Zone.Identifier, inspected or not
     std::vector<std::wstring> warnings;  // "CODE: detail"
 };
 

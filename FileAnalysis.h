@@ -31,15 +31,31 @@ struct SignatureInfo {
     std::wstring catalogFile;      // security catalog that covers the file (catalog-signed only)
     std::wstring catalogSigner;    // who signed that catalog
     std::wstring revocation;       // "Not checked", "Good", "REVOKED", "Unknown (offline)", "Unknown (...)"
+    std::wstring timestamp;        // "YYYY-MM-DD" of a valid countersignature (timestamp), "" when none
     bool isEmbedded = false;
-    bool chainTrusted = false;
+    bool chainTrusted = false;     // chain trusted at the signing time (timestamped) or now (not timestamped)
     bool hashValid = false;
+    bool hashMismatch = false;     // the file content does not match its signed hash (TRUST_E_BAD_DIGEST)
+    bool timestamped = false;      // a valid timestamp vouches for the signing time
     std::vector<std::wstring> warnings;  // "CODE: detail"
 };
 
 // Full signature analysis. Unsigned files are also checked against the Windows
 // security catalogs, so Windows' own catalog-signed files report as signed.
+// Unless revocation is Online, nothing here touches the network: every trust
+// check and chain build uses only what Windows has cached, and the certificates
+// embedded in the signature are offered to the chain build.
 SignatureInfo AnalyzeFileSignature(const std::wstring& filePath, RevocationMode revocation = RevocationMode::Off);
+
+// True when the signature checks for this mode may download anything
+// (certificates, CRLs, OCSP answers). Only Online outside portable mode.
+bool SignatureChecksMayUseNetwork(RevocationMode revocation);
+
+// Revocation verdict from a revocation-checking chain's dwErrorStatus bits:
+// "REVOKED", "Good", "Unknown (offline)", "Unknown (no revocation information)"
+// or "Unknown (incomplete chain)". Depends on the certificate only, never on
+// the file, so it is safe to cache per certificate.
+std::wstring RevocationStatusFromChainError(DWORD chainErrorStatus);
 
 // Cached, cheap summary for checks that only need "who signed this and is it valid".
 struct SignatureSummary {
@@ -81,7 +97,13 @@ std::wstring GetFilePermissions(const std::wstring& filePath);
 int64_t GetFileSizeBytes(const std::wstring& filePath);
 
 // Shannon entropy of the whole file in bits per byte (0.0 to 8.0). 0.0 if unreadable.
+// Opens the file with full sharing, so files other programs have open for
+// writing are still read.
 double CalculateFileEntropy(const std::wstring& filePath);
+
+// Package folder name of a file under Program Files\WindowsApps, "" when the
+// path is not inside a package. Case-insensitive; accepts the \\?\ prefix.
+std::wstring PackageNameFromPath(const std::wstring& filePath);
 
 // Entropy of a buffer (bits per byte).
 double CalculateBufferEntropy(const uint8_t* data, size_t length);

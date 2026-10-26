@@ -140,17 +140,41 @@ static bool HasEmbeddedSignature(const std::wstring& filePath)
 }
 
 // ---------------------------------------------------------------------------
+// Network policy
+// ---------------------------------------------------------------------------
+bool SignatureChecksMayUseNetwork(RevocationMode revocation)
+{
+    return revocation == RevocationMode::Online && !IsPortableMode();
+}
+
+// Chain-build flags that keep Windows off the network: cached URLs only (no
+// download of missing certificates from a URL the file itself names) and no
+// automatic root update.
+static DWORD OfflineChainFlags(bool mayUseNetwork)
+{
+    return mayUseNetwork ? 0 : (CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL | CERT_CHAIN_DISABLE_AUTH_ROOT_AUTO_UPDATE);
+}
+
+// ---------------------------------------------------------------------------
 // Certificate chain analysis
 // ---------------------------------------------------------------------------
-static void AnalyzeCertChain(PCCERT_CONTEXT pSignerCert, SignatureInfo& info)
+// signatureStore: the certificates carried in the signature itself, so embedded
+// intermediates complete the chain without a download. verifyAt: the signing
+// time from a valid timestamp, or NULL for "now".
+static void AnalyzeCertChain(PCCERT_CONTEXT pSignerCert, HCERTSTORE signatureStore, const FILETIME* verifyAt,
+                             bool mayUseNetwork, SignatureInfo& info)
 {
     CERT_CHAIN_PARA chainPara = {};
     chainPara.cbSize = sizeof(CERT_CHAIN_PARA);
     chainPara.RequestedUsage.dwType = USAGE_MATCH_TYPE_AND;
 
     PCCERT_CHAIN_CONTEXT pChainContext = NULL;
-    BOOL chainBuilt = CertGetCertificateChain(NULL, pSignerCert, NULL, NULL, &chainPara,
-        CERT_CHAIN_CACHE_END_CERT, NULL, &pChainContext);
+    FILETIME when = {};
+    if (verifyAt) when = *verifyAt;
+    DebugLog(std::wstring(L"Chain build: ") + (verifyAt ? L"at the timestamp" : L"now") +
+        (mayUseNetwork ? L", network allowed" : L", cache only"));
+    BOOL chainBuilt = CertGetCertificateChain(NULL, pSignerCert, verifyAt ? &when : NULL, signatureStore, &chainPara,
+        CERT_CHAIN_CACHE_END_CERT | OfflineChainFlags(mayUseNetwork), NULL, &pChainContext);
 
     if (!chainBuilt || !pChainContext) {
         info.chainTrusted = false;
@@ -225,9 +249,14 @@ bool IsMicrosoftSignerName(const std::wstring& signer)
 // ---------------------------------------------------------------------------
 // Revocation cache (process-wide; see CLAUDE.md on singletons)
 // ---------------------------------------------------------------------------
+// Keyed by "<thumbprint>#<mode>": the verdict depends on the certificate and on
+// how hard the check was allowed to try, never on the file. Definite answers
+// (Good, REVOKED) are kept for 24 hours and written to disk; "Unknown" answers
+// are kept in memory for 15 minutes only, so a moment offline does not stick.
 struct RevocationCacheEntry {
     std::wstring status;
     ULONGLONG    checkedAt = 0;   // FILETIME as 100 ns ticks
+    bool         persist = true;  // definite answer: saved and kept for the long TTL
 };
 
 struct RevocationCacheState {
@@ -253,7 +282,18 @@ static ULONGLONG NowTicks()
     return li.QuadPart;
 }
 
-static const ULONGLONG kRevocationTtl = 24ULL * 3600ULL * 10000000ULL;   // 24 hours
+static const ULONGLONG kRevocationTtl = 24ULL * 3600ULL * 10000000ULL;        // 24 hours
+static const ULONGLONG kRevocationUnknownTtl = 15ULL * 60ULL * 10000000ULL;   // 15 minutes
+
+static bool IsDefiniteRevocation(const std::wstring& status)
+{
+    return status == L"Good" || status == L"REVOKED";
+}
+
+static std::wstring RevocationCacheKey(const std::wstring& thumbprint, RevocationMode mode)
+{
+    return thumbprint + L"#" + std::to_wstring(static_cast<int>(mode));
+}
 
 static std::wstring RevocationCachePath()
 {
@@ -269,6 +309,9 @@ static void LoadRevocationCacheLocked(RevocationCacheState& state)
     for (const std::wstring& line : SplitW(text, L'\n')) {
         std::vector<std::wstring> parts = SplitW(line, L'|', false);
         if (parts.size() != 3) continue;
+        // Entries written before the key carried the mode were per-file verdicts; skip them.
+        if (parts[0].find(L'#') == std::wstring::npos) continue;
+        if (!IsDefiniteRevocation(parts[1])) continue;
         RevocationCacheEntry e;
         e.status = parts[1];
         e.checkedAt = _wcstoui64(parts[2].c_str(), NULL, 10);
@@ -284,6 +327,7 @@ void SaveRevocationCache()
     std::wstring text;
     ULONGLONG now = NowTicks();
     for (const auto& pair : state.entries) {
+        if (!pair.second.persist) continue;
         if (now - pair.second.checkedAt > kRevocationTtl) continue;
         text += pair.first + L"|" + pair.second.status + L"|" + std::to_wstring(pair.second.checkedAt) + L"\n";
     }
@@ -292,69 +336,71 @@ void SaveRevocationCache()
     }
 }
 
-static bool LookupRevocation(const std::wstring& thumbprint, std::wstring& status)
+static bool LookupRevocation(const std::wstring& key, std::wstring& status)
 {
     RevocationCacheState& state = RevocationCache();
     std::lock_guard<std::mutex> lock(state.mutex);
     LoadRevocationCacheLocked(state);
-    auto it = state.entries.find(thumbprint);
+    auto it = state.entries.find(key);
     if (it == state.entries.end()) return false;
-    if (NowTicks() - it->second.checkedAt > kRevocationTtl) return false;
+    ULONGLONG ttl = it->second.persist ? kRevocationTtl : kRevocationUnknownTtl;
+    if (NowTicks() - it->second.checkedAt > ttl) return false;
     status = it->second.status;
     return true;
 }
 
-static void StoreRevocation(const std::wstring& thumbprint, const std::wstring& status)
+static void StoreRevocation(const std::wstring& key, const std::wstring& status)
 {
     RevocationCacheState& state = RevocationCache();
     std::lock_guard<std::mutex> lock(state.mutex);
     LoadRevocationCacheLocked(state);
-    state.entries[thumbprint] = RevocationCacheEntry{ status, NowTicks() };
-    state.dirty = true;
+    bool persist = IsDefiniteRevocation(status);
+    state.entries[key] = RevocationCacheEntry{ status, NowTicks(), persist };
+    if (persist) state.dirty = true;
 }
 
-static std::wstring CheckRevocation(const std::wstring& filePath, RevocationMode mode)
+std::wstring RevocationStatusFromChainError(DWORD chainErrorStatus)
 {
-    WINTRUST_FILE_INFO fileInfo = {};
-    fileInfo.cbStruct = sizeof(fileInfo);
-    fileInfo.pcwszFilePath = filePath.c_str();
+    wchar_t bits[32];
+    swprintf_s(bits, L"0x%08X", static_cast<unsigned int>(chainErrorStatus));
+    DebugLog(std::wstring(L"Revocation chain status ") + bits);
+    if (chainErrorStatus & CERT_TRUST_IS_REVOKED) return L"REVOKED";
+    if (chainErrorStatus & CERT_TRUST_IS_OFFLINE_REVOCATION) return L"Unknown (offline)";
+    if (chainErrorStatus & CERT_TRUST_REVOCATION_STATUS_UNKNOWN) return L"Unknown (no revocation information)";
+    // Without the issuer the signer's revocation cannot be checked at all.
+    if (chainErrorStatus & CERT_TRUST_IS_PARTIAL_CHAIN) return L"Unknown (incomplete chain)";
+    return L"Good";
+}
 
-    GUID policy = WINTRUST_ACTION_GENERIC_VERIFY_V2;
-    WINTRUST_DATA data = {};
-    data.cbStruct = sizeof(data);
-    data.dwUIChoice = WTD_UI_NONE;
-    data.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;
-    data.dwUnionChoice = WTD_CHOICE_FILE;
-    data.pFile = &fileInfo;
-    data.dwStateAction = WTD_STATEACTION_VERIFY;
-    data.dwProvFlags = WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
-    if (mode == RevocationMode::CacheOnly) data.dwProvFlags |= WTD_CACHE_ONLY_URL_RETRIEVAL;
+// Revocation of the signer certificate and its issuers (root excluded). Built
+// from the certificate, not the file, so a tampered or expired copy of a file
+// cannot change the verdict for every other file of that signer.
+static std::wstring CheckRevocation(PCCERT_CONTEXT pSignerCert, HCERTSTORE signatureStore, RevocationMode mode)
+{
+    bool mayUseNetwork = SignatureChecksMayUseNetwork(mode);
+    CERT_CHAIN_PARA chainPara = {};
+    chainPara.cbSize = sizeof(CERT_CHAIN_PARA);
+    chainPara.RequestedUsage.dwType = USAGE_MATCH_TYPE_AND;
 
-    LONG rc = WinVerifyTrust(NULL, &policy, &data);
-    data.dwStateAction = WTD_STATEACTION_CLOSE;
-    WinVerifyTrust(NULL, &policy, &data);
-
-    switch (rc) {
-    case ERROR_SUCCESS:                 return L"Good";
-    case CERT_E_REVOKED:                return L"REVOKED";
-    case CRYPT_E_REVOKED:               return L"REVOKED";
-    case CRYPT_E_REVOCATION_OFFLINE:    return L"Unknown (offline)";
-    case CRYPT_E_NO_REVOCATION_CHECK:   return L"Unknown (no revocation information)";
-    case CERT_E_REVOCATION_FAILURE:     return L"Unknown (offline)";
-    default: {
-        wchar_t buf[48];
-        swprintf_s(buf, L"Unknown (0x%08X)", static_cast<unsigned int>(rc));
-        return buf;
+    PCCERT_CHAIN_CONTEXT pChainContext = NULL;
+    DWORD flags = CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT | OfflineChainFlags(mayUseNetwork);
+    DebugLog(std::wstring(L"Revocation check, ") + (mayUseNetwork ? L"network allowed" : L"cache only"));
+    if (!CertGetCertificateChain(NULL, pSignerCert, NULL, signatureStore, &chainPara, flags, NULL, &pChainContext) ||
+        !pChainContext) {
+        return L"Unknown (chain build failed)";
     }
-    }
+    std::wstring status = RevocationStatusFromChainError(pChainContext->TrustStatus.dwErrorStatus);
+    CertFreeCertificateChain(pChainContext);
+    return status;
 }
 
 // ---------------------------------------------------------------------------
 // Catalog verification
 // ---------------------------------------------------------------------------
-static bool VerifyViaCatalog(const std::wstring& filePath, SignatureInfo& info)
+static bool VerifyViaCatalog(const std::wstring& filePath, bool mayUseNetwork, SignatureInfo& info)
 {
-    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    const std::wstring ioPath = ToExtendedPath(filePath);
+    HANDLE hFile = CreateFileW(ioPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) return false;
 
@@ -389,7 +435,7 @@ static bool VerifyViaCatalog(const std::wstring& filePath, SignatureInfo& info)
                 WINTRUST_CATALOG_INFO catalog = {};
                 catalog.cbStruct = sizeof(catalog);
                 catalog.pcwszCatalogFilePath = catalogInfo.wszCatalogFile;
-                catalog.pcwszMemberFilePath = filePath.c_str();
+                catalog.pcwszMemberFilePath = ioPath.c_str();
                 catalog.pcwszMemberTag = tag.c_str();
                 catalog.pbCalculatedFileHash = hash.data();
                 catalog.cbCalculatedFileHash = hashLen;
@@ -404,7 +450,8 @@ static bool VerifyViaCatalog(const std::wstring& filePath, SignatureInfo& info)
                 data.dwUnionChoice = WTD_CHOICE_CATALOG;
                 data.pCatalog = &catalog;
                 data.dwStateAction = WTD_STATEACTION_VERIFY;
-                data.dwProvFlags = WTD_SAFER_FLAG;
+                data.dwProvFlags = 0;   // no WTD_SAFER_FLAG, as for embedded signatures
+                if (!mayUseNetwork) data.dwProvFlags |= WTD_CACHE_ONLY_URL_RETRIEVAL;
 
                 DebugLog(std::wstring(L"WinVerifyTrust (catalog): ") + catalogInfo.wszCatalogFile);
                 LONG rc = WinVerifyTrust(NULL, &policy, &data);
@@ -446,8 +493,46 @@ static bool VerifyViaCatalog(const std::wstring& filePath, SignatureInfo& info)
 // ---------------------------------------------------------------------------
 // Full signature analysis
 // ---------------------------------------------------------------------------
-SignatureInfo AnalyzeFileSignature(const std::wstring& filePath, RevocationMode revocation)
+static std::wstring StripExtendedPrefix(const std::wstring& path)
 {
+    if (path.rfind(L"\\\\?\\UNC\\", 0) == 0) return L"\\\\" + path.substr(8);
+    if (path.rfind(L"\\\\?\\", 0) == 0) return path.substr(4);
+    return path;
+}
+
+std::wstring PackageNameFromPath(const std::wstring& filePath)
+{
+    std::wstring plain = StripExtendedPrefix(filePath);
+    if (!IsPackagedAppPath(plain)) return L"";
+    const std::wstring marker = L"\\windowsapps\\";
+    size_t at = ToLowerW(plain).find(marker);
+    if (at == std::wstring::npos) return L"";
+    std::wstring rest = plain.substr(at + marker.size());
+    std::wstring package = rest.substr(0, rest.find(L'\\'));
+    DebugLog(L"App package path, package " + package);
+    return package;
+}
+
+// Signing time vouched for by a valid timestamp, read from WinVerifyTrust's own
+// state (sftVerifyAsOf is the timestamp when a countersigner verified).
+static bool ReadTimestampFromState(HANDLE stateData, FILETIME& signingTime)
+{
+    if (!stateData) return false;
+    CRYPT_PROVIDER_DATA* provider = WTHelperProvDataFromStateData(stateData);
+    if (!provider) return false;
+    CRYPT_PROVIDER_SGNR* signer = WTHelperGetProvSignerFromChain(provider, 0, FALSE, 0);
+    if (!signer || signer->csCounterSigners == 0 || !signer->pasCounterSigners) return false;
+    if (signer->pasCounterSigners[0].dwError != ERROR_SUCCESS) return false;
+    signingTime = signer->sftVerifyAsOf;
+    return signingTime.dwHighDateTime != 0 || signingTime.dwLowDateTime != 0;
+}
+
+SignatureInfo AnalyzeFileSignature(const std::wstring& filePathIn, RevocationMode revocation)
+{
+    const std::wstring filePath = ToExtendedPath(filePathIn);
+    if (IsPortableMode() && revocation == RevocationMode::Online) revocation = RevocationMode::CacheOnly;
+    const bool mayUseNetwork = SignatureChecksMayUseNetwork(revocation);
+
     SignatureInfo info;
     info.signerName = L"N/A";
     info.issuerName = L"N/A";
@@ -471,13 +556,25 @@ SignatureInfo AnalyzeFileSignature(const std::wstring& filePath, RevocationMode 
     winTrustData.dwUnionChoice = WTD_CHOICE_FILE;
     winTrustData.pFile = &wtFileInfo;
     winTrustData.dwStateAction = WTD_STATEACTION_VERIFY;
-    winTrustData.dwProvFlags = WTD_SAFER_FLAG;
+    // No WTD_SAFER_FLAG: with it WinVerifyTrust reports a tampered file
+    // (TRUST_E_BAD_DIGEST) as TRUST_E_NOSIGNATURE, so tampering read as "Unsigned".
+    winTrustData.dwProvFlags = 0;
+    // A file names its own certificate download URLs; offline modes must never follow them.
+    if (!mayUseNetwork) winTrustData.dwProvFlags |= WTD_CACHE_ONLY_URL_RETRIEVAL;
 
-    DebugLog(L"WinVerifyTrust (file): " + filePath);
+    DebugLog(L"WinVerifyTrust (file): " + filePath + (mayUseNetwork ? L" [network allowed]" : L" [cache only]"));
     LONG trustStatus = WinVerifyTrust(NULL, &policyGUID, &winTrustData);
+    FILETIME signingTime = {};
+    bool timestamped = ReadTimestampFromState(winTrustData.hWVTStateData, signingTime);
     winTrustData.dwStateAction = WTD_STATEACTION_CLOSE;
     WinVerifyTrust(NULL, &policyGUID, &winTrustData);
+    if (timestamped) {
+        info.timestamped = true;
+        info.timestamp = FileTimeToDateW(signingTime);
+        DebugLog(L"Timestamped signature, signing time " + info.timestamp);
+    }
 
+    std::wstring package;   // app package folder, for files signed as part of a Store package
     switch (trustStatus) {
     case ERROR_SUCCESS:
         info.status = L"Signed (Valid)";
@@ -487,12 +584,12 @@ SignatureInfo AnalyzeFileSignature(const std::wstring& filePath, RevocationMode 
     case TRUST_E_SUBJECT_FORM_UNKNOWN:
     case TRUST_E_PROVIDER_UNKNOWN:
         // No embedded signature. Windows' own files are usually signed through a catalog.
-        if (VerifyViaCatalog(filePath, info)) {
+        if (VerifyViaCatalog(filePath, mayUseNetwork, info)) {
             info.warnings.push_back(L"CATALOG_SIGNED: Signed through a Windows security catalog ("
                 + (info.catalogSigner.empty() ? std::wstring(L"unknown signer") : info.catalogSigner) + L")");
             CheckSignerLocationMismatch(filePath, info, info.warnings);
         }
-        else if (IsPackagedAppPath(filePath)) {
+        else if (!(package = PackageNameFromPath(filePath)).empty()) {
             // Store / MSIX apps are signed as a whole package (AppxSignature.p7x).
             // Windows checks that signature at install time and protects the folder,
             // so individual files carry no signature of their own.
@@ -500,9 +597,7 @@ SignatureInfo AnalyzeFileSignature(const std::wstring& filePath, RevocationMode 
             info.signatureType = L"Package";
             info.hashValid = true;
             info.chainTrusted = true;
-            std::wstring rest = filePath.substr(filePath.find(L"\\WindowsApps\\") + 13);
-            std::wstring package = rest.substr(0, rest.find(L'\\'));
-            info.catalogSigner = package.rfind(L"Microsoft.", 0) == 0 || package.rfind(L"MicrosoftCorporationII.", 0) == 0
+            info.catalogSigner = StartsWithI(package, L"Microsoft.") || StartsWithI(package, L"MicrosoftCorporationII.")
                 ? L"Microsoft Corporation (app package)" : package;
             info.revocation = L"Not checked (app package)";
         }
@@ -513,6 +608,7 @@ SignatureInfo AnalyzeFileSignature(const std::wstring& filePath, RevocationMode 
     case TRUST_E_BAD_DIGEST:
         info.status = L"Signed (HASH MISMATCH)";
         info.hashValid = false;
+        info.hashMismatch = true;
         info.warnings.push_back(L"HASH_MISMATCH: File content does not match the signed hash. "
             L"Strong indicator of signature theft or file tampering.");
         break;
@@ -556,32 +652,36 @@ SignatureInfo AnalyzeFileSignature(const std::wstring& filePath, RevocationMode 
             info.validFrom = FileTimeToDateW(pSignerCert->pCertInfo->NotBefore);
             info.validTo = FileTimeToDateW(pSignerCert->pCertInfo->NotAfter);
 
-            AnalyzeCertChain(pSignerCert, info);
+            // A valid timestamp proves the certificate was valid when the file was
+            // signed, so the chain is judged at that moment (Authenticode rules);
+            // an expired but timestamped signature is still a good signature.
+            AnalyzeCertChain(pSignerCert, hStore, info.timestamped ? &signingTime : NULL, mayUseNetwork, info);
             CheckSignerLocationMismatch(filePath, info, info.warnings);
+
+            // Revocation: per signer certificate and mode, see the cache notes above.
+            if (revocation != RevocationMode::Off && info.thumbprint != L"N/A") {
+                std::wstring key = RevocationCacheKey(info.thumbprint, revocation);
+                std::wstring status;
+                if (!LookupRevocation(key, status)) {
+                    status = CheckRevocation(pSignerCert, hStore, revocation);
+                    StoreRevocation(key, status);
+                }
+                info.revocation = status;
+                if (status == L"REVOKED") {
+                    bool already = false;
+                    for (const std::wstring& w : info.warnings) {
+                        if (w.rfind(L"REVOKED", 0) == 0) already = true;
+                    }
+                    if (!already) info.warnings.push_back(L"REVOKED: The signing certificate has been revoked");
+                }
+            }
 
             CertFreeCertificateContext(pSignerCert);
         }
         if (hStore) CertCloseStore(hStore, 0);
     }
 
-    // Revocation: per signer certificate, cached for 24 hours.
-    if (revocation != RevocationMode::Off && info.isEmbedded && info.thumbprint != L"N/A") {
-        if (IsPortableMode() && revocation == RevocationMode::Online) revocation = RevocationMode::CacheOnly;
-        std::wstring status;
-        if (!LookupRevocation(info.thumbprint, status)) {
-            status = CheckRevocation(filePath, revocation);
-            StoreRevocation(info.thumbprint, status);
-        }
-        info.revocation = status;
-        if (status == L"REVOKED") {
-            bool already = false;
-            for (const std::wstring& w : info.warnings) {
-                if (w.rfind(L"REVOKED", 0) == 0) already = true;
-            }
-            if (!already) info.warnings.push_back(L"REVOKED: The signing certificate has been revoked");
-        }
-    }
-    else if (info.signatureType == L"Catalog") {
+    if (info.signatureType == L"Catalog") {
         info.revocation = L"Not checked (catalog)";
     }
 
@@ -677,22 +777,37 @@ static std::wstring QueryVersionString(const std::wstring& filePath, const wchar
     std::vector<BYTE> buffer;
     if (!LoadVersionInfo(filePath, buffer)) return L"";
 
+    // Every language the Translation table lists, in order, then the tables
+    // that resource compilers write most often (US English Unicode, US English
+    // Windows-1252, neutral Unicode), because some files list a language that
+    // has no string table or carry no Translation table at all.
     struct LANGANDCODEPAGE { WORD wLanguage; WORD wCodePage; };
+    std::vector<LANGANDCODEPAGE> candidates;
     LANGANDCODEPAGE* pTranslate = nullptr;
     UINT cbTranslate = 0;
-    if (!VerQueryValueW(buffer.data(), L"\\VarFileInfo\\Translation",
-        reinterpret_cast<LPVOID*>(&pTranslate), &cbTranslate)) return L"";
-    if (cbTranslate < sizeof(LANGANDCODEPAGE)) return L"";
+    if (VerQueryValueW(buffer.data(), L"\\VarFileInfo\\Translation",
+        reinterpret_cast<LPVOID*>(&pTranslate), &cbTranslate) && pTranslate) {
+        size_t count = (std::min)(static_cast<size_t>(cbTranslate / sizeof(LANGANDCODEPAGE)), static_cast<size_t>(64));
+        for (size_t i = 0; i < count; ++i) candidates.push_back(pTranslate[i]);
+    }
+    const LANGANDCODEPAGE fallbacks[] = { { 0x0409, 0x04B0 }, { 0x0409, 0x04E4 }, { 0x0000, 0x04B0 }, { 0x0409, 0x0000 } };
+    for (const LANGANDCODEPAGE& f : fallbacks) candidates.push_back(f);
 
-    wchar_t subBlock[256];
-    swprintf_s(subBlock, 256, L"\\StringFileInfo\\%04x%04x\\%s",
-        pTranslate[0].wLanguage, pTranslate[0].wCodePage, field);
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        wchar_t subBlock[256];
+        swprintf_s(subBlock, 256, L"\\StringFileInfo\\%04x%04x\\%s",
+            candidates[i].wLanguage, candidates[i].wCodePage, field);
 
-    LPVOID pValue = nullptr;
-    UINT valueLen = 0;
-    if (!VerQueryValueW(buffer.data(), subBlock, &pValue, &valueLen)) return L"";
-    if (valueLen == 0 || !pValue) return L"";
-    return AsciiPunctuation(std::wstring(static_cast<wchar_t*>(pValue)));
+        LPVOID pValue = nullptr;
+        UINT valueLen = 0;
+        if (!VerQueryValueW(buffer.data(), subBlock, &pValue, &valueLen)) continue;
+        if (valueLen == 0 || !pValue) continue;
+        std::wstring value(static_cast<wchar_t*>(pValue), wcsnlen(static_cast<wchar_t*>(pValue), valueLen));
+        if (TrimW(value).empty()) continue;
+        if (i > 0) DebugLog(std::wstring(L"Version string ") + field + L" found in language table " + std::to_wstring(i));
+        return AsciiPunctuation(value);
+    }
+    return L"";
 }
 
 std::wstring GetFileDeveloper(const std::wstring& filePath)
@@ -712,7 +827,7 @@ std::wstring GetFileProductName(const std::wstring& filePath)
 int64_t GetFileSizeBytes(const std::wstring& filePath)
 {
     WIN32_FILE_ATTRIBUTE_DATA info = {};
-    if (!GetFileAttributesExW(filePath.c_str(), GetFileExInfoStandard, &info)) {
+    if (!GetFileAttributesExW(ToExtendedPath(filePath).c_str(), GetFileExInfoStandard, &info)) {
         DebugLog(L"GetFileSizeBytes failed: " + filePath);
         return -1;
     }
@@ -739,9 +854,13 @@ double CalculateBufferEntropy(const uint8_t* data, size_t length)
 
 double CalculateFileEntropy(const std::wstring& filePath)
 {
-    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ,
-        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    // Full sharing: a file another program has open for writing (a running
+    // log, an installer still writing) must still be measured.
+    HANDLE hFile = CreateFileW(ToExtendedPath(filePath).c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
+        DebugLog(L"CalculateFileEntropy: cannot open " + filePath + L", error " + std::to_wstring(GetLastError()));
         return 0.0;
     }
 

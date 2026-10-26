@@ -4,6 +4,7 @@
 #include "AppPaths.h"
 #include "FileAnalysis.h"
 #include "HashUtils.h"
+#include "PeOrdinals.h"
 #include "StringConv.h"
 #include "TextUtils.h"
 
@@ -61,10 +62,46 @@ static uint32_t RvaToOffset(const std::vector<PeSection>& sections, uint32_t rva
         if (rva >= s.virtualAddress && rva < s.virtualAddress + span) {
             uint32_t delta = rva - s.virtualAddress;
             if (delta >= s.rawSize) return 0;   // in the zero-filled tail, not on disk
-            return s.rawPointer + delta;
+            return s.rawPointerLoaded + delta;
         }
     }
     return 0;
+}
+
+// The loader ignores the low 9 bits of PointerToRawData when the file alignment
+// is at least 512, so a header that says 0x401 is read from 0x400. Parsing at
+// the written value would let a file show the scanner different bytes.
+static uint32_t LoadedRawPointer(uint32_t rawPointer, uint32_t fileAlignment)
+{
+    const uint32_t hardcoded = 0x200;
+    if (fileAlignment < hardcoded) return rawPointer;
+    return rawPointer & ~(hardcoded - 1);
+}
+
+static bool ContainsBytes(const uint8_t* data, size_t size, const char* needle)
+{
+    size_t n = std::strlen(needle);
+    if (n == 0 || size < n) return false;
+    const uint8_t* end = data + size;
+    return std::search(data, end, needle, needle + n,
+        [](uint8_t a, char b) { return a == static_cast<uint8_t>(b); }) != end;
+}
+
+// Names a .NET protector leaves in the assembly's metadata (#Strings holds type
+// and namespace names). Section names cannot carry them: .NET protectors do not
+// add sections.
+static std::string FindDotNetProtector(const ByteView& v, uint32_t metadataOffset, uint32_t metadataSize)
+{
+    if (metadataOffset == 0 || metadataSize == 0 || !v.Has(metadataOffset, 4)) return "";
+    uint32_t signature = 0;
+    if (!v.Read(metadataOffset, signature) || signature != 0x424A5342 /* 'BSJB' */) return "";
+    uint64_t length = (std::min)(static_cast<uint64_t>(metadataSize), static_cast<uint64_t>(v.Size() - metadataOffset));
+    length = (std::min)(length, static_cast<uint64_t>(64ULL * 1024 * 1024));
+    const uint8_t* p = v.Ptr(metadataOffset);
+    size_t n = static_cast<size_t>(length);
+    if (ContainsBytes(p, n, "ConfusedByAttribute")) return "ConfuserEx";
+    if (ContainsBytes(p, n, "SmartAssembly.Attributes")) return "SmartAssembly";
+    return "";
 }
 
 static bool OddSectionName(const char raw[8])
@@ -124,7 +161,6 @@ static void ParseImpl(const uint8_t* data, size_t size, PeInfo& pe)
 
     IMAGE_DATA_DIRECTORY dirs[IMAGE_NUMBEROF_DIRECTORY_ENTRIES] = {};
     DWORD numDirs = 0;
-    uint32_t checksumOffset = 0;
 
     if (magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
         IMAGE_OPTIONAL_HEADER64 opt = {};
@@ -139,10 +175,10 @@ static void ParseImpl(const uint8_t* data, size_t size, PeInfo& pe)
         pe.entryPointRva = opt.AddressOfEntryPoint;
         pe.subsystem = opt.Subsystem;
         pe.sizeOfHeaders = opt.SizeOfHeaders;
+        pe.fileAlignment = opt.FileAlignment;
         pe.checksumHeader = opt.CheckSum;
         numDirs = (std::min)(static_cast<DWORD>(IMAGE_NUMBEROF_DIRECTORY_ENTRIES), opt.NumberOfRvaAndSizes);
         for (DWORD i = 0; i < numDirs; ++i) dirs[i] = opt.DataDirectory[i];
-        checksumOffset = optOffset + offsetof(IMAGE_OPTIONAL_HEADER64, CheckSum);
     }
     else if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
         IMAGE_OPTIONAL_HEADER32 opt = {};
@@ -156,25 +192,32 @@ static void ParseImpl(const uint8_t* data, size_t size, PeInfo& pe)
         pe.entryPointRva = opt.AddressOfEntryPoint;
         pe.subsystem = opt.Subsystem;
         pe.sizeOfHeaders = opt.SizeOfHeaders;
+        pe.fileAlignment = opt.FileAlignment;
         pe.checksumHeader = opt.CheckSum;
         numDirs = (std::min)(static_cast<DWORD>(IMAGE_NUMBEROF_DIRECTORY_ENTRIES), opt.NumberOfRvaAndSizes);
         for (DWORD i = 0; i < numDirs; ++i) dirs[i] = opt.DataDirectory[i];
-        checksumOffset = optOffset + offsetof(IMAGE_OPTIONAL_HEADER32, CheckSum);
     }
     else {
         pe.error = L"Unknown optional header magic";
         return;
     }
-    (void)checksumOffset;
     if (pe.subsystem == IMAGE_SUBSYSTEM_NATIVE) pe.isDriver = true;
 
     // Sections
-    uint32_t secOffset = optOffset + fh.SizeOfOptionalHeader;
-    WORD numSections = (std::min)(fh.NumberOfSections, static_cast<WORD>(96));
+    // Every header counts for the overlay start (Windows allows up to 65535
+    // sections), but only the first kMaxPeSectionsKept are kept for analysis.
+    uint64_t secOffset = static_cast<uint64_t>(optOffset) + fh.SizeOfOptionalHeader;
     int64_t lastRawEnd = pe.sizeOfHeaders;
-    for (WORD i = 0; i < numSections; ++i) {
+    for (uint32_t i = 0; i < fh.NumberOfSections; ++i) {
         IMAGE_SECTION_HEADER sh = {};
-        if (!v.Read(secOffset + i * sizeof(IMAGE_SECTION_HEADER), sh)) break;
+        if (!v.Read(secOffset + static_cast<uint64_t>(i) * sizeof(IMAGE_SECTION_HEADER), sh)) break;
+        pe.sectionHeaderCount++;
+        if (sh.SizeOfRawData > 0 && v.Has(sh.PointerToRawData, 1)) {
+            int64_t end = static_cast<int64_t>(sh.PointerToRawData) + sh.SizeOfRawData;
+            if (end > lastRawEnd) lastRawEnd = end;
+        }
+        if (pe.sections.size() >= kMaxPeSectionsKept) continue;
+
         PeSection s;
         char rawName[9] = {};
         std::memcpy(rawName, sh.Name, 8);
@@ -183,14 +226,13 @@ static void ParseImpl(const uint8_t* data, size_t size, PeInfo& pe)
         s.virtualAddress = sh.VirtualAddress;
         s.virtualSize = sh.Misc.VirtualSize;
         s.rawPointer = sh.PointerToRawData;
+        s.rawPointerLoaded = LoadedRawPointer(sh.PointerToRawData, pe.fileAlignment);
         s.rawSize = sh.SizeOfRawData;
         s.characteristics = sh.Characteristics;
-        if (s.rawSize > 0 && v.Has(s.rawPointer, 1)) {
+        if (s.rawSize > 0 && v.Has(s.rawPointerLoaded, 1)) {
             uint64_t sample = (std::min)(static_cast<uint64_t>(s.rawSize), static_cast<uint64_t>(4096));
-            sample = (std::min)(sample, static_cast<uint64_t>(size - s.rawPointer));
-            s.entropySample = CalculateBufferEntropy(v.Ptr(s.rawPointer), static_cast<size_t>(sample));
-            int64_t end = static_cast<int64_t>(s.rawPointer) + s.rawSize;
-            if (end > lastRawEnd) lastRawEnd = end;
+            sample = (std::min)(sample, static_cast<uint64_t>(size - s.rawPointerLoaded));
+            s.entropySample = CalculateBufferEntropy(v.Ptr(s.rawPointerLoaded), static_cast<size_t>(sample));
         }
         pe.sections.push_back(s);
     }
@@ -203,10 +245,11 @@ static void ParseImpl(const uint8_t* data, size_t size, PeInfo& pe)
         }
     }
 
-    // Imports
+    // Imports. kMaxPeImportThunks bounds the total work across all descriptors.
     if (numDirs > IMAGE_DIRECTORY_ENTRY_IMPORT && dirs[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress != 0) {
         uint32_t descOffset = RvaToOffset(pe.sections, dirs[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress, pe.sizeOfHeaders);
-        for (int d = 0; descOffset != 0 && d < 4096; ++d) {
+        uint32_t thunksVisited = 0;
+        for (int d = 0; descOffset != 0 && d < 4096 && !pe.importsTruncated; ++d) {
             IMAGE_IMPORT_DESCRIPTOR desc = {};
             if (!v.Read(descOffset + d * sizeof(IMAGE_IMPORT_DESCRIPTOR), desc)) break;
             if (desc.OriginalFirstThunk == 0 && desc.FirstThunk == 0 && desc.Name == 0) break;
@@ -214,12 +257,18 @@ static void ParseImpl(const uint8_t* data, size_t size, PeInfo& pe)
             std::string dllName;
             uint32_t nameOffset = RvaToOffset(pe.sections, desc.Name, pe.sizeOfHeaders);
             if (nameOffset != 0) dllName = v.ReadAscii(nameOffset, 256);
+            std::string dllLower = ToLowerA(dllName);
 
             uint32_t thunkRva = desc.OriginalFirstThunk != 0 ? desc.OriginalFirstThunk : desc.FirstThunk;
             uint32_t thunkOffset = RvaToOffset(pe.sections, thunkRva, pe.sizeOfHeaders);
             if (thunkOffset == 0) continue;
 
             for (int t = 0; t < 65536; ++t) {
+                if (thunksVisited >= kMaxPeImportThunks) {
+                    pe.importsTruncated = true;
+                    break;
+                }
+                ++thunksVisited;
                 PeImport imp;
                 imp.dll = dllName;
                 if (pe.is64) {
@@ -228,6 +277,7 @@ static void ParseImpl(const uint8_t* data, size_t size, PeInfo& pe)
                     if (thunk & IMAGE_ORDINAL_FLAG64) {
                         imp.byOrdinal = true;
                         imp.ordinal = static_cast<uint16_t>(thunk & 0xFFFF);
+                        if (const char* known = LookupOrdinalName(dllLower, imp.ordinal)) imp.function = known;
                     }
                     else {
                         uint32_t hintOffset = RvaToOffset(pe.sections, static_cast<uint32_t>(thunk & 0x7FFFFFFF), pe.sizeOfHeaders);
@@ -241,6 +291,7 @@ static void ParseImpl(const uint8_t* data, size_t size, PeInfo& pe)
                     if (thunk & IMAGE_ORDINAL_FLAG32) {
                         imp.byOrdinal = true;
                         imp.ordinal = static_cast<uint16_t>(thunk & 0xFFFF);
+                        if (const char* known = LookupOrdinalName(dllLower, imp.ordinal)) imp.function = known;
                     }
                     else {
                         uint32_t hintOffset = RvaToOffset(pe.sections, thunk & 0x7FFFFFFF, pe.sizeOfHeaders);
@@ -251,11 +302,21 @@ static void ParseImpl(const uint8_t* data, size_t size, PeInfo& pe)
                 if (imp.byOrdinal || !imp.function.empty()) pe.imports.push_back(imp);
             }
         }
+        if (pe.importsTruncated) {
+            OutputDebugStringW((L"[PeFile] Import table stopped at " + std::to_wstring(kMaxPeImportThunks) +
+                L" entries\n").c_str());
+        }
     }
 
     // .NET
     if (numDirs > IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR && dirs[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].VirtualAddress != 0) {
         pe.isDotNet = true;
+        uint32_t corOffset = RvaToOffset(pe.sections, dirs[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].VirtualAddress, pe.sizeOfHeaders);
+        IMAGE_COR20_HEADER cor = {};
+        if (corOffset != 0 && v.Read(corOffset, cor) && cor.MetaData.VirtualAddress != 0) {
+            uint32_t mdOffset = RvaToOffset(pe.sections, cor.MetaData.VirtualAddress, pe.sizeOfHeaders);
+            pe.dotNetProtector = FindDotNetProtector(v, mdOffset, cor.MetaData.Size);
+        }
     }
 
     // TLS callbacks
@@ -454,7 +515,8 @@ std::string ImphashInput(const PeInfo& pe)
             std::string ext = lib.substr(dot + 1);
             if (ext == "dll" || ext == "ocx" || ext == "sys") lib = lib.substr(0, dot);
         }
-        std::string fn = imp.byOrdinal ? ("ord" + std::to_string(imp.ordinal)) : ToLowerA(imp.function);
+        // Ordinals with a known name (ws2_32, wsock32, oleaut32) use the name, as pefile does.
+        std::string fn = imp.function.empty() ? ("ord" + std::to_string(imp.ordinal)) : ToLowerA(imp.function);
         if (!out.empty()) out += ",";
         out += lib + "." + fn;
     }
@@ -531,8 +593,13 @@ std::vector<std::wstring> FindPeAnomalies(const PeInfo& pe, const std::wstring& 
         }
     }
 
-    if (pe.sections.size() > 10) {
-        out.push_back(L"SECTION_COUNT_HIGH: " + std::to_wstring(pe.sections.size()) + L" sections");
+    uint32_t sectionCount = (std::max)(pe.sectionHeaderCount, static_cast<uint32_t>(pe.sections.size()));
+    if (sectionCount > 10) {
+        out.push_back(L"SECTION_COUNT_HIGH: " + std::to_wstring(sectionCount) + L" sections");
+    }
+    if (pe.importsTruncated) {
+        out.push_back(L"IMPORT_TABLE_HUGE: More than " + std::to_wstring(kMaxPeImportThunks) +
+            L" import entries; the rest were not read");
     }
     for (const PeSection& s : pe.sections) {
         if (s.nameHasOddChars) {
