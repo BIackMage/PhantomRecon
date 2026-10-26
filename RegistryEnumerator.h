@@ -28,8 +28,19 @@ public:
 
     // Given a list of installed programs, find all executable files (.exe, .dll, etc.)
     // in their install locations. Returns a deduplicated list of full file paths.
+    // Install folders are searched maxDepth levels deep; junctions and directory links
+    // are not followed. Deep folders use the long-path prefix internally.
     static std::vector<std::wstring> GetExecutablePathsFromPrograms(
         const std::vector<InstalledProgram>& programs, int maxDepth = 3);
+
+    // InstallLocation as a usable folder: whitespace and surrounding quotes removed,
+    // no trailing backslash, 8.3 names expanded. "" when it is not an absolute path.
+    static std::wstring CleanInstallLocation(const std::wstring& raw);
+
+    // The existing .exe or .msi a command line starts with ("C:\Program Files\A\u.exe /S",
+    // quoted or not), or "" when there is none. Relative names ("MsiExec.exe /X{...}")
+    // give "" because they would resolve against the current folder.
+    static std::wstring ExecutableFromCommandLine(const std::wstring& raw);
 
 private:
     // Enumerate subkeys under a single registry path

@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "RegistryEnumerator.h"
+#include "AppPaths.h"
 #include <algorithm>
+#include <cwctype>
 #include <set>
 #include <Shlwapi.h>
 
@@ -164,8 +166,9 @@ void RegistryEnumerator::FindExecutablesInDirectory(const std::wstring& director
         searchPath += L'\\';
     }
 
+    // Long-path prefix for deep install folders; the paths handed back stay plain.
     WIN32_FIND_DATAW findData;
-    HANDLE hFind = FindFirstFileW((searchPath + L"*").c_str(), &findData);
+    HANDLE hFind = FindFirstFileW(ToExtendedPath(searchPath + L"*").c_str(), &findData);
     if (hFind == INVALID_HANDLE_VALUE) {
         return;
     }
@@ -175,6 +178,12 @@ void RegistryEnumerator::FindExecutablesInDirectory(const std::wstring& director
 
         if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             if (name != L"." && name != L"..") {
+                if (findData.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                    // Junctions and directory links can point anywhere (or back up the
+                    // tree). The folder walker never follows them; neither does this.
+                    DebugLog(L"Not following link: " + searchPath + name);
+                    continue;
+                }
                 FindExecutablesInDirectory(searchPath + name, out, maxDepth - 1);
             }
         }
@@ -216,6 +225,108 @@ void RegistryEnumerator::FindExecutablesInDirectory(const std::wstring& director
 }
 
 // ---------------------------------------------------------------------------
+// Path helpers for registry values
+// ---------------------------------------------------------------------------
+static std::wstring TrimSpaces(const std::wstring& s)
+{
+    const wchar_t* ws = L" \t\r\n";
+    size_t start = s.find_first_not_of(ws);
+    if (start == std::wstring::npos) return L"";
+    size_t end = s.find_last_not_of(ws);
+    return s.substr(start, end - start + 1);
+}
+
+static bool IsAbsolutePath(const std::wstring& p)
+{
+    return (p.size() >= 3 && iswalpha(p[0]) && p[1] == L':' && p[2] == L'\\') || p.rfind(L"\\\\", 0) == 0;
+}
+
+static bool IsExistingFile(const std::wstring& p)
+{
+    DWORD attrs = GetFileAttributesW(ToExtendedPath(p).c_str());
+    return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+static bool HasProgramExtension(const std::wstring& p)
+{
+    if (p.size() <= 4) return false;
+    std::wstring ext = p.substr(p.size() - 4);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return ext == L".exe" || ext == L".msi";
+}
+
+// 8.3 short names expanded so the same file has one spelling in every scan.
+static std::wstring LongForm(const std::wstring& p)
+{
+    if (p.find(L'~') == std::wstring::npos) return p;
+    std::wstring io = ToExtendedPath(p);
+    bool prefixed = io.size() != p.size();
+    DWORD needed = GetLongPathNameW(io.c_str(), NULL, 0);
+    if (needed == 0) return p;
+    std::wstring out(needed, L'\0');
+    DWORD written = GetLongPathNameW(io.c_str(), &out[0], needed);
+    if (written == 0 || written >= needed) return p;
+    out.resize(written);
+    if (prefixed) {
+        if (out.rfind(L"\\\\?\\UNC\\", 0) == 0) out = L"\\\\" + out.substr(8);
+        else if (out.rfind(L"\\\\?\\", 0) == 0) out = out.substr(4);
+    }
+    return out;
+}
+
+std::wstring RegistryEnumerator::CleanInstallLocation(const std::wstring& raw)
+{
+    // Installers write InstallLocation as C:\App, C:\App\, "C:\App" or "C:\App\". The
+    // quoted forms used to fail the folder check and the program was skipped.
+    std::wstring location = TrimSpaces(raw);
+    if (location.size() >= 2 && location.front() == L'"') {
+        size_t close = location.find(L'"', 1);
+        location = close == std::wstring::npos ? location.substr(1) : location.substr(1, close - 1);
+        location = TrimSpaces(location);
+        DebugLog(L"CleanInstallLocation: quotes removed: " + location);
+    }
+    for (wchar_t& c : location) {
+        if (c == L'/') c = L'\\';
+    }
+    while (location.size() > 3 && location.back() == L'\\') location.pop_back();
+    if (!IsAbsolutePath(location)) return L"";
+    return LongForm(location);
+}
+
+std::wstring RegistryEnumerator::ExecutableFromCommandLine(const std::wstring& raw)
+{
+    std::wstring command = TrimSpaces(raw);
+    if (command.empty()) return L"";
+
+    if (command.front() == L'"') {
+        size_t close = command.find(L'"', 1);
+        std::wstring path = close == std::wstring::npos ? command.substr(1) : command.substr(1, close - 1);
+        path = TrimSpaces(path);
+        if (IsAbsolutePath(path) && HasProgramExtension(path) && IsExistingFile(path)) return LongForm(path);
+        return L"";
+    }
+
+    // No quotes: "C:\Program Files\App\uninst.exe /S" was cut at the first space, which
+    // gave "C:\Program" and lost the program. Try every prefix that ends at a space (or
+    // at the end) the way CreateProcess resolves an unquoted path, shortest first, and
+    // take the first one that names an existing .exe or .msi.
+    size_t pos = 0;
+    while (true) {
+        size_t space = command.find(L' ', pos);
+        std::wstring candidate = command.substr(0, space);
+        if (IsAbsolutePath(candidate) && HasProgramExtension(candidate) && IsExistingFile(candidate)) {
+            if (candidate.find(L' ') != std::wstring::npos) {
+                DebugLog(L"ExecutableFromCommandLine: unquoted path with spaces resolved: " + candidate);
+            }
+            return LongForm(candidate);
+        }
+        if (space == std::wstring::npos) break;
+        pos = space + 1;
+    }
+    return L"";
+}
+
+// ---------------------------------------------------------------------------
 // GetExecutablePathsFromPrograms - extract executables from install locations
 // ---------------------------------------------------------------------------
 std::vector<std::wstring> RegistryEnumerator::GetExecutablePathsFromPrograms(
@@ -238,58 +349,29 @@ std::vector<std::wstring> RegistryEnumerator::GetExecutablePathsFromPrograms(
 
     for (const auto& prog : programs) {
         // Try install location first
-        if (!prog.installLocation.empty()) {
-            std::wstring location = prog.installLocation;
-            // Remove trailing backslash for consistency
-            if (location.size() > 3 && location.back() == L'\\') {
-                location.pop_back();
-            }
-
+        std::wstring location = CleanInstallLocation(prog.installLocation);
+        if (!location.empty()) {
             // Verify directory exists
-            DWORD attrs = GetFileAttributesW(location.c_str());
+            DWORD attrs = GetFileAttributesW(ToExtendedPath(location).c_str());
             if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+                if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) {
+                    DebugLog(L"Install folder is a link, scanning its own files only: " + location);
+                }
                 std::vector<std::wstring> exes;
                 FindExecutablesInDirectory(location, exes, maxDepth);
                 for (auto& e : exes) {
                     uniquePaths.insert(std::move(e));
                 }
             }
+            else {
+                DebugLog(L"Install folder not found: " + location + L" (" + prog.displayName + L")");
+            }
         }
 
         // Also try extracting exe path from uninstall string
-        if (!prog.uninstallString.empty()) {
-            std::wstring uninstall = prog.uninstallString;
-
-            // Remove surrounding quotes if present
-            if (uninstall.size() > 2 && uninstall.front() == L'"') {
-                size_t closeQuote = uninstall.find(L'"', 1);
-                if (closeQuote != std::wstring::npos) {
-                    uninstall = uninstall.substr(1, closeQuote - 1);
-                }
-            }
-            else {
-                // Take everything up to the first space (for paths without quotes)
-                size_t spacePos = uninstall.find(L' ');
-                if (spacePos != std::wstring::npos) {
-                    uninstall = uninstall.substr(0, spacePos);
-                }
-            }
-
-            // Check if this path is an exe that exists
-            std::wstring lowerUninstall = uninstall;
-            std::transform(lowerUninstall.begin(), lowerUninstall.end(),
-                lowerUninstall.begin(), ::towlower);
-
-            if (lowerUninstall.length() > 4) {
-                std::wstring ext = lowerUninstall.substr(lowerUninstall.length() - 4);
-                if (ext == L".exe" || ext == L".msi") {
-                    DWORD attrs = GetFileAttributesW(uninstall.c_str());
-                    if (attrs != INVALID_FILE_ATTRIBUTES &&
-                        !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-                        uniquePaths.insert(uninstall);
-                    }
-                }
-            }
+        std::wstring uninstall = ExecutableFromCommandLine(prog.uninstallString);
+        if (!uninstall.empty()) {
+            uniquePaths.insert(uninstall);
         }
     }
 

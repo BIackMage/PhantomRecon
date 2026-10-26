@@ -195,6 +195,18 @@ inline int CompareVersions(const std::wstring& a, const std::wstring& b)
     return 0;
 }
 
+// True when s is not empty and every character is a hex digit. A hash column holds
+// either a digest or an error text ("MD5 Checksum Error"); only a digest is comparable.
+inline bool IsHexText(const std::wstring& s)
+{
+    if (s.empty()) return false;
+    for (wchar_t c : s) {
+        bool hex = (c >= L'0' && c <= L'9') || (c >= L'a' && c <= L'f') || (c >= L'A' && c <= L'F');
+        if (!hex) return false;
+    }
+    return true;
+}
+
 // Quote a CSV field when it contains a comma, quote or line break (RFC 4180).
 inline std::wstring CsvEscape(const std::wstring& field)
 {

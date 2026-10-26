@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ScoringConfig.h"
 
+#include "FileIO.h"
 #include "StringConv.h"
 
 #include <algorithm>
@@ -158,15 +159,20 @@ bool ScoringConfig::LoadFromFile(const std::wstring& filePath)
 {
     DebugLog(L"Loading config from: " + filePath);
 
-    std::ifstream file(filePath);
-    if (!file.is_open()) {
+    // ReadTextFile removes a UTF-8 BOM and decodes UTF-16 (what Notepad writes for
+    // "Unicode"). Read through std::ifstream, the BOM stuck to the first line, so
+    // "[entropy_thresholds]" was not seen as a section and its values were ignored.
+    std::wstring wide;
+    if (!ReadTextFile(filePath, wide, 4 * 1024 * 1024)) {
         DebugLog(L"Config file not found, using defaults");
         return false;
     }
+    if (!wide.empty() && wide[0] == 0xFEFF) wide.erase(0, 1);   // a BOM ReadTextFile did not remove
 
     std::vector<SettingRef> settings = AllSettings(*this);
     std::string currentSection;
     std::string line;
+    std::istringstream file(WideToUtf8(wide));
 
     while (std::getline(file, line)) {
         line = TrimString(line);

@@ -68,6 +68,11 @@ public:
 
     static const uint32_t BASELINE_VERSION = 3;
 
+    // Longest string field the file format carries (16 M characters). WriteString cuts
+    // anything longer and ReadString accepts anything up to it, so a saved baseline
+    // always loads again.
+    static const uint32_t MAX_STRING_CHARS = 16u * 1024u * 1024u;
+
 private:
     struct InternalEntry {
         BaselineEntry data;
