@@ -1,0 +1,7 @@
+# Normalise line endings in the repo; check out as CRLF on Windows.
+* text=auto
+*.sln text eol=crlf
+*.vcxproj text eol=crlf
+*.vcxproj.filters text eol=crlf
+*.rc text eol=crlf
+*.ico binary

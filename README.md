@@ -135,6 +135,9 @@ Rules for changing the code are in [CLAUDE.md](CLAUDE.md). They apply to people 
 Issues and pull requests are welcome. Keep changes small and in the module they belong
 to. Do not add third-party dependencies without opening an issue first.
 
+Looking for something to build? [docs/IDEAS.md](docs/IDEAS.md) lists what would help most,
+in order. [ROADMAP.md](ROADMAP.md) has the long-range plan.
+
 ## License
 
 PolyForm Noncommercial 1.0.0. See [LICENSE](LICENSE).
