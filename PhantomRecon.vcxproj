@@ -74,6 +74,7 @@
   <ItemGroup>
     <ClCompile Include="AiSidebar.cpp" />
     <ClCompile Include="AppDialogs.cpp" />
+    <ClCompile Include="AppMessages.cpp" />
     <ClCompile Include="AuditController.cpp" />
     <ClCompile Include="CommandHelpers.cpp" />
     <ClCompile Include="DetailWindow.cpp" />

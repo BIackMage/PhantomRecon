@@ -298,8 +298,12 @@ static LRESULT CALLBACK FindingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         NMHDR* hdr = reinterpret_cast<NMHDR*>(lParam);
         if (hdr->hwndFrom == st->list) {
             if (hdr->code == LVN_ITEMCHANGED) {
+                // Selected or deselected: both change what the copy buttons can act on,
+                // so a click on empty space greys them out again.
                 NMLISTVIEW* lv = reinterpret_cast<NMLISTVIEW*>(lParam);
-                if (lv->uNewState & LVIS_SELECTED) ShowSelected(*st);
+                if ((lv->uChanged & LVIF_STATE) && ((lv->uOldState ^ lv->uNewState) & LVIS_SELECTED)) {
+                    ShowSelected(*st);
+                }
                 return 0;
             }
             if (hdr->code == NM_CUSTOMDRAW) return OnCustomDraw(*st, lParam);

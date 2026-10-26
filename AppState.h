@@ -117,6 +117,8 @@ struct AppState {
     AppSettings  settings;                  // loaded in wWinMain, saved by the Settings dialog
     std::wstring outputCsvPath;             // CSV of the last scan
     std::wstring baselineFilePath;          // active baseline for Full and Fast Scan
+    bool         baselinePathChangePending = false;   // Settings changed the baseline file during a scan;
+                                                      // OnScanFinished applies it
 
     ScanProgress progress;
     AuditState   audit;
@@ -126,7 +128,9 @@ struct AppState {
     std::mutex baselineMutex;   // guards currentBaseline while the UI thread swaps it
     Baseline   currentBaseline; // the active baseline used by Full Scan and Fast Scan
 
-    BackgroundWorker worker;    // every background thread; joined in wWinMain
+    PayloadTracker   payloads;  // every WM_APP payload between post and handler (AppMessages.h)
+    BackgroundWorker worker;    // every background thread; joined in wWinMain (with a time limit, see there).
+                                // Declared last so it is destroyed (joined) before anything a job uses.
 };
 
 // Fetch the AppState pointer stored on the main window. Returns nullptr before

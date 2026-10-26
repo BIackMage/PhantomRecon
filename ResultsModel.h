@@ -37,6 +37,17 @@ public:
 
     std::wstring CellText(size_t viewIndex, ResultColumn column) const;
 
+    // Model rows never move once added (Append only adds at the end), so a model
+    // index identifies a row across sorts, filters and new rows. The list uses
+    // these to keep the same file selected while rows stream in.
+    bool ModelIndexOfView(size_t viewIndex, size_t& modelIndex) const;
+    int  ViewIndexOfModel(size_t modelIndex) const;   // -1 when filtered out
+
+    // Type-ahead: the first view row at or after start whose file name starts with
+    // text (equals it when exact), ignoring case; wraps to the top when wrap is set.
+    // -1 when nothing matches.
+    int FindByFileName(const std::wstring& text, size_t start, bool wrap, bool exact) const;
+
     ResultColumn SortColumn() const { return m_sortColumn; }
     bool SortAscending() const { return m_ascending; }
     bool HasSort() const { return m_hasSort; }
@@ -57,6 +68,7 @@ private:
     bool                 m_hasSort = false;
 
     bool Visible(const ScanRow& row) const;
+    bool Less(size_t a, size_t b) const;
     void Rebuild();
     void ApplySort();
 };

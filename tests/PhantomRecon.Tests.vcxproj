@@ -67,6 +67,7 @@
     <ClCompile Include="TestFixAuditChecksA.cpp" />
     <ClCompile Include="TestFixAuditChecksB.cpp" />
     <ClCompile Include="TestFixReportsCli.cpp" />
+    <ClCompile Include="TestFixWindowApp.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\PhantomRecon.Core.vcxproj">

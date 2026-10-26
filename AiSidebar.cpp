@@ -1,14 +1,17 @@
 #include "pch.h"
 #include "AiSidebar.h"
 
+#include "AiConsent.h"
 #include "AppMessages.h"
 #include "DetailText.h"
+#include "GuiComponents.h"
 #include "LLMClient.h"
 #include "Redactor.h"
 #include "StringConv.h"
 #include "TextUtils.h"
 #include "Theme.h"
 
+#include <algorithm>
 #include <memory>
 #include <sstream>
 #include <vector>
@@ -31,6 +34,12 @@ static const int TOGGLE_TAB_WIDTH = 28;
 static const int SLIDE_STEP_MS = 10;   // timer interval for slide animation
 static const int SLIDE_PX_STEP = 40;   // pixels per animation step
 static const int PANEL_MARGIN = 8;     // inner margin inside the panel
+
+// The chat edit control would stop at 32,767 characters (its default limit).
+// The limit is lifted; past kChatMaxChars the oldest text is dropped down to
+// about kChatKeepChars so a long session stays responsive.
+static const size_t kChatMaxChars = 2000000;
+static const size_t kChatKeepChars = 1000000;
 
 #define IDT_SLIDE_ANIM 5001
 
@@ -66,43 +75,78 @@ static RECT GetMainWindowScreenRect(HWND hMain)
     return r;
 }
 
+// Where the panel goes at a given width. Normally flush against the main
+// window's right edge. When that would leave the monitor (main window maximized
+// or pushed to the right edge), it opens inside the main window instead, just
+// left of the toggle tab so the tab stays visible to close it again. Height is
+// kept within the monitor's work area.
+static RECT PanelRectFor(const AiSidebarState& state, int width)
+{
+    RECT mainRect = GetMainWindowScreenRect(state.hMainWindow);
+    RECT work = mainRect;
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
+    if (GetMonitorInfoW(MonitorFromWindow(state.hMainWindow, MONITOR_DEFAULTTONEAREST), &mi)) work = mi.rcWork;
+
+    int top = (std::max)(mainRect.top, work.top);
+    int bottom = (std::min)(mainRect.bottom, work.bottom);
+    if (bottom - top < 100) {
+        top = mainRect.top;
+        bottom = mainRect.bottom;
+    }
+
+    int x = mainRect.right;
+    if (x + width > work.right) {
+        RECT tab = {};
+        int rightEdge = work.right;
+        if (state.hToggleTab && GetWindowRect(state.hToggleTab, &tab)) rightEdge = (std::min)(rightEdge, static_cast<int>(tab.left) - 2);
+        x = rightEdge - width;
+        if (x < work.left) x = work.left;
+    }
+    RECT r = { x, top, x + width, bottom };
+    return r;
+}
+
+static void PlacePanel(AiSidebarState& state, int width)
+{
+    RECT r = PanelRectFor(state, width);
+    SetWindowPos(state.hPanel, NULL, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 // ---------------------------------------------------------------------------
 // Privacy gate
 //
 // The default endpoint is localhost, so nothing leaves the machine. If the user
-// pointed Settings at another host, say so plainly and ask once per session.
+// pointed Settings at another host, say so plainly and ask. The approval covers
+// only that exact endpoint (AiConsent.h). config receives the settings this
+// request must run with, captured together with the decision.
 // ---------------------------------------------------------------------------
-static bool ConfirmSendAllowed(AiSidebarState& state)
+static bool ConfirmSendAllowed(AiSidebarState& state, LLMConfig& config)
 {
-    std::wstring endpoint = GetLLMClient().GetConfig().endpoint;
-    if (IsLoopbackEndpoint(endpoint)) {
-        return true;
-    }
-    if (state.remoteSendApproved) {
-        return true;
-    }
+    config = GetLLMClient().GetConfig();
+    AiSendDecision decision = DecideAiSend(config.endpoint, state.approvedRemoteEndpoint);
+    if (decision != AiSendDecision::NeedsApproval) return true;
 
-    std::wstring text =
-        L"The AI endpoint is not on this machine:\n\n" + endpoint + L"\n\n"
-        L"Scan data will be sent there. That includes file paths, which can contain "
-        L"user names and other details about this host.\n\n"
-        L"Send anyway? You will not be asked again this session.";
+    std::wstring text = BuildRemoteSendConsentText(config.endpoint);
     int answer = MessageBoxW(state.hMainWindow, text.c_str(), L"Send scan data to a remote server?",
         MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
     if (answer != IDYES) {
         AppendToChatDisplay(state, L"\r\n[Info]: Not sent. Change the endpoint in File > Settings to a local server, or approve the remote one.\r\n");
+        DebugLog((L"User declined sending to " + config.endpoint).c_str());
         return false;
     }
 
-    state.remoteSendApproved = true;
-    DebugLog(L"User approved sending to a remote endpoint for this session");
+    state.approvedRemoteEndpoint = config.endpoint;
+    DebugLog((L"User approved sending to " + config.endpoint + L" for this session").c_str());
     return true;
 }
 
 // ---------------------------------------------------------------------------
-// Worker plumbing: run one chat completion, post the result to the panel
+// Worker plumbing: run one chat completion, post the result to the panel. Each
+// request uses its own client built from the approved config, so the endpoint
+// cannot change between the question and the send.
 // ---------------------------------------------------------------------------
-static void RunLlmRequest(AiSidebarState& state, const std::vector<LLMMessage>& messages,
+static void RunLlmRequest(AiSidebarState& state, const LLMConfig& config, const std::vector<LLMMessage>& messages,
                           const std::wstring& successPrefix)
 {
     if (!state.worker) {
@@ -111,54 +155,79 @@ static void RunLlmRequest(AiSidebarState& state, const std::vector<LLMMessage>& 
     }
 
     HWND hPanel = state.hPanel;
-    state.worker->Run([hPanel, messages, successPrefix]() {
-        std::string response = GetLLMClient().SendChatCompletion(messages);
+    PayloadTracker* tracker = state.payloads;
+    state.worker->Run([hPanel, tracker, config, messages, successPrefix]() {
+        LLMClient client;
+        client.SetConfig(config);
+        std::string response = client.SendChatCompletion(messages);
 
         AiResponsePayload* payload = new AiResponsePayload();
         if (response.empty()) {
-            payload->chatText = L"\r\n[AI Error]: " + Utf8ToWide(GetLLMClient().GetLastError()) + L"\r\n";
+            payload->chatText = L"\r\n[AI Error]: " + Utf8ToWide(client.GetLastError()) + L"\r\n";
             payload->statusText = L"  Error";
         }
         else {
             payload->chatText = successPrefix + ToWindowsLineEnds(Utf8ToWide(response)) + L"\r\n";
             payload->statusText = L"  Ready";
         }
-        PostPayload(hPanel, WM_APP_AI_RESPONSE, payload);
+        PostPayload(hPanel, WM_APP_AI_RESPONSE, payload, *tracker);
     });
 }
 
-// Probe the endpoint once at startup. Sends no scan data, so no consent needed.
+// Probe the endpoint at startup (and after Settings changes it). Only an endpoint
+// on this PC is contacted without asking; for any other the panel says it was not
+// tested and where the Test button is.
 static void TestConnectionInBackground(AiSidebarState& state)
 {
     if (!state.worker) return;
 
+    LLMConfig config = GetLLMClient().GetConfig();
+    if (!ShouldTestAiEndpointAtStartup(config.endpoint)) {
+        SetAiStatusText(state, StartupTestSkippedStatus());
+        AppendToChatDisplay(state, StartupTestSkippedChatText(config.endpoint));
+        DebugLog((L"Startup connection test skipped for the remote endpoint " + config.endpoint).c_str());
+        return;
+    }
+
+    SetAiStatusText(state, L"  Testing connection...");
     HWND hPanel = state.hPanel;
-    state.worker->Run([hPanel]() {
+    PayloadTracker* tracker = state.payloads;
+    state.worker->Run([hPanel, tracker, config]() {
         DebugLog(L"Testing LLM connection...");
-        bool connected = GetLLMClient().TestConnection();
+        LLMClient client;
+        client.SetConfig(config);
+        bool connected = client.TestConnection();
 
         AiResponsePayload* payload = new AiResponsePayload();
         if (connected) {
-            payload->statusText = L"  Connected (" + Utf8ToWide(GetLLMClient().GetConfig().model) + L")";
+            payload->statusText = L"  Connected (" + Utf8ToWide(config.model) + L")";
             DebugLog(L"LLM connection successful");
         }
         else {
             payload->statusText = L"  Connection failed";
-            DebugLog((L"LLM connection failed: " + Utf8ToWide(GetLLMClient().GetLastError())).c_str());
+            DebugLog((L"LLM connection failed: " + Utf8ToWide(client.GetLastError())).c_str());
         }
-        PostPayload(hPanel, WM_APP_AI_RESPONSE, payload);
+        PostPayload(hPanel, WM_APP_AI_RESPONSE, payload, *tracker);
     });
+}
+
+void OnAiSettingsChanged(AiSidebarState& state)
+{
+    DebugLog(L"AI settings changed; refreshing the connection status");
+    TestConnectionInBackground(state);
 }
 
 // ---------------------------------------------------------------------------
 // CreateAiSidebar
 // ---------------------------------------------------------------------------
-void CreateAiSidebar(HWND hMainWindow, HINSTANCE hInst, AiSidebarState& state, BackgroundWorker& worker)
+void CreateAiSidebar(HWND hMainWindow, HINSTANCE hInst, AiSidebarState& state, BackgroundWorker& worker,
+                     PayloadTracker& payloads)
 {
     DebugLog(L"Creating AI sidebar");
 
     state.hMainWindow = hMainWindow;
     state.worker = &worker;
+    state.payloads = &payloads;
 
     // Toggle tab: thin vertical button on the right edge of the main window
     RECT clientRect;
@@ -239,6 +308,7 @@ void CreateAiSidebar(HWND hMainWindow, HINSTANCE hInst, AiSidebarState& state, B
         ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_WANTRETURN,
         m, y, w, 300,  // placeholder height, recalculated in LayoutPanelControls
         state.hPanel, (HMENU)ID_AI_CHAT, hInst, NULL);
+    SendMessageW(state.hChatDisplay, EM_SETLIMITTEXT, 0, 0);   // 0: the largest size the control allows
     y += 300 + 4;
 
     int sendW = 55;
@@ -275,8 +345,15 @@ static LRESULT CALLBACK AiPanelWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
         }
         return 0;
 
+    case WM_NCDESTROY:
+        // Replies already posted to this window are dropped with it; free them.
+        if (pState && pState->payloads) pState->payloads->FreeFor(hWnd);
+        break;
+
     case WM_APP_AI_RESPONSE: {
-        std::unique_ptr<AiResponsePayload> payload(reinterpret_cast<AiResponsePayload*>(lParam));
+        std::unique_ptr<AiResponsePayload> payload =
+            TakePayload<AiResponsePayload>(pState ? pState->payloads : nullptr, lParam);
+        DebugLog(L"AI response handled by the panel");
         if (pState && payload) {
             if (!payload->chatText.empty()) {
                 AppendToChatDisplay(*pState, payload->chatText);
@@ -291,7 +368,6 @@ static LRESULT CALLBACK AiPanelWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
     case WM_TIMER: {
         if (wParam != IDT_SLIDE_ANIM || !pState) break;
 
-        RECT mainRect = GetMainWindowScreenRect(pState->hMainWindow);
         RECT panelRect;
         GetWindowRect(hWnd, &panelRect);
         int currentW = panelRect.right - panelRect.left;
@@ -304,8 +380,7 @@ static LRESULT CALLBACK AiPanelWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
                 KillTimer(hWnd, IDT_SLIDE_ANIM);
                 DebugLog(L"Slide-out animation complete");
             }
-            SetWindowPos(hWnd, NULL, mainRect.right, mainRect.top,
-                newW, mainRect.bottom - mainRect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+            PlacePanel(*pState, newW);
         }
         else {
             int newW = currentW - SLIDE_PX_STEP;
@@ -315,8 +390,7 @@ static LRESULT CALLBACK AiPanelWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARA
                 ShowWindow(hWnd, SW_HIDE);
                 DebugLog(L"Slide-in animation complete");
             }
-            SetWindowPos(hWnd, NULL, mainRect.right, mainRect.top,
-                newW, mainRect.bottom - mainRect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+            PlacePanel(*pState, newW);
         }
         return 0;
     }
@@ -379,9 +453,7 @@ void ToggleAiSidebar(AiSidebarState& state)
     SetWindowTextW(state.hToggleTab, state.expanded ? L"AI\n<<" : L"AI\n>>");
 
     if (state.expanded) {
-        RECT mainRect = GetMainWindowScreenRect(state.hMainWindow);
-        SetWindowPos(state.hPanel, NULL, mainRect.right, mainRect.top,
-            0, mainRect.bottom - mainRect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+        PlacePanel(state, 0);
         ShowWindow(state.hPanel, SW_SHOWNOACTIVATE);
         LayoutPanelControls(state);
     }
@@ -401,13 +473,10 @@ void RepositionAiSidebar(AiSidebarState& state)
 
     if (!state.expanded) return;
 
-    RECT mainRect = GetMainWindowScreenRect(state.hMainWindow);
     RECT panelRect;
     GetWindowRect(state.hPanel, &panelRect);
     int currentW = panelRect.right - panelRect.left;
-
-    SetWindowPos(state.hPanel, NULL, mainRect.right, mainRect.top,
-        currentW, mainRect.bottom - mainRect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    PlacePanel(state, currentW);
 
     LayoutPanelControls(state);
 }
@@ -415,10 +484,28 @@ void RepositionAiSidebar(AiSidebarState& state)
 // ---------------------------------------------------------------------------
 // Display helpers (UI thread)
 // ---------------------------------------------------------------------------
+// Drop the oldest chat text once the display passes kChatMaxChars, cutting at a
+// line start so no message is left half shown.
+static void TrimChatDisplay(AiSidebarState& state, size_t incoming)
+{
+    size_t len = static_cast<size_t>(GetWindowTextLengthW(state.hChatDisplay));
+    if (len + incoming <= kChatMaxChars) return;
+
+    std::wstring all = GetWindowTextString(state.hChatDisplay);
+    size_t cut = all.size() > kChatKeepChars ? all.size() - kChatKeepChars : 0;
+    size_t lineStart = all.find(L"\r\n", cut);
+    cut = lineStart == std::wstring::npos ? cut : lineStart + 2;
+    std::wstring kept = L"[Older messages were removed to keep the panel fast.]\r\n" + all.substr(cut);
+    SetWindowTextW(state.hChatDisplay, kept.c_str());
+    DebugLog((L"Chat display trimmed from " + std::to_wstring(len) + L" to " + std::to_wstring(kept.size()) +
+              L" characters").c_str());
+}
+
 void AppendToChatDisplay(AiSidebarState& state, const std::wstring& text)
 {
     if (!state.hChatDisplay) return;
 
+    TrimChatDisplay(state, text.size());
     int len = GetWindowTextLengthW(state.hChatDisplay);
     SendMessageW(state.hChatDisplay, EM_SETSEL, len, len);
     SendMessageW(state.hChatDisplay, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(text.c_str()));
@@ -450,7 +537,8 @@ int GetAiSidebarWidth(const AiSidebarState& state)
 void SendUserMessage(AiSidebarState& state, const std::wstring& message)
 {
     if (message.empty()) return;
-    if (!ConfirmSendAllowed(state)) return;
+    LLMConfig config;
+    if (!ConfirmSendAllowed(state, config)) return;
 
     DebugLog((L"Sending user message: " + message).c_str());
 
@@ -465,12 +553,13 @@ void SendUserMessage(AiSidebarState& state, const std::wstring& message)
           "Be concise and technical. Focus on actionable intel." },
         { "user", WideToUtf8(message) }
     };
-    RunLlmRequest(state, messages, L"\r\n[AI]: ");
+    RunLlmRequest(state, config, messages, L"\r\n[AI]: ");
 }
 
-void TriageSelectedFile(AiSidebarState& state, const ScanRow& row)
+void TriageSelectedFile(AiSidebarState& state, ScanRow row)
 {
-    if (!ConfirmSendAllowed(state)) return;
+    LLMConfig config;
+    if (!ConfirmSendAllowed(state, config)) return;
 
     DebugLog((L"Triaging file: " + row.entry.path).c_str());
 
@@ -490,12 +579,13 @@ void TriageSelectedFile(AiSidebarState& state, const ScanRow& row)
           "such as checking the vendor's published hash. Do not guess beyond the facts given." },
         { "user", prompt }
     };
-    RunLlmRequest(state, messages, L"\r\n[AI Triage]:\r\n");
+    RunLlmRequest(state, config, messages, L"\r\n[AI Triage]:\r\n");
 }
 
 void RequestScanSummary(AiSidebarState& state, const ScanSummary& summary, const std::wstring& title)
 {
-    if (!ConfirmSendAllowed(state)) return;
+    LLMConfig config;
+    if (!ConfirmSendAllowed(state, config)) return;
 
     AppendToChatDisplay(state, L"\r\n[Summary]: Summarising " + (title.empty() ? std::wstring(L"the last scan") : title) + L"...\r\n");
     SetAiStatusText(state, L"  Analyzing scan...");
@@ -511,7 +601,7 @@ void RequestScanSummary(AiSidebarState& state, const ScanSummary& summary, const
           "Be concise. Say what deserves a look first and why." },
         { "user", prompt }
     };
-    RunLlmRequest(state, messages, L"\r\n[AI Summary]:\r\n");
+    RunLlmRequest(state, config, messages, L"\r\n[AI Summary]:\r\n");
 }
 
 void RequestAuditAnalysis(AiSidebarState& state, const std::vector<SecurityCheckResult>& results, size_t maxPartChars)
@@ -520,7 +610,8 @@ void RequestAuditAnalysis(AiSidebarState& state, const std::vector<SecurityCheck
         AppendToChatDisplay(state, L"\r\n[Info]: The security audit has not finished yet. Press F5 to run it.\r\n");
         return;
     }
-    if (!ConfirmSendAllowed(state)) return;
+    LLMConfig config;
+    if (!ConfirmSendAllowed(state, config)) return;
     if (!state.worker) {
         AppendToChatDisplay(state, L"\r\n[AI Error]: background worker not available.\r\n");
         return;
@@ -534,8 +625,13 @@ void RequestAuditAnalysis(AiSidebarState& state, const std::vector<SecurityCheck
     SetAiStatusText(state, L"  Analyzing audit...");
     DebugLog((L"Audit analysis: " + std::to_wstring(parts.size()) + L" part(s)").c_str());
 
+    // Every part goes to the endpoint approved above, even if Settings changes it
+    // while the parts are being sent.
     HWND hPanel = state.hPanel;
-    state.worker->Run([hPanel, parts]() {
+    PayloadTracker* tracker = state.payloads;
+    state.worker->Run([hPanel, tracker, parts, config]() {
+        LLMClient client;
+        client.SetConfig(config);
         for (size_t i = 0; i < parts.size(); ++i) {
             std::string header = parts.size() == 1 ? std::string("Here are the findings.\n\n")
                 : "This is part " + std::to_string(i + 1) + " of " + std::to_string(parts.size()) +
@@ -545,20 +641,20 @@ void RequestAuditAnalysis(AiSidebarState& state, const std::vector<SecurityCheck
                   "in plain words and the order to fix things in, most important first. Keep each item short." },
                 { "user", header + BuildSecurityAuditPrompt(WideToUtf8(parts[i])) }
             };
-            std::string response = GetLLMClient().SendChatCompletion(messages);
+            std::string response = client.SendChatCompletion(messages);
 
             AiResponsePayload* payload = new AiResponsePayload();
             std::wstring label = parts.size() == 1 ? L"\r\n[AI Audit Analysis]:\r\n"
                 : L"\r\n[AI Audit Analysis, part " + std::to_wstring(i + 1) + L" of " + std::to_wstring(parts.size()) + L"]:\r\n";
             if (response.empty()) {
-                payload->chatText = L"\r\n[AI Error]: " + Utf8ToWide(GetLLMClient().GetLastError()) + L"\r\n";
+                payload->chatText = L"\r\n[AI Error]: " + Utf8ToWide(client.GetLastError()) + L"\r\n";
                 payload->statusText = L"  Error";
-                PostPayload(hPanel, WM_APP_AI_RESPONSE, payload);
+                PostPayload(hPanel, WM_APP_AI_RESPONSE, payload, *tracker);
                 return;
             }
             payload->chatText = label + ToWindowsLineEnds(Utf8ToWide(response)) + L"\r\n";
             payload->statusText = (i + 1 == parts.size()) ? L"  Ready" : L"  Analyzing audit...";
-            PostPayload(hPanel, WM_APP_AI_RESPONSE, payload);
+            PostPayload(hPanel, WM_APP_AI_RESPONSE, payload, *tracker);
         }
     });
 }

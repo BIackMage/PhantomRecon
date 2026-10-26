@@ -32,6 +32,12 @@ public:
     // Block until every started job has returned.
     void JoinAll();
 
+    // Wait at most timeoutMs for every job to return, joining the ones that did.
+    // True when none is left. False when a job is still stuck in a blocking call
+    // (a slow AI server, a file that takes long to hash); the caller decides what
+    // to do, and wWinMain then ends the process instead of hanging invisibly.
+    bool JoinAllFor(unsigned long timeoutMs);
+
     // Number of jobs still running.
     size_t ActiveCount();
 

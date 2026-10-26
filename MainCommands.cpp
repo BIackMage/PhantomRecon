@@ -68,12 +68,28 @@ static void CmdExit(AppState&, HWND hWnd)
 static void CmdSettings(AppState& app, HWND hWnd)
 {
     std::wstring oldBaselineSetting = app.settings.baselinePath;
+    std::wstring oldEndpoint = app.settings.llmEndpoint;
+    std::string oldModel = app.settings.llmModel;
     int oldTheme = app.settings.theme;
-    if (!ShowSettingsDialog(hWnd, app.hInstance, app.worker, app.settings)) return;
+    if (!ShowSettingsDialog(hWnd, app.hInstance, app.worker, app.payloads, app.settings)) return;
 
-    if (app.settings.baselinePath != oldBaselineSetting && !app.progress.running) {
-        app.baselineFilePath = EffectiveBaselinePath(app.settings);
-        DebugLog(L"Active baseline now " + app.baselineFilePath);
+    if (app.settings.baselinePath != oldBaselineSetting) {
+        if (app.progress.running) {
+            // The running scan keeps the baseline it started with; the new file
+            // becomes active when it finishes (OnScanFinished applies it).
+            app.baselinePathChangePending = true;
+            DebugLog(L"Baseline setting changed during a scan; applied when the scan finishes");
+            MessageBoxW(hWnd, L"The new baseline file is used from the next scan. The scan that is running now "
+                L"keeps comparing against the baseline it started with.", L"Settings", MB_OK | MB_ICONINFORMATION);
+        }
+        else {
+            app.baselinePathChangePending = false;
+            app.baselineFilePath = EffectiveBaselinePath(app.settings);
+            DebugLog(L"Active baseline now " + app.baselineFilePath);
+        }
+    }
+    if (app.settings.llmEndpoint != oldEndpoint || app.settings.llmModel != oldModel) {
+        OnAiSettingsChanged(app.aiSidebar);
     }
     if (app.settings.theme != oldTheme) {
         SetThemeMode(static_cast<ThemeMode>(app.settings.theme));
@@ -329,6 +345,21 @@ static void CmdCancelScan(AppState& app, HWND)
     DebugLog(L"Cancel requested by user");
 }
 
+// Esc: the same as Cancel Scan, but only after a Yes, because Esc is pressed for
+// many other reasons (leaving the search box, closing a menu) and a cancelled
+// scan cannot be resumed.
+static void CmdCancelScanKey(AppState& app, HWND hWnd)
+{
+    if (!app.progress.running) return;
+    int answer = MessageBoxW(hWnd, L"Stop the running scan?\n\nThe rows found so far stay in the list, but the scan "
+        L"cannot be resumed.", L"Cancel Scan", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+    if (answer != IDYES) {
+        DebugLog(L"Esc pressed during a scan; user kept it running");
+        return;
+    }
+    CmdCancelScan(app, hWnd);
+}
+
 static void CmdWeeklyScan(AppState& app, HWND hWnd)
 {
     if (IsPortableMode()) {
@@ -390,6 +421,7 @@ bool DispatchFileScanCommand(AppState& app, HWND hWnd, int commandId)
         { ID_SCANS_FULLSCAN,         CmdFullScan },
         { ID_SCANS_FASTSCAN,         CmdFastScan },
         { ID_SCANS_CANCEL,           CmdCancelScan },
+        { ID_SCANS_CANCEL_KEY,       CmdCancelScanKey },
         { ID_BUTTON_CANCEL,          CmdCancelScan },
         { ID_SCANS_WEEKLY,           CmdWeeklyScan },
     };
@@ -414,7 +446,8 @@ void UpdateMenuState(AppState& app, HMENU menu)
 {
     if (!menu) return;
     bool scanning = app.progress.running.load();
-    bool hasRows = app.results.ViewCount() > 0;
+    bool hasRows = app.results.ViewCount() > 0;          // rows the filter and search show
+    bool hasAnyRows = app.results.TotalCount() > 0;      // rows at all, shown or hidden
     bool hasSelection = SelectedRow(app) != nullptr;
     bool hasAudit = app.audit.hasResults;
     bool hasReport = hasAudit || app.results.TotalCount() > 0;
@@ -447,6 +480,6 @@ void UpdateMenuState(AppState& app, HMENU menu)
     enable(ID_RESULTS_COPY_SHA, hasSelection);
     enable(ID_RESULTS_OPEN_LOCATION, hasSelection);
     enable(ID_RESULTS_TRIAGE, hasSelection);
-    enable(ID_RESULTS_CLEAR, hasRows && !scanning);
+    enable(ID_RESULTS_CLEAR, hasAnyRows && !scanning);
     enable(ID_HELP_SAMPLES, !scanning);
 }

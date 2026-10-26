@@ -22,29 +22,37 @@ bool RefuseWhileScanning(AppState& app, HWND hWnd, const wchar_t* what)
     return true;
 }
 
+// The file is read into a local Baseline and the questions are asked with no lock
+// held (a message box runs a message loop). The lock is taken only for the swap.
 bool LoadBaselineForComparison(AppState& app, HWND hWnd, const wchar_t* scanName)
 {
-    std::lock_guard<std::mutex> lock(app.baselineMutex);
-    if (!app.currentBaseline.LoadFromFile(app.baselineFilePath)) {
-        std::wstring text = FileExists(app.baselineFilePath)
-            ? L"The baseline file could not be read. It may be damaged or from a newer version:\n" + app.baselineFilePath
-            : L"There is no baseline yet. Run Scans > Take Baseline first, on a PC you trust.\n\nExpected at:\n" + app.baselineFilePath;
+    std::wstring path = app.baselineFilePath;
+    Baseline loaded;
+    if (!loaded.LoadFromFile(path)) {
+        std::wstring text = FileExists(path)
+            ? L"The baseline file could not be read. It may be damaged or from a newer version:\n" + path
+            : L"There is no baseline yet. Run Scans > Take Baseline first, on a PC you trust.\n\nExpected at:\n" + path;
         MessageBoxW(hWnd, text.c_str(), scanName, MB_OK | MB_ICONWARNING);
         return false;
     }
-    DebugLog(std::wstring(scanName) + L": loaded baseline with " + std::to_wstring(app.currentBaseline.Count()) + L" entries");
+    DebugLog(std::wstring(scanName) + L": loaded baseline with " + std::to_wstring(loaded.Count()) + L" entries");
 
-    if (app.currentBaseline.IsOlderThan(30)) {
+    if (loaded.IsOlderThan(30)) {
         std::wstringstream ageMsg;
-        ageMsg << L"The baseline is " << app.currentBaseline.GetAgeDays()
-               << L" days old (taken " << app.currentBaseline.GetCreationTimeString() << L").\n\n"
+        ageMsg << L"The baseline is " << loaded.GetAgeDays()
+               << L" days old (taken " << loaded.GetCreationTimeString() << L").\n\n"
                << L"Programs updated since then will show as CHANGED. Taking a fresh baseline on a PC you trust "
                << L"keeps the list short.\n\nCompare against this baseline anyway?";
         if (MessageBoxW(hWnd, ageMsg.str().c_str(), L"Old Baseline", MB_YESNO | MB_ICONWARNING) != IDYES) {
             return false;
         }
     }
-    app.currentBaseline.ResetSeenFlags();
+    loaded.ResetSeenFlags();
+    {
+        std::lock_guard<std::mutex> lock(app.baselineMutex);
+        app.currentBaseline = std::move(loaded);
+    }
+    DebugLog(std::wstring(scanName) + L": baseline swapped in without holding the lock across any dialog");
     return true;
 }
 

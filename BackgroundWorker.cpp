@@ -65,6 +65,29 @@ void BackgroundWorker::JoinAll()
     }
 }
 
+bool BackgroundWorker::JoinAllFor(unsigned long timeoutMs)
+{
+    ULONGLONG start = GetTickCount64();
+    for (;;) {
+        size_t left = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            ReapFinishedLocked();
+            left = m_slots.size();
+        }
+        if (left == 0) {
+            DebugLog(L"JoinAllFor: every job returned");
+            return true;
+        }
+        if (GetTickCount64() - start >= timeoutMs) {
+            DebugLog((L"JoinAllFor: " + std::to_wstring(left) + L" job(s) still running after " +
+                      std::to_wstring(timeoutMs) + L" ms").c_str());
+            return false;
+        }
+        Sleep(20);
+    }
+}
+
 size_t BackgroundWorker::ActiveCount()
 {
     std::lock_guard<std::mutex> lock(m_mutex);

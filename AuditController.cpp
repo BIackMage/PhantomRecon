@@ -5,8 +5,10 @@
 #include "DetailText.h"
 #include "FindingsWindow.h"
 #include "MainLayout.h"
+#include "StringConv.h"
 #include "SystemInfo.h"
 
+#include <exception>
 #include <memory>
 
 static void DebugLog(const std::wstring& msg)
@@ -68,21 +70,34 @@ void StartAuditInBackground(AppState& app)
 
     DebugLog(L"Starting audit, baseline=" + (context.baselinePath.empty() ? std::wstring(L"(none)") : context.baselinePath));
     app.worker.Run([appPtr, hMain, context]() {
-        AuditFinishedPayload* payload = new AuditFinishedPayload();
-        payload->results = RunAllSecurityChecks(context);
-        payload->cancelled = appPtr->audit.cancelRequested.load();
-        payload->score = ComputeHardeningScore(payload->results);
-        payload->finishedAt = NowText();
-        payload->panelText = BuildSystemInfoText() + L"\n" + GetSecuritySummary(payload->results);
+        // The finished message is posted whatever happens, so the window never
+        // stays in "auditing" after an exception in a check.
+        std::unique_ptr<AuditFinishedPayload> payload(new AuditFinishedPayload());
+        try {
+            payload->results = RunAllSecurityChecks(context);
+            payload->cancelled = appPtr->audit.cancelRequested.load();
+            payload->score = ComputeHardeningScore(payload->results);
+            payload->finishedAt = NowText();
+            payload->panelText = BuildSystemInfoText() + L"\n" + GetSecuritySummary(payload->results);
 
-        // Keep the plain-text report next to the program, as earlier versions did.
-        std::wstring reportPath = AppFilePath(L"security_audit_report.txt");
-        if (!WriteSecurityReport(reportPath, payload->results)) {
-            DebugLog(L"Could not write " + reportPath);
+            // Keep the plain-text report next to the program, as earlier versions did.
+            std::wstring reportPath = AppFilePath(L"security_audit_report.txt");
+            if (!WriteSecurityReport(reportPath, payload->results)) {
+                DebugLog(L"Could not write " + reportPath);
+            }
+            DebugLog(L"Audit finished: " + std::to_wstring(payload->results.size()) + L" checks, score " +
+                     std::to_wstring(payload->score.score));
         }
-        DebugLog(L"Audit finished: " + std::to_wstring(payload->results.size()) + L" checks, score " +
-                 std::to_wstring(payload->score.score));
-        PostPayload(hMain, WM_APP_AUDIT_FINISHED, payload);
+        catch (const std::exception& e) {
+            payload.reset(new AuditFinishedPayload());
+            payload->error = Utf8ToWide(e.what());
+        }
+        catch (...) {
+            payload.reset(new AuditFinishedPayload());
+            payload->error = L"unknown error";
+        }
+        if (!payload->error.empty()) DebugLog(L"Audit stopped by an internal error: " + payload->error);
+        PostPayload(hMain, WM_APP_AUDIT_FINISHED, payload.release(), appPtr->payloads);
     });
 }
 
@@ -97,6 +112,17 @@ void OnAuditFinishedMessage(AppState& app, AuditFinishedPayload* rawPayload)
     std::unique_ptr<AuditFinishedPayload> payload(rawPayload);
     app.audit.running = false;
     if (!payload) return;
+
+    if (!payload->error.empty()) {
+        // Keep any earlier results; say what happened where the audit text goes.
+        std::wstring text = BuildSystemInfoText() + L"\nSecurity audit stopped by an internal error: " + payload->error +
+                            (app.audit.hasResults ? L"\nThe score on the right is from the previous audit (" +
+                                                    app.audit.finishedAt + L"). Press F5 to try again."
+                                                  : L"\nPress F5 to try again.");
+        SetWindowTextW(app.controls.systemInfoLabel, ToWindowsLineEnds(text).c_str());
+        UpdateScoreDisplay(app);
+        return;
+    }
 
     if (payload->cancelled && payload->results.empty()) {
         DebugLog(L"Audit cancelled before any check finished");

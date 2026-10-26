@@ -6,6 +6,8 @@
 #include "LLMClient.h"
 #include "ScanCore.h"
 
+class PayloadTracker;   // AppMessages.h
+
 // ---------------------------------------------------------------------------
 // SettingsDialog: modal window with three tabs.
 //   Scanning    exclusions, default folder, baseline file, reports folder,
@@ -45,8 +47,10 @@ struct AppSettings {
 };
 
 // Show the settings dialog (modal). Returns true if the user saved changes;
-// settings then holds the saved values.
-bool ShowSettingsDialog(HWND hParent, HINSTANCE hInst, BackgroundWorker& worker, AppSettings& settings);
+// settings then holds the saved values. payloads tracks the connection test's
+// reply (AppMessages.h), so a reply that arrives as the dialog closes is freed.
+bool ShowSettingsDialog(HWND hParent, HINSTANCE hInst, BackgroundWorker& worker, PayloadTracker& payloads,
+                        AppSettings& settings);
 
 // Load settings from the INI file. Returns defaults if the file does not exist.
 AppSettings LoadAppSettings();
