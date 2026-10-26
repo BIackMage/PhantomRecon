@@ -55,3 +55,6 @@ reports/
 *.swp
 Thumbs.db
 Desktop.ini
+
+# Agent worktrees and local tool state
+.claude/
