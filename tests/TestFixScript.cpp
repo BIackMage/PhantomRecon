@@ -904,11 +904,16 @@ TEST(FixScript_EveryCatalogScriptParses)
     // Every check FAILs at once, so every fix and undo command of the catalog is in one
     // plan, and the real parser must accept all of it.
     std::vector<SecurityCheckResult> results;
+    size_t perTargetChecks = 0;
     for (const CheckInfo& info : GetCheckCatalog()) {
         SecurityCheckResult r = Result(info.id, CHECK_FAIL, L"evidence for " + info.id);
-        if (info.scriptPerTarget) r.targets = { L"Cafe Free WiFi", L"it's open" };
+        if (info.scriptPerTarget) {
+            r.targets = { L"Cafe Free WiFi", L"it's open" };
+            ++perTargetChecks;
+        }
         results.push_back(r);
     }
+    REQUIRE(perTargetChecks > 0);
     FixScriptOptions options;
     std::wstring fix = BuildFixScript(results, options);
     std::wstring undo = BuildUndoScript(results, options);
@@ -923,7 +928,7 @@ TEST(FixScript_EveryCatalogScriptParses)
         REQUIRE(parsed.ok);
         CHECK_EQ(parsed.errors, 0);
         CHECK_EQ(parsed.expandable, 0);
-        CHECK_EQ(parsed.targets.size(), static_cast<size_t>(2));
+        CHECK_EQ(parsed.targets.size(), 2 * perTargetChecks);   // two names per check that names things one by one
     }
 }
 

@@ -126,6 +126,29 @@ Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name Vulner
           L"This sets the 15-minute limit for every user of this PC.",
           L"",
           { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System)~", L"InactivityTimeoutSecs" } } },
+        { L"acct.autologon",
+          LR"~(Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name AutoAdminLogon -Value '0'
+Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name DefaultPassword -ErrorAction SilentlyContinue)~",
+          L"",
+          false, true, false,
+          L"Windows asks for a password at the next start. A password netplwiz keeps encrypted stays stored until you tick Users must enter a user name and password in netplwiz. If a plain-text password was stored, change it as well.",
+          L"",
+          // DefaultPassword holds a password in plain text: the backup never copies it.
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon)~", L"AutoAdminLogon" },
+            { LR"~(HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon)~", L"DefaultPassword", false, true } } },
+        { L"cred.ntlm",
+          LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name LmCompatibilityLevel -Value 5 -Type DWord
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name NoLMHash -Value 1 -Type DWord
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0' -Name NtlmMinClientSec -Value 537395200 -Type DWord
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0' -Name NtlmMinServerSec -Value 537395200 -Type DWord)~",
+          L"",
+          false, true, true,
+          L"Very old devices (NAS boxes, printers, scanners) that only speak LM or NTLMv1 may stop working after the restart.",
+          L"",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Lsa)~", L"LmCompatibilityLevel" },
+            { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Lsa)~", L"NoLMHash" },
+            { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0)~", L"NtlmMinClientSec" },
+            { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0)~", L"NtlmMinServerSec" } } },
 
         // ------------------------------------------------------------------ Services and privileges
         { L"msi.alwayselevated",
@@ -192,6 +215,35 @@ Set-Service RemoteRegistry -StartupType Disabled)~",
           L"netsh wlan set profileparameter ('name=' + $target) connectionmode=auto",
           true, true, false,
           L"The networks stay saved; Windows only stops joining them on its own. Networks saved for all users need an elevated PowerShell.",
+          L"" },
+        // Target: "share|SID|Full" or "share|SID|Change" (ShareFixTargets in HostRules.cpp).
+        // The SID is turned into this PC's own name for the account, so the commands
+        // work in every Windows language.
+        { L"net.shares",
+          LR"~($parts = $target -split '\|'
+$account = (New-Object System.Security.Principal.SecurityIdentifier($parts[1])).Translate([System.Security.Principal.NTAccount]).Value
+Revoke-SmbShareAccess -Name $parts[0] -AccountName $account -Force | Out-Null
+Grant-SmbShareAccess -Name $parts[0] -AccountName $account -AccessRight Read -Force | Out-Null)~",
+          LR"~($parts = $target -split '\|'
+$account = (New-Object System.Security.Principal.SecurityIdentifier($parts[1])).Translate([System.Security.Principal.NTAccount]).Value
+Revoke-SmbShareAccess -Name $parts[0] -AccountName $account -Force | Out-Null
+Grant-SmbShareAccess -Name $parts[0] -AccountName $account -AccessRight $parts[2] -Force | Out-Null)~",
+          true, true, false,
+          L"Each target is a share, the group that could change files in it, and that group's old right. The group keeps Read, so computers that only open files there keep working.",
+          L"Each group gets back the right it had on that share (Full or Change)." },
+        { L"net.smbguest",
+          LR"~(Set-SmbClientConfiguration -EnableInsecureGuestLogons $false -Force
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' -Name RestrictNullSessAccess -Value 1 -Type DWord)~",
+          L"",
+          false, true, true,
+          L"A NAS box that only offers guest access stops working: give it an account. If Group Policy allows guest logons, change that policy too (Lanman Workstation > Enable insecure guest logons = Disabled).",
+          L"",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters)~", L"RestrictNullSessAccess" } } },
+        { L"fw.rules",
+          L"Disable-NetFirewallRule -Name $target",
+          L"Enable-NetFirewallRule -Name $target",
+          true, true, false,
+          L"Each line turns one rule off by its unique name; nothing is deleted. A program that has to accept connections on public networks stops receiving them.",
           L"" },
 
         // ------------------------------------------------------------------ Logging and audit

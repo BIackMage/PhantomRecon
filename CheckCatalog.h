@@ -27,6 +27,7 @@ struct RegistryValueRef {
     std::wstring key;                 // PowerShell path as the commands write it: HKLM:\SOFTWARE\...
     std::wstring name;                // value name
     bool         eachSubkey = false;  // the commands set the value in every direct subkey of key
+    bool         neverSaved = false;  // it can hold a secret (a stored password): never backed up, never restored
 };
 
 struct CheckInfo {
