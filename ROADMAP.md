@@ -262,7 +262,7 @@ Core scanning and analysis capabilities running as a local GUI application.
 ### 1.5 Additional Security Checks `DONE`
 
 Every check is a row in `CheckCatalog.cpp` (title, severity, ATT&CK, CIS, explanation, fix,
-undo) and a function in a `SecurityChecks<Topic>.cpp` file; the audit has 51. The full list
+undo) and a function in a `SecurityChecks<Topic>.cpp` file; the audit has 63 (58 scored, 5 Recent activity). The full list
 is generated into [docs/FINDINGS.md](docs/FINDINGS.md).
 
 - [x] Group Policy Preferences (GPP) check `gpp.cpassword`:
