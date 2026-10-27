@@ -308,6 +308,20 @@ TEST(History_RecordInFile)
     CHECK_EQ(CountLines(ReadAll(path)), static_cast<size_t>(2));
     CHECK_EQ(u3.recent.size(), static_cast<size_t>(2));
     CHECK(!FileExists(path + L".tmp"));
+
+    // A history that exists but cannot be read (held open by another program) is never
+    // overwritten: nothing is compared, nothing is saved, and the file stays as it was.
+    std::wstring before = ReadAll(path);
+    HANDLE locked = CreateFileW(path.c_str(), GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    REQUIRE(locked != INVALID_HANDLE_VALUE);
+    AuditHistoryUpdate u4 = RecordAuditInHistory(path, Record(Day(4), 10, { { ids[0], CHECK_FAIL } }));
+    CloseHandle(locked);
+    CHECK(!u4.loaded);
+    CHECK(!u4.saved);
+    CHECK(!u4.error.empty());
+    CHECK(!u4.comparison.hasPrevious);
+    CHECK_EQ(ReadAll(path), before);
+    CHECK(!FileExists(path + L".tmp"));
 }
 
 // ---------------------------------------------------------------------------
