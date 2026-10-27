@@ -125,6 +125,9 @@ TEST(FixNight_RegistryKeyCreationKeepsExistingValues)
         REQUIRE(std::regex_search(scriptLines[i], m, hklmPath));
         std::wstring key = std::wstring(base) + L"\\Key" + std::to_wstring(i);
         std::wstring line = ReplaceAllW(scriptLines[i], m[1].str(), key);
+        // Safety: the line runs for real, so nothing in it may still name the machine hive.
+        REQUIRE(line.find(L"HKLM:") == std::wstring::npos);
+        REQUIRE(line.find(std::wstring(base)) != std::wstring::npos);
         std::string k = tf::Narrow(key);
         ps += "New-Item '" + k + "\\Sub' -Force | Out-Null\r\n";
         ps += "Set-ItemProperty '" + k + "' -Name Keep -Value 7 -Type DWord\r\n";
