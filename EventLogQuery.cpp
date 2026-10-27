@@ -488,7 +488,11 @@ static bool ReadChannelEnabled(const std::wstring& channel, bool& enabled)
     return true;
 }
 
-static std::wstring LocalTimeText(unsigned long long fileTime)
+// The local time of the event itself: SystemTimeToTzSpecificLocalTime applies the
+// daylight saving rule in force on that date. FileTimeToLocalFileTime (FormatFileTime)
+// applies today's bias to every date, so an event from before a daylight saving change
+// was shown an hour off.
+std::wstring EventTimeText(unsigned long long fileTime)
 {
     if (fileTime == 0) return L"(time unknown)";
     ULARGE_INTEGER li;
@@ -496,8 +500,15 @@ static std::wstring LocalTimeText(unsigned long long fileTime)
     FILETIME ft;
     ft.dwLowDateTime = li.LowPart;
     ft.dwHighDateTime = li.HighPart;
-    std::wstring text = FormatFileTime(ft);
-    return text.empty() ? std::wstring(L"(time unknown)") : text;
+    SYSTEMTIME utc = {};
+    SYSTEMTIME local = {};
+    if (!FileTimeToSystemTime(&ft, &utc) || !SystemTimeToTzSpecificLocalTime(NULL, &utc, &local)) {
+        DebugLog(L"EventTimeText: time " + std::to_wstring(fileTime) + L" could not be converted");
+        return L"(time unknown)";
+    }
+    wchar_t buf[40];
+    swprintf_s(buf, L"%04u-%02u-%02u %02u:%02u", local.wYear, local.wMonth, local.wDay, local.wHour, local.wMinute);
+    return buf;
 }
 
 EventQueryResult RunEventQuery(const EventQuery& query)
@@ -545,7 +556,7 @@ EventQueryResult RunEventQuery(const EventQuery& query)
             std::wstring xml;
             EventRecord record;
             if (RenderEventXml(event.Get(), xml) && ParseEventXml(xml, record)) {
-                record.timeText = LocalTimeText(record.fileTime);
+                record.timeText = EventTimeText(record.fileTime);
                 result.events.push_back(std::move(record));
             }
             else {

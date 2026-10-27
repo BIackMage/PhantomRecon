@@ -167,7 +167,7 @@ The disk must use GPT and the PC must boot in UEFI mode, not Legacy or CSM.)~",
         L"AutoPlay and AutoRun act on a USB stick or disc as soon as it is inserted. That has long been a way for malware to jump "
         L"between PCs on removable media.",
         LR"~(Elevated PowerShell:
-  New-Item 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Force | Out-Null
+  if (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer')) { New-Item 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Force | Out-Null }
   Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Name NoDriveTypeAutoRun -Value 255 -Type DWord
   Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Name NoAutorun -Value 1 -Type DWord)~",
         LR"~(Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Name NoDriveTypeAutoRun,NoAutorun)~" });
@@ -177,7 +177,7 @@ The disk must use GPT and the PC must boot in UEFI mode, not Legacy or CSM.)~",
         L"Windows Script Host runs .vbs and .js files when you double-click them. Few people need that today, and email "
         L"attachments with those extensions are a common way malware starts.",
         LR"~(If nothing on this PC uses .vbs or .js scripts (some company login scripts do), elevated PowerShell:
-  New-Item 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings' -Force | Out-Null
+  if (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings')) { New-Item 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings' -Force | Out-Null }
   Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings' -Name Enabled -Value 0 -Type DWord)~",
         LR"~(Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings' -Name Enabled -Value 1 -Type DWord)~" });
 
@@ -209,7 +209,7 @@ With Group Policy (Office templates): User Configuration > Microsoft Office > Se
 If Windows lists incompatible drivers there, update or uninstall those drivers first (the list names each .sys file and its publisher). Memory integrity stays off while one is installed.
 If memory integrity is on but not running, restart. If it still does not run, check that virtualization (Intel VT-x or AMD-V / SVM) is enabled in the UEFI firmware setup.
 Or elevated PowerShell, then restart:
-  New-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Force | Out-Null
+  if (-not (Test-Path 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity')) { New-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Force | Out-Null }
   Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name Enabled -Value 1 -Type DWord)~",
         LR"~(Windows Security > Device security > Core isolation details > Memory integrity = Off, then restart. Or elevated PowerShell, then restart:
   Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name Enabled -Value 0 -Type DWord
@@ -223,7 +223,7 @@ If Group Policy turned it on (Device Guard > Turn On Virtualization Based Securi
         L"to load them. It is on by default on Windows 11 22H2 and later, and whenever memory integrity, Smart App Control or "
         L"S mode is on.",
         LR"~(Windows Security > Device security > Core isolation details > Microsoft Vulnerable Driver Blocklist = On, then restart. Or elevated PowerShell, then restart:
-  New-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Force | Out-Null
+  if (-not (Test-Path 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config')) { New-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Force | Out-Null }
   Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name VulnerableDriverBlocklistEnable -Value 1 -Type DWord
 If a device stops working afterwards, its driver is on the list: get a current driver from the vendor.)~",
         LR"~(Same switch, Off, then restart. Or elevated PowerShell, then restart:
@@ -433,7 +433,7 @@ MS14-025 stops new ones from being created but does not remove old ones. Use Win
   Stop-Service Spooler
   Set-Service Spooler -StartupType Disabled
 With printers, restrict driver installs:
-  New-Item 'HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint' -Force | Out-Null
+  if (-not (Test-Path 'HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint')) { New-Item 'HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint' -Force | Out-Null }
   Set-ItemProperty 'HKLM:\Software\Policies\Microsoft\Windows NT\Printers\PointAndPrint' -Name RestrictDriverInstallationToAdministrators -Value 1 -Type DWord)~",
         LR"~(Set-Service Spooler -StartupType Automatic
 Start-Service Spooler)~" });
@@ -460,7 +460,7 @@ Then make sure the firewall blocks it: Windows Security > Firewall and network p
         L"When DNS cannot find a name, Windows shouts the question to the whole local network with LLMNR. Any device can answer "
         L"\"that is me\", and the PC then sends it a login attempt with a password hash that can be cracked or relayed.",
         LR"~(Elevated PowerShell:
-  New-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Force | Out-Null
+  if (-not (Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient')) { New-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Force | Out-Null }
   Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Name EnableMulticast -Value 0 -Type DWord
 Or Group Policy: Computer Configuration > Administrative Templates > Network > DNS Client > Turn off multicast name resolution = Enabled.)~",
         LR"~(Remove-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Name EnableMulticast)~" });
@@ -639,16 +639,18 @@ Also record the command line of new processes:
   wevtutil sl Security /ms:209715200
   wevtutil sl Microsoft-Windows-PowerShell/Operational /e:true /ms:104857600
 That sets the Security log to 200 MB and turns on the PowerShell operational log at 100 MB.)~",
-        LR"~(wevtutil sl Security /ms:20971520)~" });
+        LR"~(wevtutil sl Security /ms:20971520
+wevtutil sl Microsoft-Windows-PowerShell/Operational /ms:15728640
+These are the Windows default sizes (20 MB and 15 MB).)~" });
 
     add({ L"ps.logging", L"PowerShell logging", CAT_LOGGING, Severity::Medium,
         { L"T1059.001" }, { L"8.2", L"8.8" }, L"Turn on PowerShell Script Block Logging: Enabled",
         L"Most modern attacks use PowerShell at some point. Script block logging records the code that actually ran, even when "
         L"it was obfuscated, so you can find out later what happened. Module logging records the commands.",
         LR"~(Elevated PowerShell:
-  New-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging' -Force | Out-Null
+  if (-not (Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging')) { New-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging' -Force | Out-Null }
   Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging' -Name EnableScriptBlockLogging -Value 1 -Type DWord
-  New-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames' -Force | Out-Null
+  if (-not (Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames')) { New-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames' -Force | Out-Null }
   Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging' -Name EnableModuleLogging -Value 1 -Type DWord
   Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames' -Name '*' -Value '*'
 Logs land in Event Viewer > Applications and Services Logs > Microsoft > Windows > PowerShell > Operational.)~",

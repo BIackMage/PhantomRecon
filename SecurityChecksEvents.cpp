@@ -14,6 +14,7 @@
 #include <sddl.h>
 
 #include <map>
+#include <vector>
 
 #pragma comment(lib, "netapi32.lib")
 #pragma comment(lib, "advapi32.lib")
@@ -152,31 +153,52 @@ SecurityCheckResult CheckEventsNewServices()
 // ---------------------------------------------------------------------------
 
 // SID text to name for every local account, from this PC's own account database
-// (NetUserEnum on the local computer). No name lookup goes to a domain controller.
-static std::map<std::wstring, std::wstring> LocalAccountSids()
+// (NetUserEnum and NetUserGetInfo on the local computer). No name lookup goes to a
+// domain controller. NetUserEnum has no level with the SID (level 23 answers
+// ERROR_INVALID_LEVEL), so the names come from level 0 and each SID from
+// NetUserGetInfo level 23.
+std::map<std::wstring, std::wstring> LocalAccountSids()
 {
-    std::map<std::wstring, std::wstring> out;
+    std::vector<std::wstring> names;
     DWORD resume = 0;
     NET_API_STATUS status;
     do {
         LPBYTE buffer = NULL;
         DWORD read = 0;
         DWORD total = 0;
-        status = NetUserEnum(NULL, 23, FILTER_NORMAL_ACCOUNT, &buffer, MAX_PREFERRED_LENGTH, &read, &total, &resume);
+        status = NetUserEnum(NULL, 0, FILTER_NORMAL_ACCOUNT, &buffer, MAX_PREFERRED_LENGTH, &read, &total, &resume);
         if ((status == NERR_Success || status == ERROR_MORE_DATA) && buffer) {
-            const USER_INFO_23* users = reinterpret_cast<const USER_INFO_23*>(buffer);
+            const USER_INFO_0* users = reinterpret_cast<const USER_INFO_0*>(buffer);
             for (DWORD i = 0; i < read; ++i) {
-                if (!users[i].usri23_name || !users[i].usri23_user_sid) continue;
-                LPWSTR text = NULL;
-                if (ConvertSidToStringSidW(users[i].usri23_user_sid, &text) && text) {
-                    out[text] = users[i].usri23_name;
-                    LocalFree(text);
-                }
+                if (users[i].usri0_name) names.push_back(users[i].usri0_name);
             }
         }
         if (buffer) NetApiBufferFree(buffer);
     } while (status == ERROR_MORE_DATA);
-    DebugLog(L"LocalAccountSids: " + std::to_wstring(out.size()) + L" account(s), status " + std::to_wstring(status));
+
+    std::map<std::wstring, std::wstring> out;
+    int failed = 0;
+    for (const std::wstring& name : names) {
+        LPBYTE buffer = NULL;
+        NET_API_STATUS infoStatus = NetUserGetInfo(NULL, name.c_str(), 23, &buffer);
+        if (infoStatus == NERR_Success && buffer) {
+            const USER_INFO_23* user = reinterpret_cast<const USER_INFO_23*>(buffer);
+            LPWSTR text = NULL;
+            if (user->usri23_user_sid && ConvertSidToStringSidW(user->usri23_user_sid, &text) && text) {
+                out[text] = name;
+                LocalFree(text);
+            }
+            else {
+                ++failed;
+            }
+        }
+        else {
+            ++failed;
+        }
+        if (buffer) NetApiBufferFree(buffer);
+    }
+    DebugLog(L"LocalAccountSids: " + std::to_wstring(out.size()) + L" of " + std::to_wstring(names.size()) +
+             L" account(s), enum status " + std::to_wstring(status) + L", " + std::to_wstring(failed) + L" without a SID");
     return out;
 }
 
