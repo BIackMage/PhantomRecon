@@ -109,7 +109,7 @@ Engine (`PhantomRecon.Core.vcxproj`, static library):
 | `Redactor.cpp`, `LLMClient.cpp`, `AiConsent.cpp` | Name hiding; the optional AI client; the per-endpoint consent rules |
 | `SettingsValues.cpp`, `RegistryEnumerator.cpp` | Settings values checked and clamped; installed programs for Fast Scan |
 | `JsonWriter.cpp`, `JsonReader.cpp` | JSON out (reports, AI requests); strict JSON in (AI answers, treated as hostile) |
-| `SampleData.cpp`, `ScheduledScan.cpp`, `CliRunner.cpp` | Sample pack, weekly task, the console program's logic |
+| `SampleData.cpp`, `ScheduledScan.cpp`, `CliRunner.cpp`, `CliNotification.cpp` | Sample pack, weekly check-up task, the console program's logic, the notification text and the "did anything get worse" decision |
 | `StartupRequest.cpp` | The window program's command line |
 | `BackgroundWorker.cpp`, `DebugTrace.cpp` | Joinable worker threads; trace lines (`PHANTOMRECON_TRACE=1`) |
 | `AppPaths.cpp`, `FileIO.cpp`, `RegUtil.cpp`, `ServiceUtil.cpp`, `WmiQuery.cpp`, `SystemInfo.cpp`, `HashUtils.cpp`, `TextUtils.h`, `StringConv.h` | Shared helpers |

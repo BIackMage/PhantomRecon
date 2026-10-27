@@ -14,6 +14,7 @@
 #include "../SecurityChecks.h"
 #include "../StringConv.h"
 #include "../TextUtils.h"
+#include "../Version.h"
 
 #include <windows.h>
 #include <algorithm>
@@ -407,7 +408,7 @@ TEST(FixScript_StepOrderGatesAndUndo)
 
     // Header: what it is, version, date, counts, the warning, how to run and undo.
     CHECK(Contains(fix, L"# Phantom Recon fix plan"));
-    CHECK(Contains(fix, L"Phantom Recon 1.0.0"));
+    CHECK(Contains(fix, std::wstring(L"Phantom Recon ") + PHANTOMRECON_VERSION_W));
     CHECK(Contains(fix, L"# Created:  2026-10-26T12:00:00"));
     CHECK(Contains(fix, L"# Findings: 4 FAIL, 2 WARNING"));
     CHECK(Contains(fix, L"# Steps:    6 (4 with commands, 2 done by hand)"));

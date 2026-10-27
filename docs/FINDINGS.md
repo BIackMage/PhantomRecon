@@ -1,6 +1,6 @@
 # What the findings mean
 
-Generated from the check catalog of Phantom Recon 1.0.0. Do not edit by hand; run `PhantomReconCli.exe --findings-md docs/FINDINGS.md` instead.
+Generated from the check catalog of Phantom Recon 1.1.0. Do not edit by hand; run `PhantomReconCli.exe --findings-md docs/FINDINGS.md` instead.
 
 Each check below says what it looks at, why it matters, how to fix it and how to undo the fix. Commands marked elevated need a PowerShell or Command Prompt opened with Run as administrator.
 

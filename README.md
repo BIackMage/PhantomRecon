@@ -13,7 +13,7 @@ server yourself, or set certificate revocation checks to Online in Settings.
 It is a defensive tool. It looks at the PC it runs on and changes nothing. Every fix is
 shown for you to run yourself, with the command to undo it.
 
-Version 1.0.0. Windows 10 and 11, 64-bit.
+Version 1.1.0. Windows 10 and 11, 64-bit.
 
 ## What it does
 

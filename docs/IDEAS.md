@@ -97,6 +97,7 @@ reason).
 | 7.5 | Fix plan | **Done.** Reports > Save Fix Script, the findings window, or `--fix-script`. A PowerShell script the user reads and runs: every step asks first, `-ListOnly` changes nothing, values from the PC only ever appear as single-quoted text. Before a registry step it saves the earlier values, so the matching undo script puts back exactly what was there. The program still never runs a fix. |
 | 7.6 | Audit history | **Done.** What changed since the last audit (fixed, new problems, worse, better), a score chart in the HTML report, `--history`, a switch to turn it off. Only check ids and results are kept, no names or paths. |
 | 7.7 | Biggest wins | **Done.** The five fixes that raise the score most, in the reports and the findings window. |
+| 7.8 | Weekly check-up | **Done.** The weekly task runs the Fast Scan and the security audit, and with `--notify-on-change` notifies only when something got worse (new problems, a lower score, new or changed files, a failed run), saying what. A task made by 1.0.0 keeps working; registering again replaces it. |
 
 ---
 

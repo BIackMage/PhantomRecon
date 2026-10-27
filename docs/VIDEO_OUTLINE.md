@@ -31,14 +31,14 @@ can ever sell it.
 
 **1:00 Get it (40 s)**
 GitHub page, Releases, the zip. Show the SHA-256 on the release page and check it:
-`Get-FileHash .\PhantomRecon-1.0.0-x64.zip`. Explain in one line why: the program is not
+`Get-FileHash .\PhantomRecon-1.1.0-x64.zip`. Explain in one line why: the program is not
 code-signed, so the hash is how you know it is the real one. Unzip.
 
 **1:40 First launch: the score (2 min)**
 Start `PhantomRecon.exe`. The Getting Started window explains the two jobs; close it.
 Point at the hardening score filling in on the right. Press **F6**. The findings window
-lists problems worst first. Pick three common on a home PC and explain each in one
-sentence:
+lists problems worst first, and marks the five "biggest wins": the fixes that raise the
+score most. Pick three common on a home PC and explain each in one sentence:
 - LLMNR on: your PC asks the whole network "who is this name" and believes anyone who
   answers.
 - PowerShell logging off: if something runs a script, there is no record.
@@ -46,7 +46,12 @@ sentence:
   system.
 Click **Copy the Fix** on LLMNR, paste it into an administrator PowerShell, run it. Point
 at **How to undo** so people see it is reversible. Back in Phantom Recon press **F5**.
-The check turns PASS and the score goes up.
+The check turns PASS, the score goes up, and the line under it says "+N since" the last
+audit: the program remembers results (only check names and results, no files or names).
+Then **Reports > Save Fix Script**. Open it in Notepad for five seconds: every step says
+why, asks "Apply this step? [y/N]" before changing anything, and a matching undo script
+puts back exactly what was there. Say it twice: the program never runs it, you do, and
+`-ListOnly` shows the steps without changing anything.
 
 **3:40 See it work on harmless samples (1 min)**
 Help > Create Sample Pack. Pick a folder. Say what is in it: tiny programs that do
@@ -71,9 +76,13 @@ came from. Explain MISSING in one line: it was here before and now it is gone. E
 UPDATED in one line: Windows or Office updated it with a Microsoft-signed file.
 
 **8:10 Reports and the weekly habit (50 s)**
-Reports > Save HTML Report; it opens in the browser. Scroll: score, findings with copy
-buttons, the scan table. Then Scans > Weekly Fast Scan: one visible task every Sunday,
-removable from the same menu. "If the Sunday report says nothing changed, you are done."
+Reports > Save HTML Report; it opens in the browser. Scroll: score, "Since your last
+audit" with the score chart, the biggest wins, findings with copy buttons, the Recent
+activity section (cleared logs, new services, Defender detections from this PC's own
+event logs; run as administrator to include the Security log), the scan table. Then Scans > Weekly Fast Scan: one visible task every Sunday,
+removable from the same menu. It runs the scan and the audit, and it only shows a
+notification when something got worse ("2 new problems since 20 Oct"). "If Sunday is
+quiet, you are done."
 
 **9:00 The optional AI panel (30 s)**
 Click the AI tab on the right edge. It talks to a model on your own PC if you have one,
