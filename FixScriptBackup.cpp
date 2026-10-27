@@ -51,35 +51,34 @@ function Write-PRBackup($List) {
 static const wchar_t kSaveHelpers[] = LR"PS(function Get-PRValueState([string]$Key, [string]$Name) {
     $state = [ordered]@{ Key = $Key; Name = $Name; Existed = $false; Type = ''; Data = ''; Count = 0 }
     $k = Open-PRKey $Key $false
-    if ($null -ne $k) {
-        try {
-            $found = $false
-            foreach ($n in $k.GetValueNames()) { if ([string]::Equals($n, $Name, [StringComparison]::OrdinalIgnoreCase)) { $found = $true } }
-            if ($found) {
-                $kind = [string]$k.GetValueKind($Name)
-                $raw = $k.GetValue($Name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-                $state.Existed = $true
-                $state.Type = $kind
-                switch ($kind) {
-                    'DWord' { $state.Data = [string][BitConverter]::ToUInt32([BitConverter]::GetBytes([int32]$raw), 0) }
-                    'QWord' { $state.Data = [string][BitConverter]::ToUInt64([BitConverter]::GetBytes([int64]$raw), 0) }
-                    'String' { $state.Data = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes([string]$raw)) }
-                    'ExpandString' { $state.Data = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes([string]$raw)) }
-                    'MultiString' {
-                        $parts = [string[]]$raw
-                        $joined = ''
-                        foreach ($p in $parts) { $joined += $p + [char]0 }
-                        $state.Count = $parts.Length
-                        $state.Data = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($joined))
-                    }
-                    'Binary' { if ($null -ne $raw) { $state.Data = [Convert]::ToBase64String([byte[]]$raw) } }
-                    'None' { if ($null -ne $raw) { $state.Data = [Convert]::ToBase64String([byte[]]$raw) } }
-                    default { throw ('The value ' + $Key + ' ' + $Name + ' has a registry type the backup cannot put back exactly (' + $kind + '), so nothing was changed.') }
+    if ($null -eq $k) { return [pscustomobject]$state }
+    try {
+        $found = $false
+        foreach ($n in $k.GetValueNames()) { if ([string]::Equals($n, $Name, [StringComparison]::OrdinalIgnoreCase)) { $found = $true } }
+        if ($found) {
+            $kind = [string]$k.GetValueKind($Name)
+            $raw = $k.GetValue($Name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $state.Existed = $true
+            $state.Type = $kind
+            switch ($kind) {
+                'DWord' { $state.Data = [string][BitConverter]::ToUInt32([BitConverter]::GetBytes([int32]$raw), 0) }
+                'QWord' { $state.Data = [string][BitConverter]::ToUInt64([BitConverter]::GetBytes([int64]$raw), 0) }
+                'String' { $state.Data = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes([string]$raw)) }
+                'ExpandString' { $state.Data = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes([string]$raw)) }
+                'MultiString' {
+                    $parts = [string[]]$raw
+                    $joined = ''
+                    foreach ($p in $parts) { $joined += $p + [char]0 }
+                    $state.Count = $parts.Length
+                    $state.Data = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($joined))
                 }
+                'Binary' { if ($null -ne $raw) { $state.Data = [Convert]::ToBase64String([byte[]]$raw) } }
+                'None' { if ($null -ne $raw) { $state.Data = [Convert]::ToBase64String([byte[]]$raw) } }
+                default { throw ('The value ' + $Key + ' ' + $Name + ' has a registry type the backup cannot put back exactly (' + $kind + '), so nothing was changed.') }
             }
         }
-        finally { $k.Close() }
     }
+    finally { $k.Close() }
     return [pscustomobject]$state
 }
 function Get-PRMissingKeys([string]$Key) {
@@ -272,6 +271,7 @@ std::vector<std::wstring> RegistryValuesLines(const std::vector<RegistryValueRef
     std::vector<std::wstring> out;
     out.push_back(L"$registryValues = @(");
     for (const RegistryValueRef& v : values) {
+        if (v.neverSaved) continue;   // a stored password is never copied into the backup file
         out.push_back(L"    @{ Key = " + PowerShellQuote(v.key) + L"; Name = " + PowerShellQuote(v.name) +
                       L"; EachSubkey = " + (v.eachSubkey ? L"$true" : L"$false") + L" }");
     }
@@ -281,5 +281,14 @@ std::vector<std::wstring> RegistryValuesLines(const std::vector<RegistryValueRef
 
 std::wstring RegistryValueShown(const RegistryValueRef& value)
 {
-    return value.key + (value.eachSubkey ? L"\\<each subkey>" : L"") + L"  " + value.name;
+    return value.key + (value.eachSubkey ? L"\\<each subkey>" : L"") + L"  " + value.name +
+           (value.neverSaved ? L"  (not saved: it can hold a password, so the undo leaves it as it is)" : L"");
+}
+
+bool HasSavedRegistryValues(const std::vector<RegistryValueRef>& values)
+{
+    for (const RegistryValueRef& v : values) {
+        if (!v.neverSaved) return true;
+    }
+    return false;
 }

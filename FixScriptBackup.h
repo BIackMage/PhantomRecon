@@ -44,7 +44,11 @@ std::wstring BackupPathFor(const std::wstring& fixScriptPath);
 std::vector<std::wstring> BackupHelperLines(const std::wstring& backupFileName, bool undo);
 
 // "$registryValues = @(", one hashtable per value, ")". Each line has no indent.
+// Values marked neverSaved (a stored password) are left out: the backup never holds them.
 std::vector<std::wstring> RegistryValuesLines(const std::vector<RegistryValueRef>& values);
+
+// True when at least one value is backed up (not neverSaved).
+bool HasSavedRegistryValues(const std::vector<RegistryValueRef>& values);
 
 // "HKLM:\...\System  EnableLUA", "HKLM:\...\Interfaces\<each subkey>  NetbiosOptions".
 std::wstring RegistryValueShown(const RegistryValueRef& value);

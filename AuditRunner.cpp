@@ -3,6 +3,7 @@
 
 #include "AppPaths.h"
 #include "Baseline.h"
+#include "BiggestWins.h"
 #include "CheckCatalog.h"
 #include "FileIO.h"
 #include "HardeningScore.h"
@@ -205,6 +206,8 @@ std::wstring GetSecuritySummary(const std::vector<SecurityCheckResult>& results)
     }
     ss << L"\nTotal: " << score.pass << L" pass, " << score.fail << L" fail, " << score.warn << L" warn, "
        << score.info + score.notApplicable << L" info, " << score.error << L" err";
+    std::wstring wins = BiggestWinsText(ComputeBiggestWins(results), L"\n");
+    if (!wins.empty()) ss << L"\n\n" << wins.substr(0, wins.size() - 1);
     return ss.str();
 }
 
@@ -227,6 +230,8 @@ bool WriteSecurityReport(const std::wstring& outputPath, const std::vector<Secur
         out << L"\r\n" << ReplaceAllW(AsciiPunctuation(historyParagraph), L"\n", L"\r\n") << L"\r\n";
         DebugLog(L"Text report includes the audit history paragraph");
     }
+    std::wstring wins = BiggestWinsText(ComputeBiggestWins(results), L"\r\n");
+    if (!wins.empty()) out << L"\r\n" << wins;
     out << L"=========================================\r\n\r\n";
 
     for (const SecurityCheckResult& r : results) {

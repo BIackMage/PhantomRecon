@@ -3,6 +3,7 @@
 
 #include "AppPaths.h"
 #include "FileIO.h"
+#include "FixScriptBackup.h"
 #include "StringConv.h"
 #include "TextUtils.h"
 #include "Version.h"
@@ -166,6 +167,17 @@ static FixStep MakeStep(const CheckInfo& info, const SecurityCheckResult& result
 
     const std::wstring& script = undo ? info.undoScript : info.fixScript;
     std::wstring reason;
+    // A step that changes registry values: the fix backs them up first, and the undo
+    // puts them back from that backup, so the undo has a command even when the catalog
+    // has no undo command (it falls back to the prose for a step without a backup).
+    if (!info.fixScript.empty() && !info.scriptPerTarget && HasSavedRegistryValues(info.scriptRegistry)) {
+        step.kind = FixStepKind::Command;
+        step.commands = SplitLines(script, false);
+        step.registryValues = info.scriptRegistry;
+        step.needsAdmin = info.scriptNeedsAdmin;
+        if (undo && step.commands.empty()) step.instructions = SplitLines(info.undo, true);
+        return step;
+    }
     if (!script.empty()) {
         std::vector<std::wstring> lines = SplitLines(script, false);
         if (!info.scriptPerTarget) {
@@ -261,6 +273,7 @@ struct PlanCounts {
     int warn = 0;
     int commands = 0;
     int manual = 0;
+    int registry = 0;   // command steps with a registry backup
     bool needsAdmin = false;
 };
 
@@ -272,6 +285,7 @@ PlanCounts CountPlan(const std::vector<FixStep>& steps)
         else c.warn++;
         if (s.kind == FixStepKind::Command) {
             c.commands++;
+            if (!s.registryValues.empty()) c.registry++;
             if (s.needsAdmin) c.needsAdmin = true;
         }
         else {
@@ -296,6 +310,7 @@ void WriteHeader(ScriptText& s, const FixScriptOptions& o, const PlanCounts& c, 
     if (self.empty()) self = undo ? L"phantom-recon-fix-undo.ps1" : L"phantom-recon-fix.ps1";
     std::wstring other = undo ? o.scriptName : o.undoScriptName;
     if (other.empty()) other = undo ? L"the fix script saved with it" : L"the undo script saved with it (same name, ending in -undo.ps1)";
+    std::wstring backup = BackupFileNameFor(o.scriptName);
 
     s.Comment(undo ? L"Phantom Recon undo plan" : L"Phantom Recon fix plan");
     s.Comment(L"");
@@ -303,13 +318,29 @@ void WriteHeader(ScriptText& s, const FixScriptOptions& o, const PlanCounts& c, 
         s.Comment(L"Reverses the steps of the fix plan " + other + L", which was saved with this file from");
         s.Comment(std::wstring(L"the same ") + PHANTOMRECON_NAME_W + L" " + PHANTOMRECON_VERSION_W +
                   L" audit. Phantom Recon never runs this script.");
-        s.Comment(L"Each step puts the setting back to the Windows default, not to the value it had");
-        s.Comment(L"before the fix. If you had set a value of your own, set it again by hand.");
+        if (c.registry > 0) {
+            s.Comment(L"Steps that change registry values put back exactly what was there before the fix:");
+            s.Comment(L"the fix plan saved those values to " + backup + L" before it applied each such");
+            s.Comment(L"step. Keep that file next to this script. A step without a saved backup (skipped in");
+            s.Comment(L"the fix plan, or the file is missing), and every step that runs a command such as");
+            s.Comment(L"Set-MpPreference, net accounts or wevtutil, puts the setting back to the Windows");
+            s.Comment(L"default, not to the value it had before the fix. If you had set a value of your own");
+            s.Comment(L"there, set it again by hand. Each registry step says which of the two it uses.");
+        }
+        else {
+            s.Comment(L"Each step puts the setting back to the Windows default, not to the value it had");
+            s.Comment(L"before the fix. If you had set a value of your own, set it again by hand.");
+        }
     }
     else {
         s.Comment(std::wstring(L"The problems the ") + PHANTOMRECON_NAME_W + L" " + PHANTOMRECON_VERSION_W +
                   L" security audit found on this PC, as steps you");
         s.Comment(L"review and run yourself. Phantom Recon changed nothing and never runs this script.");
+        if (c.registry > 0) {
+            s.Comment(L"Before a step that changes registry values runs, the values it changes are saved");
+            s.Comment(L"to " + backup + L" next to this script, so the undo plan can put them back");
+            s.Comment(L"exactly. -ListOnly and skipped steps save nothing.");
+        }
     }
     s.Comment(L"");
     s.Comment(L"Created:  " + (o.generatedAt.empty() ? NowText() : o.generatedAt));
@@ -338,7 +369,8 @@ void WriteHeader(ScriptText& s, const FixScriptOptions& o, const PlanCounts& c, 
     }
     else {
         s.Comment(L"Undo: run " + other + L" the same way, and answer y only for");
-        s.Comment(L"the steps you applied. Keep the two files together.");
+        s.Comment(c.registry > 0 ? L"the steps you applied. Keep the files together, with the backup file."
+                                 : L"the steps you applied. Keep the two files together.");
     }
 }
 
@@ -366,23 +398,112 @@ void WriteStepDescription(ScriptText& s, const FixStep& step, size_t number, siz
     if (step.needsRestart) s.Say(L"", L"This change takes effect after a restart.");
 }
 
+// Each command, with a check of the exit code a native program leaves behind.
+void WriteCommands(ScriptText& s, const std::vector<std::wstring>& commands, const std::wstring& indent)
+{
+    for (const std::wstring& c : commands) {
+        s.Line(indent + L"$global:LASTEXITCODE = 0");
+        s.Line(indent + c);
+        s.Line(indent + L"if ($LASTEXITCODE) { throw ('A command ended with exit code ' + $LASTEXITCODE + '.') }");
+    }
+}
+
+void WriteRegistryValues(ScriptText& s, const std::vector<RegistryValueRef>& values, const std::wstring& indent)
+{
+    for (const std::wstring& line : RegistryValuesLines(values)) s.Line(indent + line);
+}
+
+void SayRegistryValues(ScriptText& s, const FixStep& step)
+{
+    for (const RegistryValueRef& v : step.registryValues) s.Say(L"", L"    " + RegistryValueShown(v));
+}
+
 void WriteCommandStep(ScriptText& s, const FixStep& step, size_t number, size_t total, bool undo)
 {
     WriteStepDescription(s, step, number, total, undo);
     s.Say(L"", L"Commands:");
     for (const std::wstring& c : step.commands) s.Say(L"", L"    " + c);
+    bool backup = !undo && !step.registryValues.empty();
+    if (backup) {
+        s.Say(L"", L"Before the commands run, the registry values they change are saved to the backup file:");
+        SayRegistryValues(s, step);
+    }
     s.Line(L"if (-not $ListOnly) {");
     s.Line(L"    $answer = Read-Host 'Apply this step? [y/N]'");
     s.Line(L"    if ($answer -eq 'y') {");
     s.Line(L"        try {");
-    for (const std::wstring& c : step.commands) {
-        s.Line(L"            $global:LASTEXITCODE = 0");
-        s.Line(L"            " + c);
-        s.Line(L"            if ($LASTEXITCODE) { throw ('A command ended with exit code ' + $LASTEXITCODE + '.') }");
+    if (backup) {
+        WriteRegistryValues(s, step.registryValues, L"            ");
+        s.Line(L"            Save-PRBackup " + PowerShellQuote(step.checkId) + L" $registryValues");
     }
+    WriteCommands(s, step.commands, L"            ");
     s.Line(L"            $applied++");
     if (step.needsRestart) s.Line(L"            $restartSteps.Add(" + PowerShellQuote(ShownText(step.title)) + L")");
     s.Say(L"            ", L"Applied.");
+    s.Line(L"        }");
+    s.Line(L"        catch {");
+    s.Line(L"            $failed++");
+    s.Line(L"            Write-Warning ('Step " + std::to_wstring(number) + L" failed: ' + $_.Exception.Message)");
+    s.Line(L"        }");
+    s.Line(L"    }");
+    s.Line(L"    else {");
+    s.Line(L"        $skipped++");
+    s.Say(L"        ", L"Skipped.");
+    s.Line(L"    }");
+    s.Line(L"}");
+    s.Line();
+}
+
+// An undo step for a registry step: the exact values from the backup when it has
+// the step, the catalog's undo commands otherwise, and the prose when there are none.
+void WriteRestoreStep(ScriptText& s, const FixStep& step, size_t number, size_t total)
+{
+    const std::wstring id = PowerShellQuote(step.checkId);
+    const bool fallbackCommands = !step.commands.empty();
+    WriteStepDescription(s, step, number, total, true);
+    s.Say(L"", L"Registry values this step puts back from the backup:");
+    SayRegistryValues(s, step);
+    s.Line(L"$backupState = Get-PRBackupState " + id);
+    s.Line(L"if ($backupState -eq 'saved') { Write-Host 'Backup: found. This step puts back the exact values from before the fix.' }");
+    s.Line(L"elseif ($backupState -eq 'restored') { Write-Host 'Backup: already put back by an earlier run of this undo plan, so this step changes nothing.' }");
+    s.Line(L"elseif ($backupState -eq 'unreadable') { Write-Host 'Backup: the backup file cannot be read, so this step stops without changing anything.' }");
+    s.Line(L"else { Write-Host 'Backup: none for this step (it was skipped in the fix plan, or the backup file is not next to this script).' }");
+    if (fallbackCommands) {
+        s.Say(L"", L"Without a backup it sets the Windows default with these commands:");
+        for (const std::wstring& c : step.commands) s.Say(L"", L"    " + c);
+    }
+    else {
+        s.Say(L"", L"Without a backup this undo is done by hand. What to do:");
+        for (const std::wstring& line : step.instructions) s.Say(L"", L"    " + line);
+    }
+    s.Line(L"if (-not $ListOnly) {");
+    s.Line(L"    $answer = Read-Host 'Apply this step? [y/N]'");
+    s.Line(L"    if ($answer -eq 'y') {");
+    s.Line(L"        try {");
+    WriteRegistryValues(s, step.registryValues, L"            ");
+    s.Line(L"            $restore = Restore-PRBackup " + id + L" $registryValues");
+    s.Line(L"            if ($restore -eq 'restored') {");
+    s.Line(L"                $applied++");
+    if (step.needsRestart) s.Line(L"                $restartSteps.Add(" + PowerShellQuote(ShownText(step.title)) + L")");
+    s.Say(L"                ", L"Applied from the backup: the exact values from before the fix are back.");
+    s.Line(L"            }");
+    s.Line(L"            elseif ($restore -eq 'done') {");
+    s.Line(L"                $skipped++");
+    s.Say(L"                ", L"Nothing to do: these values were already put back from the backup.");
+    s.Line(L"            }");
+    s.Line(L"            else {");
+    if (fallbackCommands) {
+        WriteCommands(s, step.commands, L"                ");
+        s.Line(L"                $applied++");
+        if (step.needsRestart) s.Line(L"                $restartSteps.Add(" + PowerShellQuote(ShownText(step.title)) + L")");
+        s.Say(L"                ", L"Applied with the Windows default: there is no backup for this step.");
+    }
+    else {
+        s.Say(L"                ", L"There is no backup for this step, so this undo is done by hand (see above).");
+        s.Line(L"                $null = Read-Host 'Press Enter when you have done this step, or to leave it for later'");
+        s.Line(L"                $byHand++");
+    }
+    s.Line(L"            }");
     s.Line(L"        }");
     s.Line(L"        catch {");
     s.Line(L"            $failed++");
@@ -460,6 +581,10 @@ std::wstring BuildScript(const std::vector<SecurityCheckResult>& results, const 
         WriteAdminGuard(s);
         s.Line();
     }
+    if (counts.registry > 0) {
+        for (const std::wstring& line : BackupHelperLines(BackupFileNameFor(options.scriptName), undo)) s.Line(line);
+        s.Line();
+    }
     s.Say(L"", std::wstring(undo ? L"Phantom Recon undo plan: " : L"Phantom Recon fix plan: ") + std::to_wstring(steps.size()) +
                L" step(s), " + std::to_wstring(counts.commands) + L" with commands and " + std::to_wstring(counts.manual) +
                L" done by hand.");
@@ -467,13 +592,14 @@ std::wstring BuildScript(const std::vector<SecurityCheckResult>& results, const 
     s.Line();
 
     for (size_t i = 0; i < steps.size(); ++i) {
-        if (steps[i].kind == FixStepKind::Command) WriteCommandStep(s, steps[i], i + 1, steps.size(), undo);
-        else WriteManualStep(s, steps[i], i + 1, steps.size(), undo);
+        if (steps[i].kind == FixStepKind::Manual) WriteManualStep(s, steps[i], i + 1, steps.size(), undo);
+        else if (undo && !steps[i].registryValues.empty()) WriteRestoreStep(s, steps[i], i + 1, steps.size());
+        else WriteCommandStep(s, steps[i], i + 1, steps.size(), undo);
     }
     WriteSummary(s, steps.size());
     DebugLog(std::wstring(undo ? L"Undo" : L"Fix") + L" plan: " + std::to_wstring(steps.size()) + L" steps, " +
-             std::to_wstring(counts.commands) + L" with commands, " + std::to_wstring(counts.manual) + L" by hand" +
-             (options.redacted ? L", names hidden" : L""));
+             std::to_wstring(counts.commands) + L" with commands, " + std::to_wstring(counts.manual) + L" by hand, " +
+             std::to_wstring(counts.registry) + L" with a registry backup" + (options.redacted ? L", names hidden" : L""));
     return s.Text();
 }
 

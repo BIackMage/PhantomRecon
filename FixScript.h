@@ -31,6 +31,12 @@
 //     redacted name would make a broken command) and the header says so.
 //   - Steps that need administrator rights make the script refuse to apply anything
 //     from a normal PowerShell. -ListOnly works without them.
+//   - Exact undo for registry steps (FixScriptBackup.h): a step whose commands set or
+//     remove registry values (CheckInfo::scriptRegistry) first saves their state to
+//     <fix script name>-backup.json, only after the user answered y. The undo step
+//     puts back exactly that state when the backup has the step, and otherwise runs
+//     the catalog's undo commands (the Windows default) or, when there are none,
+//     becomes a step done by hand. It says which one it used.
 // ---------------------------------------------------------------------------
 
 struct FixScriptOptions {
@@ -54,6 +60,10 @@ struct FixStep {
     std::vector<std::wstring> instructions;  // Manual: the fix (or undo) text, one entry per line
     std::vector<std::wstring> evidence;      // Manual: what the audit found, capped
     std::wstring manualReason;               // Manual: why there is no command, may be empty
+    // Command steps that change registry values: backed up before the fix commands run,
+    // restored exactly by the undo step. In an undo step, commands are the fallback for
+    // a step without a backup, and instructions the fallback when there are no commands.
+    std::vector<RegistryValueRef> registryValues;
     bool         needsAdmin = false;
     bool         needsRestart = false;
 };
@@ -86,7 +96,9 @@ std::wstring UndoScriptPathFor(const std::wstring& fixScriptPath);
 bool HasPs1Extension(const std::wstring& path);
 
 // Write both scripts as UTF-8 with BOM (Windows PowerShell 5.1 reads UTF-8 without a
-// BOM as ANSI). The undo script goes to UndoScriptPathFor(fixScriptPath). Fills the
+// BOM as ANSI). The undo script goes to UndoScriptPathFor(fixScriptPath); the backup
+// file the scripts use is BackupPathFor(fixScriptPath), written only when the fix
+// script runs a registry step (Phantom Recon writes no backup itself). Fills the
 // file names in the options from the paths. False with error set when a file could
 // not be written.
 bool SaveFixScripts(const std::wstring& fixScriptPath, const std::vector<SecurityCheckResult>& results,

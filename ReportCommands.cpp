@@ -7,6 +7,7 @@
 #include "CommandHelpers.h"
 #include "FindingsWindow.h"
 #include "FixScript.h"
+#include "FixScriptBackup.h"
 #include "GuiComponents.h"
 #include "MainLayout.h"
 #include "Reports.h"
@@ -133,6 +134,8 @@ void SaveFixScriptFiles(AppState& app, HWND owner)
     DebugLog(L"Fix script saved to " + path + L" and " + undoPath + (redact ? L" (names hidden)" : L""));
     // Not opened with the shell: on some PCs the default action for .ps1 runs it.
     std::wstring text = L"Saved:\n" + path + L"\n" + undoPath +
+        L"\n\nBefore a step that changes registry values runs, the fix script saves those values to\n" + BackupPathFor(path) +
+        L"\nso the undo script can put them back exactly. Keep the three files together."
         L"\n\nOpen the fix script in a text editor and read every step before you run it. Phantom Recon does not run it."
         L"\n\nTo see the steps without changing anything, in PowerShell:\n"
         L"powershell -NoProfile -ExecutionPolicy Bypass -File \"" + path + L"\" -ListOnly";

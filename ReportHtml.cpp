@@ -2,6 +2,7 @@
 #include "Reports.h"
 
 #include "AppPaths.h"
+#include "BiggestWins.h"
 #include "CheckCatalog.h"
 #include "ReportHistory.h"
 #include "TextUtils.h"
@@ -44,6 +45,7 @@ table{width:100%;border-collapse:collapse;background:var(--card);border:1px soli
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{cursor:pointer;user-select:none;background:var(--code)}
 td.path{word-break:break-all;max-width:420px}tr.hi td:first-child{border-left:4px solid var(--fail)}tr.mid td:first-child{border-left:4px solid var(--warn)}
 footer{margin-top:40px;color:var(--muted);font-size:13px}
+.wins{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:10px;padding:12px 16px;margin:16px 0}.wins p{margin:6px 0}.wins ol{margin:4px 0;padding-left:22px}.wins a{color:var(--accent)}
 .hist ul{margin:4px 0 12px;padding-left:22px}.trend{display:block;width:100%;max-width:680px;height:auto;margin:14px 0 6px}.trend .grid{stroke:var(--line);stroke-width:1}.trend .line{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linejoin:round}.trend .dot{fill:var(--accent)}.trend text{font:12px "Segoe UI",sans-serif;fill:var(--muted)}
 @media print{.bar,.copy{display:none}.finding{break-inside:avoid}body{background:#fff}}
 )CSS";
@@ -51,6 +53,7 @@ footer{margin-top:40px;color:var(--muted);font-size:13px}
 static const wchar_t* kScript = LR"JS(
 function filterFindings(kind,btn){document.querySelectorAll('.bar.f button').forEach(b=>b.classList.remove('on'));btn.classList.add('on');
 document.querySelectorAll('.finding').forEach(f=>{const s=f.dataset.status;let show=kind==='all'||(kind==='attention'&&(s==='FAIL'||s==='WARNING'))||(kind==='pass'&&s==='PASS');f.style.display=show?'':'none';});}
+function showFinding(a){const f=document.getElementById(a.getAttribute('href').slice(1));if(f)f.style.display='';}
 function copyFix(btn){const t=btn.parentElement.querySelector('pre').innerText;navigator.clipboard.writeText(t).then(()=>{btn.textContent='Copied';setTimeout(()=>btn.textContent='Copy',1500);});}
 function filterRows(){const st=document.getElementById('st').value,q=document.getElementById('q').value.toLowerCase();
 document.querySelectorAll('#rows tbody tr').forEach(r=>{const ok=(st==='all'||r.dataset.status===st||(st==='review'&&r.dataset.review==='1'))&&(!q||r.innerText.toLowerCase().includes(q));r.style.display=ok?'':'none';});}
@@ -84,6 +87,27 @@ static std::wstring ScoreRing(int score, const std::wstring& label)
     return s.str();
 }
 
+// The anchor of a finding's article, for the links in the Biggest wins box.
+static std::wstring FindingAnchor(const std::wstring& id)
+{
+    return L"check-" + id;
+}
+
+// "Biggest wins": the fixes that raise the score the most, each a link to its finding.
+static void WriteBiggestWins(std::wstringstream& html, const ReportData& d)
+{
+    BiggestWinsResult wins = ComputeBiggestWins(d.audit);
+    if (wins.wins.empty()) return;
+    html << L"<section class=\"wins\"><h3>Biggest wins</h3><p>" << H(BiggestWinsHeadline(wins))
+         << L" Start here: these fixes raise the hardening score the most.</p><ol>";
+    for (const ScoreWin& w : wins.wins) {
+        html << L"<li><a href=\"#" << H(FindingAnchor(w.id)) << L"\" onclick=\"showFinding(this)\">" << H(w.title)
+             << L"</a> <b>+" << w.points << L"</b> <span class=\"sev\">" << SeverityName(w.severity) << L", "
+             << H(w.status) << L"</span></li>";
+    }
+    html << L"</ol></section>\n";
+}
+
 static void WriteFindings(std::wstringstream& html, const ReportData& d)
 {
     html << L"<h2>Security posture</h2>\n<div class=\"top\">" << ScoreRing(d.score.score, d.score.label) << L"</div>\n";
@@ -92,6 +116,7 @@ static void WriteFindings(std::wstringstream& html, const ReportData& d)
          << L"<div class=\"tile\"><b class=\"warn\">" << d.score.warn << L"</b><span>Warning</span></div>"
          << L"<div class=\"tile\"><b class=\"pass\">" << d.score.pass << L"</b><span>Pass</span></div>"
          << L"<div class=\"tile\"><b class=\"info\">" << d.score.info + d.score.notApplicable + d.score.error << L"</b><span>Info</span></div></div>\n";
+    WriteBiggestWins(html, d);
     if (d.hasHistory) html << BuildHistoryHtmlSection(d.history, d.historyRecords);
     html << L"<div class=\"bar f\"><button class=\"on\" onclick=\"filterFindings('attention',this)\">Needs attention</button>"
          << L"<button onclick=\"filterFindings('all',this)\">All checks</button><button onclick=\"filterFindings('pass',this)\">Passed</button></div>\n";
@@ -106,7 +131,7 @@ static void WriteFindings(std::wstringstream& html, const ReportData& d)
                 header = true;
             }
             bool attention = r.status == CHECK_FAIL || r.status == CHECK_WARNING;
-            html << L"<article class=\"finding\" data-status=\"" << H(r.status) << L"\"" << (attention ? L"" : L" style=\"display:none\"") << L">"
+            html << L"<article class=\"finding\" id=\"" << H(FindingAnchor(r.id)) << L"\" data-status=\"" << H(r.status) << L"\"" << (attention ? L"" : L" style=\"display:none\"") << L">"
                  << L"<div class=\"head\"><span class=\"pill " << StatusClass(r.status) << L"\">" << H(r.status) << L"</span>"
                  << L"<h3>" << H(r.name) << L"</h3><span class=\"sev\">" << SeverityName(info->severity) << L" severity"
                  << (info->scored ? L"" : L", not scored") << L"</span></div>";

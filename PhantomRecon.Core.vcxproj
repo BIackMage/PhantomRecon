@@ -72,6 +72,8 @@
     <ClInclude Include="FileIO.h" />
     <ClInclude Include="FileOrigin.h" />
     <ClInclude Include="FixScript.h" />
+    <ClInclude Include="FixScriptBackup.h" />
+    <ClInclude Include="BiggestWins.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="FuzzyHash.h" />
     <ClInclude Include="HardeningScore.h" />
@@ -140,6 +142,8 @@
     <ClCompile Include="FileIO.cpp" />
     <ClCompile Include="FileOrigin.cpp" />
     <ClCompile Include="FixScript.cpp" />
+    <ClCompile Include="FixScriptBackup.cpp" />
+    <ClCompile Include="BiggestWins.cpp" />
     <ClCompile Include="FuzzyHash.cpp" />
     <ClCompile Include="HardeningScore.cpp" />
     <ClCompile Include="HashUtils.cpp" />
