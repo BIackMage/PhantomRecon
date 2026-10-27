@@ -128,8 +128,12 @@ def smoke_fix_script(cli: pathlib.Path, work: pathlib.Path) -> None:
         log("output:\n" + result.stdout + result.stderr)
     expect(result.returncode in (0, 1), f"--audit --fix-script exits 0 or 1 (got {result.returncode})")
     report = load_report(audit_json)
-    problems = [f for f in report.get("findings", []) if f.get("status") in ("FAIL", "WARNING")]
-    log(f"audit: {len(problems)} FAIL or WARNING finding(s)")
+    # Unscored findings (Recent activity) report events, not settings; the plan leaves them out.
+    problems = [f for f in report.get("findings", [])
+                if f.get("status") in ("FAIL", "WARNING") and f.get("scored", True)]
+    activity = [f for f in report.get("findings", []) if f.get("scored", True) is False]
+    expect(bool(activity), f"audit.json marks the Recent activity findings as not scored (got {len(activity)})")
+    log(f"audit: {len(problems)} scored FAIL or WARNING finding(s)")
 
     fix_text = check_script_file(fix, work)
     undo_text = check_script_file(undo, work)
