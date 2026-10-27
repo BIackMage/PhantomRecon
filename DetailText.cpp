@@ -176,7 +176,7 @@ std::wstring BuildFindingDetailText(const CheckInfo& info, const SecurityCheckRe
     out << info.title << L"\n";
     out << L"Check id: " << info.id << L"    Category: " << info.category << L"\n";
     out << L"Status: " << (result ? result->status : std::wstring(L"not run yet")) << L"    Severity: "
-        << SeverityName(info.severity) << L"\n";
+        << SeverityName(info.severity) << (info.scored ? L"" : L"    Not scored: it reports events, not a setting") << L"\n";
     if (!info.attack.empty()) {
         out << L"MITRE ATT&CK:\n";
         for (const std::wstring& id : info.attack) {

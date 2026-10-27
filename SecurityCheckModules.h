@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SecurityChecks.h"
+#include "SecurityChecksEvents.h"   // the "Recent activity" checks, declared in their own header
 
 // ---------------------------------------------------------------------------
 // Every check function, grouped by the file that implements it. The audit

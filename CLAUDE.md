@@ -92,6 +92,7 @@ Engine (`PhantomRecon.Core.vcxproj`, static library):
 | `AuditRunner.cpp`, `SecurityChecks*.cpp` | The audit and its checks |
 | `CheckHelpers.cpp` | Pure decision logic behind the checks (testable) |
 | `AuditRules.cpp` | Pure verdict logic for the Defender, hardening, account, logging and firewall checks: facts in, status out |
+| `EventLogQuery.cpp`, `EventRules.cpp` | This PC's own event logs (EvtQuery with a NULL session, never a remote one; capped, newest first); pure verdicts for the Recent activity checks, which are not scored |
 | `PeOrdinals.cpp` | Function names for imports by ordinal (ws2_32, wsock32, oleaut32) for the imphash and import scoring |
 | `HardeningScore.cpp`, `AttackMapping.cpp` | Score; ATT&CK names, finding codes, Navigator |
 | `ReportHtml.cpp`, `ReportJson.cpp`, `DetailText.cpp` | Reports; plain-text explanations for windows and AI |

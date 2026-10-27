@@ -190,6 +190,7 @@ std::wstring BuildJsonReport(const ReportData& input)
             w.Key(L"title"); w.String(r.name);
             w.Key(L"status"); w.String(r.status);
             w.Key(L"severity"); w.String(info ? SeverityName(info->severity) : L"Info");
+            w.Key(L"scored"); w.Bool(info ? info->scored : false);
             w.Key(L"category"); w.String(info ? info->category : L"");
             w.Key(L"attack"); w.StringArray(info ? info->attack : std::vector<std::wstring>());
             w.Key(L"cisControls"); w.StringArray(info ? info->cisControls : std::vector<std::wstring>());

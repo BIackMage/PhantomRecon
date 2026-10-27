@@ -30,6 +30,7 @@ struct CheckInfo {
     std::wstring explanation;                // what it is and why it matters, plain words
     std::wstring fix;                        // exact steps or commands
     std::wstring undo;                       // how to reverse the fix
+    bool         scored = true;              // false: reports events, not a setting, so it never moves the hardening score
 };
 
 // Every check in report order.

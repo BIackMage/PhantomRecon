@@ -25,6 +25,7 @@ HardeningScore ComputeHardeningScore(const std::vector<SecurityCheckResult>& res
         else s.info++;
 
         const CheckInfo* info = FindCheckInfo(r.id);
+        if (info && !info->scored) continue;   // counted above, never weighed (events, not settings)
         int weight = info ? SeverityWeight(info->severity) : 0;
         if (weight == 0) continue;
 

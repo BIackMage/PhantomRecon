@@ -95,6 +95,11 @@ static const std::map<std::wstring, CheckFn>& CheckFunctions()
         { L"audit.subcategories", Plain(CheckAuditSubcategories) },
         { L"audit.policy",        Plain(CheckEventLogSettings) },
         { L"ps.logging",          Plain(CheckPowerShellLogging) },
+        { L"events.logcleared",   Plain(CheckEventsLogCleared) },
+        { L"events.newservices",  Plain(CheckEventsNewServices) },
+        { L"events.newaccounts",  Plain(CheckEventsNewAccounts) },
+        { L"events.failedlogons", Plain(CheckEventsFailedLogons) },
+        { L"events.defender",     Plain(CheckEventsDefender) },
     };
     return functions;
 }
@@ -205,7 +210,7 @@ bool WriteSecurityReport(const std::wstring& outputPath, const std::vector<Secur
         const CheckInfo* info = FindCheckInfo(r.id);
         out << L"CHECK: " << r.name << L" [" << r.id << L"]\r\n";
         out << L"STATUS: " << r.status;
-        if (info) out << L"   SEVERITY: " << SeverityName(info->severity);
+        if (info) out << L"   SEVERITY: " << SeverityName(info->severity) << (info->scored ? L"" : L" (not scored)");
         out << L"\r\n";
         if (info && !info->attack.empty()) out << L"ATT&CK: " << JoinW(info->attack, L", ") << L"\r\n";
         if (info && !info->cisControls.empty()) out << L"CIS Controls v8: " << JoinW(info->cisControls, L", ") << L"\r\n";
