@@ -240,6 +240,36 @@ Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLog
 Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames' -Name '*' -Value '*')~",
           LR"~(Remove-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging','HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging' -Recurse)~",
           false, true, false, L"", L"" },
+
+        // ------------------------------------------------------------------ Third pack (SecurityChecksHygiene.cpp)
+        // wu.paused (a Settings button or a Group Policy), net.doh (a Settings page,
+        // INFO only) have no entry: the plan shows them as steps done by hand.
+        { L"cred.wdigest",
+          LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest' -Name UseLogonCredential -Value 0 -Type DWord)~",
+          L"",
+          false, true, true,
+          L"Passwords already kept in memory stay there until each account signs out: sign out and back in, or restart. If you did not turn this on yourself, run a full scan and change the passwords of the accounts used on this PC.",
+          L"" },
+        { L"net.remoteassist",
+          LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowToGetHelp -Value 0 -Type DWord
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowFullControl -Value 0 -Type DWord)~",
+          LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowToGetHelp -Value 1 -Type DWord
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowFullControl -Value 1 -Type DWord)~",
+          false, true, false,
+          L"This turns Remote Assistance invitations off. If Group Policy turns them on (System > Remote Assistance), change that policy too.",
+          L"This allows invitations with control again, the Windows default." },
+        { L"cred.cachedlogons",
+          LR"~(Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name CachedLogonsCount -Value '4' -Type String)~",
+          LR"~(Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name CachedLogonsCount -Value '10' -Type String)~",
+          false, true, false,
+          L"Windows then keeps at most 4 domain sign-ins. Laptops used away from the office need at least 1 or 2. On a domain, Group Policy may set this value again.",
+          L"This sets the Windows default of 10." },
+        { L"hard.sudo",
+          L"sudo config --enable forceNewWindow",
+          L"sudo config --enable normal",
+          false, true, false,
+          L"sudo stays on and runs each elevated command in a window of its own.",
+          L"" },
     };
     return scripts;
 }
