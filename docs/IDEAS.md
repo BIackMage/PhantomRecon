@@ -1,8 +1,8 @@
 # Ideas: what is built and what is left
 
 The idea list was written on 2026-10-25, after the architecture refactor. Version 1.0.0
-(2026-10-26) built nearly all of it. Each item below says what shipped, and for anything
-not built, why.
+(2026-10-26) built nearly all of it, and version 1.1.0 (2026-10-27) added section 7. Each
+item below says what shipped, and for anything not built, why.
 
 The tool stays defensive, offline-first and portable. Nothing here acts on another
 machine, reads another program's memory, or sends data anywhere without asking.
@@ -86,6 +86,18 @@ reason).
 | 6.2 | Demo baseline | **Done differently.** The demo baseline belongs to the sample pack. A baseline of one person's Program Files would be wrong on every other PC. |
 | 6.3 | One page of what the findings mean | **Done.** [FINDINGS.md](FINDINGS.md), generated from the catalog. |
 
+## 7. Added in version 1.1.0
+
+| # | Idea | Status |
+|---|------|--------|
+| 7.1 | More platform checks | **Done.** Memory integrity, the vulnerable driver block list, Smart App Control, system exploit protection, screen lock, System Restore, saved open Wi-Fi networks that connect on their own. |
+| 7.2 | Recent activity from this PC's own event logs | **Done.** Cleared logs, newly installed services, new accounts and administrators, failed sign-ins, Microsoft Defender detections. Not scored: they report events, not settings. The Security log needs administrator rights; without it those parts are N/A, never a false PASS. |
+| 7.3 | Sharing, sign-in and driver checks | **Done.** Shared folders anyone can change, SMB guest access, inbound firewall rules open on public networks (WARNING only for programs in folders normal users can change, or rules that open everything), automatic sign-in (whether a stored password exists, never its value), NTLM and LM settings, driver files. |
+| 7.4 | Hygiene checks | **Done.** WDigest, paused or long-deferred updates, Remote Assistance, cached domain sign-ins, Windows sudo in inline mode, DNS over HTTPS (information only). |
+| 7.5 | Fix plan | **Done.** Reports > Save Fix Script, the findings window, or `--fix-script`. A PowerShell script the user reads and runs: every step asks first, `-ListOnly` changes nothing, values from the PC only ever appear as single-quoted text. Before a registry step it saves the earlier values, so the matching undo script puts back exactly what was there. The program still never runs a fix. |
+| 7.6 | Audit history | **Done.** What changed since the last audit (fixed, new problems, worse, better), a score chart in the HTML report, `--history`, a switch to turn it off. Only check ids and results are kept, no names or paths. |
+| 7.7 | Biggest wins | **Done.** The five fixes that raise the score most, in the reports and the findings window. |
+
 ---
 
 ## Left to do, in order
@@ -93,4 +105,10 @@ reason).
 1. Code-sign the releases if a free signing service for open-source projects accepts a
    noncommercial license (rest of 3.4).
 2. TLSH, once the output can be tested against the reference implementation (rest of 2.18).
-3. Anything people ask for in issues, inside the defensive scope.
+3. Exact undo for fix-plan steps that are not registry values (`Set-MpPreference`,
+   `net accounts`, `wevtutil`, SMB and firewall cmdlets): today they undo to the Windows
+   default, and the undo script says so (rest of 7.5).
+4. A lock around the audit history file, so two audits finishing at the same moment (the
+   window program and the console program) cannot drop one record. The file itself can
+   never be half written (rest of 7.6).
+5. Anything people ask for in issues, inside the defensive scope.

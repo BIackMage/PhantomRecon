@@ -53,7 +53,11 @@ change that drifts from this is rejected, however useful it looks.
 
 7. **One module per concern.** New check: a function in `SecurityChecks<Topic>.cpp`, a
    row in `CheckCatalog.cpp`, an entry in `AuditRunner.cpp`. The tests fail if any of the
-   three is missing. New UI: its own `.cpp` with a small header.
+   three is missing. If its fix is an exact, safe command, add the script lines and every
+   registry value they touch in `CheckScripts.cpp` (a test fails when the two disagree);
+   otherwise the fix plan shows it as a step done by hand. Verdict logic goes in a pure
+   `*Rules.cpp` function so tests can feed it made-up facts. Test data is made up, never
+   copied from a real PC. New UI: its own `.cpp` with a small header.
 
 8. **Defaults have one home.** LLM defaults: `LLMConfig`. Scan defaults: `ScanOptions`.
    Scoring weights: `ScoringConfig.cpp`. `AppSettings` copies from those.
@@ -93,13 +97,17 @@ Engine (`PhantomRecon.Core.vcxproj`, static library):
 | `CheckHelpers.cpp` | Pure decision logic behind the checks (testable) |
 | `AuditRules.cpp` | Pure verdict logic for the Defender, hardening, account, logging and firewall checks: facts in, status out |
 | `PlatformRules.cpp` | Pure verdict logic for the platform checks (`SecurityChecksPlatform.cpp`, `SecurityChecksWireless.cpp`): memory integrity, driver block list, Smart App Control, exploit protection, screen lock, System Restore, open Wi-Fi, and the WLAN profile XML reader |
+| `HostRules.cpp` | Pure verdict logic for shares, SMB guest access, inbound firewall rules, automatic sign-in, NTLM and driver services (`SecurityChecksSharing.cpp`, `SecurityChecksSignin.cpp`, `SecurityChecksDrivers.cpp`) |
+| `HygieneRules.cpp` | Pure verdict logic for WDigest, paused updates, Remote Assistance, cached sign-ins, sudo and DNS over HTTPS (`SecurityChecksHygiene.cpp`) |
 | `DeviceGuard.cpp` | One read of `Win32_DeviceGuard`, shared by the Credential Guard and memory integrity checks |
 | `EventLogQuery.cpp`, `EventRules.cpp` | This PC's own event logs (EvtQuery with a NULL session, never a remote one; capped, newest first); pure verdicts for the Recent activity checks, which are not scored |
 | `PeOrdinals.cpp` | Function names for imports by ordinal (ws2_32, wsock32, oleaut32) for the imphash and import scoring |
-| `HardeningScore.cpp`, `AttackMapping.cpp` | Score; ATT&CK names, finding codes, Navigator |
+| `HardeningScore.cpp`, `BiggestWins.cpp`, `AttackMapping.cpp` | Score; the five fixes that raise it most; ATT&CK names, finding codes, Navigator |
+| `CheckScripts.cpp`, `FixScript.cpp`, `FixScriptBackup.cpp` | Fix plan: per check, the exact PowerShell lines and the registry values they touch; the fix and undo scripts the user reviews and runs (never the program); the backup of earlier values that makes undo exact |
 | `ReportHtml.cpp`, `ReportJson.cpp`, `DetailText.cpp` | Reports; plain-text explanations for windows and AI |
 | `AuditHistory.cpp`, `AuditHistoryText.cpp`, `ReportHistory.cpp` | Past audits (`phantom_recon_history.jsonl`), the comparison with the previous audit, its text, and its HTML and JSON report parts |
-| `Redactor.cpp`, `LLMClient.cpp` | Name hiding; the optional AI client |
+| `Redactor.cpp`, `LLMClient.cpp`, `AiConsent.cpp` | Name hiding; the optional AI client; the per-endpoint consent rules |
+| `SettingsValues.cpp`, `RegistryEnumerator.cpp` | Settings values checked and clamped; installed programs for Fast Scan |
 | `JsonWriter.cpp`, `JsonReader.cpp` | JSON out (reports, AI requests); strict JSON in (AI answers, treated as hostile) |
 | `SampleData.cpp`, `ScheduledScan.cpp`, `CliRunner.cpp` | Sample pack, weekly task, the console program's logic |
 | `StartupRequest.cpp` | The window program's command line |
@@ -127,6 +135,7 @@ Tests (`tests/`, `PhantomReconTests.exe`):
 | File | Owns |
 |------|------|
 | `TestMain.cpp`, `TestFramework.h` | The runner: filters, per-run temp folder, data-folder override, crash and hang reports, exit codes |
+| `PowerShellRun.cpp` | Runs a generated script with Windows PowerShell for the fix-plan tests. Scripts a test runs touch only `HKCU\Software\PhantomReconTests-<pid>` and the test folder |
 | `JsonCheck.h` | Strict JSON syntax check with key counts, for the report tests |
 | `Test*.cpp` | One file per area; `TestFix<Area>.cpp` hold the tests for review fixes |
 
