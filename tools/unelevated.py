@@ -22,7 +22,11 @@ SAFER_LEVEL_OPEN = 1
 TOKEN_QUERY = 0x0008
 TOKEN_ELEVATION_CLASS = 20      # TokenElevation
 TOKEN_INTEGRITY_CLASS = 25      # TokenIntegrityLevel
+TOKEN_GROUPS_CLASS = 2          # TokenGroups
+SE_GROUP_ENABLED = 0x4
+SE_GROUP_USE_FOR_DENY_ONLY = 0x10
 SE_GROUP_INTEGRITY = 0x20
+ADMINISTRATORS_SID = "S-1-5-32-544"
 CREATE_NO_WINDOW = 0x08000000
 CREATE_UNICODE_ENVIRONMENT = 0x00000400
 STARTF_USESTDHANDLES = 0x00000100
@@ -66,6 +70,8 @@ _advapi.SaferCloseLevel.argtypes = [wt.HANDLE]
 _advapi.SaferCloseLevel.restype = wt.BOOL
 _advapi.ConvertStringSidToSidW.argtypes = [wt.LPCWSTR, ctypes.POINTER(ctypes.c_void_p)]
 _advapi.ConvertStringSidToSidW.restype = wt.BOOL
+_advapi.EqualSid.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_advapi.EqualSid.restype = wt.BOOL
 _advapi.GetLengthSid.argtypes = [ctypes.c_void_p]
 _advapi.GetLengthSid.restype = wt.DWORD
 _advapi.SetTokenInformation.argtypes = [wt.HANDLE, ctypes.c_int, ctypes.c_void_p, wt.DWORD]
@@ -99,11 +105,40 @@ def _check(ok, what: str):
 
 
 def token_is_elevated(token) -> bool:
+    """TokenElevation as Windows reports it. With UAC turned off (as on GitHub's
+    runners) this stays true even for a token whose Administrators group is deny-only,
+    so it is only reported for the log; admin_group_active() decides."""
     value = wt.DWORD(0)
     size = wt.DWORD(0)
     _check(_advapi.GetTokenInformation(token, TOKEN_ELEVATION_CLASS, ctypes.byref(value), ctypes.sizeof(value),
                                        ctypes.byref(size)), "GetTokenInformation(TokenElevation)")
     return value.value != 0
+
+
+def admin_group_active(token) -> bool:
+    """True when the token holds the Administrators group enabled and not deny-only:
+    the thing that decides whether admin-only files, keys and logs can be opened. The
+    program's IsProcessElevated() asks the same question with CheckTokenMembership."""
+    size = wt.DWORD(0)
+    _advapi.GetTokenInformation(token, TOKEN_GROUPS_CLASS, None, 0, ctypes.byref(size))
+    if size.value == 0:
+        raise ctypes.WinError(ctypes.get_last_error(), "GetTokenInformation(TokenGroups) size")
+    buffer = ctypes.create_string_buffer(size.value)
+    _check(_advapi.GetTokenInformation(token, TOKEN_GROUPS_CLASS, buffer, size, ctypes.byref(size)),
+           "GetTokenInformation(TokenGroups)")
+    count = ctypes.cast(buffer, ctypes.POINTER(wt.DWORD))[0]
+    # TOKEN_GROUPS: a DWORD count, then the SID_AND_ATTRIBUTES array at pointer alignment.
+    offset = ctypes.sizeof(ctypes.c_void_p)
+    groups = (SID_AND_ATTRIBUTES * count).from_buffer(buffer, offset)
+    admins = ctypes.c_void_p()
+    _check(_advapi.ConvertStringSidToSidW(ADMINISTRATORS_SID, ctypes.byref(admins)), "ConvertStringSidToSidW")
+    try:
+        for group in groups:
+            if _advapi.EqualSid(group.Sid, admins):
+                return bool(group.Attributes & SE_GROUP_ENABLED) and not (group.Attributes & SE_GROUP_USE_FOR_DENY_ONLY)
+        return False
+    finally:
+        _kernel.LocalFree(admins)
 
 
 def current_process_is_elevated() -> bool:
@@ -148,9 +183,11 @@ def run_unelevated(args: list, stdout_file, timeout_seconds: int) -> int:
     import msvcrt
 
     token = _normal_user_token()
-    if token_is_elevated(token):
+    print(f"[tools] restricted token: Administrators active {admin_group_active(token)}, "
+          f"TokenElevation {token_is_elevated(token)}", flush=True)
+    if admin_group_active(token):
         _kernel.CloseHandle(token)
-        raise RuntimeError("Windows still reports the restricted token as elevated")
+        raise RuntimeError("the restricted token still has the Administrators group enabled")
     out_handle = wt.HANDLE(msvcrt.get_osfhandle(stdout_file.fileno()))
     _check(_kernel.SetHandleInformation(out_handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT), "SetHandleInformation")
     startup = STARTUPINFOW()

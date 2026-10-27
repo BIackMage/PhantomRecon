@@ -100,15 +100,18 @@ std::wstring GetWindowsVersionText()
     return ss.str();
 }
 
+// True when the Administrators group is active in this process's token, which is what
+// decides whether admin-only keys, logs and task files can be read. TokenElevation is
+// not used: with UAC turned off it reports "elevated" even for a token whose
+// Administrators group is deny-only (a restricted or Basic User token).
 bool IsProcessElevated()
 {
-    HANDLE token = NULL;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return false;
-    TOKEN_ELEVATION elevation = {};
-    DWORD size = 0;
-    BOOL ok = GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size);
-    CloseHandle(token);
-    return ok && elevation.TokenIsElevated != 0;
+    BYTE sidBuffer[SECURITY_MAX_SID_SIZE] = {};
+    DWORD sidSize = sizeof(sidBuffer);
+    if (!CreateWellKnownSid(WinBuiltinAdministratorsSid, NULL, sidBuffer, &sidSize)) return false;
+    BOOL member = FALSE;
+    if (!CheckTokenMembership(NULL, sidBuffer, &member)) return false;
+    return member != FALSE;
 }
 
 bool SetProcessPrivilege(const wchar_t* privilegeName, bool enable)

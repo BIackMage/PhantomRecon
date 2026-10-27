@@ -33,6 +33,7 @@
 
 #include "../AppPaths.h"
 #include "../StringConv.h"
+#include "../SystemInfo.h"
 
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib")
@@ -319,16 +320,9 @@ static bool PrepareRunFolder()
     }
     // Several checks behave differently with and without administrator rights; the CI
     // log must show which kind of run this was.
-    std::string elevated = "unknown";
-    HANDLE token = NULL;
-    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
-        TOKEN_ELEVATION elevation = {};
-        DWORD size = 0;
-        if (GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size)) {
-            elevated = elevation.TokenIsElevated ? "yes" : "no";
-        }
-        CloseHandle(token);
-    }
+    // Same rule the checks use (Administrators group active in the token), so the line
+    // matches what the checks saw.
+    std::string elevated = IsProcessElevated() ? "yes" : "no";
     std::printf("Run folder: %s\nElevated: %s\n\n", Narrow(g_runDir).c_str(), elevated.c_str());
     std::fflush(stdout);
     DebugLine(L"run folder " + g_runDir);
