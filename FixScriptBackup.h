@@ -23,6 +23,9 @@
 //     step without an entry runs the catalog's undo commands (the Windows default).
 //   - The undo script only writes values and keys its own step declares: an entry
 //     that names anything else stops the step before anything is written.
+//   - A value marked neverSaved (a stored password, or a setting whose old value
+//     would expose passwords again) is never read into the backup nor restored; a
+//     step with only such values keeps the catalog's undo.
 // Values are read and written through Microsoft.Win32.RegistryKey, so the type and
 // the data are exact (no environment expansion, no provider type guessing). Data is
 // stored as text that survives JSON exactly: numbers in decimal, strings and bytes

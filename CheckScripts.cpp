@@ -133,8 +133,10 @@ Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon
           false, true, false,
           L"Windows asks for a password at the next start. A password netplwiz keeps encrypted stays stored until you tick Users must enter a user name and password in netplwiz. If a plain-text password was stored, change it as well.",
           L"",
-          // DefaultPassword holds a password in plain text: the backup never copies it.
-          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon)~", L"AutoAdminLogon" },
+          // DefaultPassword holds a password in plain text: the backup never copies it. And
+          // putting AutoAdminLogon back would sign in without a password again, so the
+          // undo stays the catalog's steps by hand (netplwiz).
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon)~", L"AutoAdminLogon", false, true },
             { LR"~(HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon)~", L"DefaultPassword", false, true } } },
         { L"cred.ntlm",
           LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name LmCompatibilityLevel -Value 5 -Type DWord
@@ -266,6 +268,41 @@ Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLog
           { { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging)~", L"EnableScriptBlockLogging" },
             { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging)~", L"EnableModuleLogging" },
             { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames)~", L"*" } } },
+
+        // ------------------------------------------------------------------ Third pack (SecurityChecksHygiene.cpp)
+        // wu.paused (a Settings button or a Group Policy), net.doh (a Settings page,
+        // INFO only) have no entry: the plan shows them as steps done by hand.
+        { L"cred.wdigest",
+          LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest' -Name UseLogonCredential -Value 0 -Type DWord)~",
+          L"",
+          false, true, true,
+          L"Passwords already kept in memory stay there until each account signs out: sign out and back in, or restart. If you did not turn this on yourself, run a full scan and change the passwords of the accounts used on this PC.",
+          L"",
+          // Putting it back would keep passwords in memory again: the undo stays by hand.
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest)~", L"UseLogonCredential", false, true } } },
+        { L"net.remoteassist",
+          LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowToGetHelp -Value 0 -Type DWord
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowFullControl -Value 0 -Type DWord)~",
+          LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowToGetHelp -Value 1 -Type DWord
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowFullControl -Value 1 -Type DWord)~",
+          false, true, false,
+          L"This turns Remote Assistance invitations off. If Group Policy turns them on (System > Remote Assistance), change that policy too.",
+          L"This allows invitations with control again, the Windows default.",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance)~", L"fAllowToGetHelp" },
+            { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance)~", L"fAllowFullControl" } } },
+        { L"cred.cachedlogons",
+          LR"~(Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name CachedLogonsCount -Value '4' -Type String)~",
+          LR"~(Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name CachedLogonsCount -Value '10' -Type String)~",
+          false, true, false,
+          L"Windows then keeps at most 4 domain sign-ins. Laptops used away from the office need at least 1 or 2. On a domain, Group Policy may set this value again.",
+          L"This sets the Windows default of 10.",
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon)~", L"CachedLogonsCount" } } },
+        { L"hard.sudo",
+          L"sudo config --enable forceNewWindow",
+          L"sudo config --enable normal",
+          false, true, false,
+          L"sudo stays on and runs each elevated command in a window of its own.",
+          L"" },
     };
     return scripts;
 }

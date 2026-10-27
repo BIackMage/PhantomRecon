@@ -6,6 +6,7 @@
 #include "SecurityChecksSharing.h"    // shared folders, SMB guest and anonymous access, inbound firewall rules
 #include "SecurityChecksSignin.h"     // automatic sign-in, NTLM and LAN Manager
 #include "SecurityChecksDrivers.h"    // driver services
+#include "SecurityChecksHygiene.h"    // WDigest, update pauses, Remote Assistance, cached sign-ins, sudo, DNS over HTTPS
 #include "SecurityChecksEvents.h"   // the "Recent activity" checks, declared in their own header
 
 // ---------------------------------------------------------------------------

@@ -441,7 +441,6 @@ TEST(FixUndo_DeclaredValuesMatchTheCommands)
         if (!info.scriptRegistry.empty()) {
             ++registrySteps;
             CHECK(!info.scriptPerTarget);
-            CHECK(HasSavedRegistryValues(info.scriptRegistry));
         }
     }
     std::printf("    note: %zu registry step(s) declared\n", registrySteps);
@@ -457,18 +456,31 @@ TEST(FixUndo_DeclaredValuesMatchTheCommands)
     CHECK(ReadRegistryTouches(L"Set-MpPreference -MAPSReporting Advanced", t, c, why));
     CHECK(t.empty());
 
-    // A stored password is declared (so the line is accounted for) but never backed up.
-    const CheckInfo* autologon = FindCheckInfo(L"acct.autologon");
-    if (autologon) {
-        bool secretMarked = false;
-        for (const RegistryValueRef& v : autologon->scriptRegistry) {
-            if (v.name == L"DefaultPassword") secretMarked = v.neverSaved;
-        }
-        CHECK(secretMarked);
-        std::wstring lines = JoinW(RegistryValuesLines(autologon->scriptRegistry), L"\n");
-        CHECK(!Contains(lines, L"DefaultPassword"));
-        CHECK(Contains(lines, L"AutoAdminLogon"));
+    // A stored password, and settings whose old value would expose passwords again, are
+    // declared (so their lines are accounted for) but never backed up or restored: those
+    // steps keep the catalog's undo, done by hand.
+    size_t keptByHand = 0;
+    for (const wchar_t* id : { L"acct.autologon", L"cred.wdigest" }) {
+        const CheckInfo* info = FindCheckInfo(id);
+        if (!info) continue;
+        ++keptByHand;
+        REQUIRE(!info->scriptRegistry.empty());
+        for (const RegistryValueRef& v : info->scriptRegistry) CHECK(v.neverSaved);
+        CHECK(!HasSavedRegistryValues(info->scriptRegistry));
+        CHECK_EQ(RegistryValuesLines(info->scriptRegistry).size(), static_cast<size_t>(2));   // "@(" and ")" only
+        SecurityCheckResult r = MakeCheckResult(id);
+        r.status = CHECK_FAIL;
+        std::vector<FixStep> fix = BuildFixSteps({ r }, false, false);
+        std::vector<FixStep> undo = BuildFixSteps({ r }, true, false);
+        REQUIRE(fix.size() == 1 && undo.size() == 1);
+        CHECK(fix[0].registryValues.empty());
+        CHECK(undo[0].kind == FixStepKind::Manual);
+        FixScriptOptions options;
+        std::wstring fixText = BuildFixScript({ r }, options);
+        CHECK(!Contains(fixText, L"Save-PRBackup"));
+        CHECK(!Contains(BuildUndoScript({ r }, options), L"Restore-PRBackup"));
     }
+    CHECK_EQ(keptByHand, static_cast<size_t>(2));
 }
 
 TEST(FixUndo_BackupFileNames)

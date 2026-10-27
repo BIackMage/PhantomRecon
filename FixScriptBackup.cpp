@@ -282,7 +282,7 @@ std::vector<std::wstring> RegistryValuesLines(const std::vector<RegistryValueRef
 std::wstring RegistryValueShown(const RegistryValueRef& value)
 {
     return value.key + (value.eachSubkey ? L"\\<each subkey>" : L"") + L"  " + value.name +
-           (value.neverSaved ? L"  (not saved: it can hold a password, so the undo leaves it as it is)" : L"");
+           (value.neverSaved ? L"  (not saved: putting it back could expose a password, so the undo leaves it as it is)" : L"");
 }
 
 bool HasSavedRegistryValues(const std::vector<RegistryValueRef>& values)

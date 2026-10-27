@@ -4,7 +4,7 @@ Generated from the check catalog of Phantom Recon 1.0.0. Do not edit by hand; ru
 
 Each check below says what it looks at, why it matters, how to fix it and how to undo the fix. Commands marked elevated need a PowerShell or Command Prompt opened with Run as administrator.
 
-Severity drives the hardening score: Critical counts 10, High 6, Medium 3, Low 1. Checks marked not scored (Recent activity) report events from this PC's logs rather than a setting, and never change the score.
+Severity drives the hardening score: Critical counts 10, High 6, Medium 3, Low 1, Info 0 (an Info check only describes a setting). Checks marked not scored (Recent activity) report events from this PC's logs rather than a setting, and never change the score.
 
 ## Malware protection
 
@@ -182,6 +182,25 @@ Most attacks use bugs that already have a fix. Windows Update applies those fixe
 **How to undo**
 
     Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name NoAutoUpdate -Value 1 -Type DWord
+
+### Windows Update paused or deferred
+
+- Check id: `wu.paused`
+- Severity: Medium
+- CIS Controls v8: 7.3
+- CIS Windows Benchmark: Select when Quality Updates are received: Enabled: 0 days
+
+While Windows Update is paused, or holds quality updates back, the monthly fixes (security fixes included) do not install, so holes that are already public stay open on this PC. Updates can be paused from Settings for up to five weeks, and Group Policy can pause them or hold quality updates back for up to 30 days after release. People often pause updates to avoid a restart at a bad moment and then forget. This check warns when quality updates are paused until a later date, or deferred by more than 7 days. Pausing or deferring only feature updates (the yearly new version of Windows) is fine and only described. It reads the pause dates the Settings app stores and the Windows Update Group Policy values; settings pushed by a management service (MDM, such as Intune) are not read. The Windows Update check covers the service, the last install and a pending restart.
+
+**How to fix**
+
+    Settings > Windows Update > Resume updates. Then Check for updates, install everything and restart.
+    If Group Policy pauses or defers quality updates: Computer Configuration > Administrative Templates > Windows Components > Windows Update > Manage updates offered from Windows Update (Windows Update for Business on older Windows 10) > Select when Quality Updates are received = Not Configured, or Enabled with 7 days or fewer and no pause start date. Then run gpupdate /force.
+    A company PC gets these settings from its IT department: ask them before you change them.
+
+**How to undo**
+
+    Settings > Windows Update > Pause updates, and choose how long. Group Policy: set Select when Quality Updates are received back to what the evidence showed.
 
 ### Outdated or end-of-life software
 
@@ -469,6 +488,26 @@ System Restore keeps restore points: snapshots of Windows system files, drivers,
     Same screen > Configure > Disable system protection (this deletes the drive's restore points). Or elevated PowerShell:
       Disable-ComputerRestore -Drive 'C:\'
 
+### sudo for Windows in inline mode
+
+- Check id: `hard.sudo`
+- Severity: Low
+- CIS Controls v8: 4.1
+
+Windows 11 24H2 and later include sudo, which runs one command as administrator from a normal console window after the usual UAC prompt. It is off by default and has three modes. In a new window (forceNewWindow) runs the elevated command in a console of its own. With input closed (disableInput) runs it in the same window but lets it read no keyboard input. Inline (normal) runs it in the same window with full input and output, like sudo on Linux. Microsoft describes inline as the riskiest mode: other programs running without administrator rights that are attached to the same console window could interact with the elevated program. This check warns for inline and passes for the other modes or sudo off. It reads the mode from the registry, lowered to a Group Policy limit when one is set, and is N/A on Windows builds without sudo.
+
+**How to fix**
+
+    Settings > System > Advanced (For developers on some builds) > Enable sudo > Configure how sudo runs = In a new window, or turn Enable sudo off. Or elevated PowerShell:
+      sudo config --enable forceNewWindow
+    To turn sudo off instead:
+      sudo config --enable disable
+
+**How to undo**
+
+    Same setting, Inline. Or elevated PowerShell:
+      sudo config --enable normal
+
 ## Credential protection
 
 ### LSA protection
@@ -513,6 +552,30 @@ Credential Guard keeps Windows login secrets in an isolated part of memory (LsaI
 **How to undo**
 
     Set the same policy to Disabled and reboot.
+
+### WDigest keeps sign-in passwords in memory
+
+- Check id: `cred.wdigest`
+- Severity: High
+- MITRE ATT&CK: T1003.001 LSASS Memory, T1112 Modify Registry
+- CIS Controls v8: 4.1
+- CIS Windows Benchmark: WDigest Authentication (disabling may require KB2871997): Disabled
+
+With UseLogonCredential set to 1, Windows keeps the password of everyone who signs in to this PC in memory in a form that can be turned back into the password itself. The setting belongs to WDigest, an old sign-in method for web sites and servers that almost nothing uses today. Malware that later gets administrator rights could then collect those passwords. That is why malware often switches this setting on, and why a 1 that nobody here set is a warning sign. On Windows 8.1, Windows Server 2012 R2 and later the setting is off when the value is missing, and 0 turns it off explicitly. Passwords already kept stay in memory until each account signs out, so sign out or restart after the fix. This check only reads the setting; it never looks at memory.
+
+**How to fix**
+
+    Elevated PowerShell, then sign out and back in (or restart):
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest' -Name UseLogonCredential -Value 0 -Type DWord
+    Deleting the value works as well on Windows 8.1 and later:
+      Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest' -Name UseLogonCredential
+    Or Group Policy (the MS Security Guide template): WDigest Authentication = Disabled.
+    If you did not turn it on yourself, run a full scan (Start-MpScan -ScanType FullScan) and change the passwords of the accounts that signed in to this PC since.
+
+**How to undo**
+
+    By hand, and only if an old program truly needs WDigest (elevated PowerShell, then sign out and back in; not recommended):
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest' -Name UseLogonCredential -Value 1 -Type DWord
 
 ### Old sign-in protocols (LM and NTLM)
 
@@ -625,6 +688,28 @@ Local password rules decide how hard a password is to guess and whether a guesse
 **How to undo**
 
     net accounts /minpwlen:<old> /lockoutthreshold:<old>   (the old values are in this report's evidence)
+
+### Cached domain sign-ins
+
+- Check id: `cred.cachedlogons`
+- Severity: Low
+- MITRE ATT&CK: T1003.005 Cached Domain Credentials
+- CIS Controls v8: 4.1
+- CIS Windows Benchmark: Interactive logon: Number of previous logons to cache (in case domain controller is not available): 4 or fewer logon(s)
+
+On a PC joined to an Active Directory domain, Windows keeps a protected copy (a hash) of the last domain accounts that signed in, so they can sign in again while the PC cannot reach a domain controller: on a train, at home, during a network outage. Each copy is something an intruder with administrator rights on this PC could try to crack to learn that account's password. CachedLogonsCount sets how many are kept; the Windows default is 10. 4 or fewer is enough for most PCs. It is a trade-off: laptops used away from the company network need at least 1 or 2, or their users cannot sign in there, and 0 suits only desktops that never leave it. PCs that are not joined to a domain (home PCs, and Microsoft Entra joined PCs without a domain) keep no cached domain sign-ins, so the check is N/A there.
+
+**How to fix**
+
+    Elevated PowerShell (takes effect at the next sign-in):
+      Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name CachedLogonsCount -Value '4' -Type String
+    Or Group Policy: Computer Configuration > Windows Settings > Security Settings > Local Policies > Security Options > Interactive logon: Number of previous logons to cache (in case domain controller is not available) = 4. On a domain the IT department usually sets this for every PC.
+    Laptops used away from the office need at least 1 or 2.
+
+**How to undo**
+
+    Elevated PowerShell (10 is the Windows default; use the number the evidence showed):
+      Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name CachedLogonsCount -Value '10' -Type String
 
 ### Automatic sign-in
 
@@ -1086,6 +1171,30 @@ Remote Desktop lets someone log in to this PC over the network. If you do not us
 
     Settings > System > Remote Desktop > On. NLA off: the same command with -Value 0.
 
+### Remote Assistance
+
+- Check id: `net.remoteassist`
+- Severity: Medium
+- MITRE ATT&CK: T1219 Remote Access Tools
+- CIS Controls v8: 4.8
+- CIS Windows Benchmark: Configure Offer Remote Assistance: Disabled; Configure Solicited Remote Assistance: Disabled
+
+Remote Assistance (msra.exe) lets someone you invite see your screen and, when allowed, take control of the mouse and keyboard. It is a support feature, and a favourite of "tech support" scammers: a caller who claims to be from Microsoft, a bank or an internet provider talks the person at the PC into sending an invitation, then takes over. Windows allows invitations, with control, unless someone turns that off. Offers of help nobody asked for (unsolicited Remote Assistance) can only be turned on by Group Policy, for the helpers it names. This check warns when an invited helper may take control, or when unsolicited offers are allowed; Remote Assistance that is off, or that only lets a helper view the screen, passes. A missing setting is read as the Windows default (on). Quick Assist, a separate app, is not judged.
+
+**How to fix**
+
+    System Properties > Remote (Win+R, SystemPropertiesRemote) > untick Allow Remote Assistance connections to this computer > OK. To keep it for help you ask for, view only: Advanced > untick Allow this computer to be controlled remotely. Or elevated PowerShell:
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowToGetHelp -Value 0 -Type DWord
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowFullControl -Value 0 -Type DWord
+    If Group Policy turns it on: Computer Configuration > Administrative Templates > System > Remote Assistance > Configure Offer Remote Assistance = Disabled, and Configure Solicited Remote Assistance = Disabled.
+    Never send an invitation, or let anyone connect, because someone who called you asks for it.
+
+**How to undo**
+
+    Tick the same boxes again. Or elevated PowerShell:
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowToGetHelp -Value 1 -Type DWord
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowFullControl -Value 1 -Type DWord
+
 ### Windows Remote Management
 
 - Check id: `net.winrm`
@@ -1198,6 +1307,25 @@ DNS turns names into addresses. Whoever runs your DNS server can send you anywhe
 **How to undo**
 
     Set the DNS servers back in the same screen.
+
+### DNS over HTTPS
+
+- Check id: `net.doh`
+- Severity: Info
+- CIS Controls v8: 3.10
+- CIS Windows Benchmark: Configure DNS over HTTPS (DoH) name resolution: Enabled: Allow DoH
+
+DNS turns names such as example.com into addresses. Plain DNS travels unencrypted, so others on the same network, for example on public Wi-Fi or whoever runs that network, can see which names this PC looks up and could answer with a wrong address. DNS over HTTPS (DoH) encrypts the lookups between this PC and its DNS server. It does not hide the lookups from that DNS server, it does not hide which addresses the PC then connects to (the internet provider still sees those), and it does not help when the DNS server itself cannot be trusted. Plenty of safe setups use plain DNS to a home router or a company DNS server, so this check never warns: it reports the DoH Group Policy, Windows' automatic DoH setting and each adapter's DoH setting as INFO, and its Info severity counts for nothing in the hardening score. The evidence shows each adapter's raw DohFlags value; the Settings app can also allow a fallback to plain DNS when DoH does not answer. The DNS servers check lists the servers themselves.
+
+**How to fix**
+
+    Settings > Network and internet > Wi-Fi or Ethernet > the adapter's Hardware properties > DNS server assignment > Edit > Manual. Turn on IPv4 (and IPv6 if used), enter the DNS servers, set DNS over HTTPS = On (automatic template), and turn Fallback to plaintext off for encrypted lookups only.
+    The automatic template works for the public servers Windows knows (the evidence counts them); for another server choose On (manual template) and type its DoH address.
+    A company PC gets its DNS settings from its IT department.
+
+**How to undo**
+
+    Same screen > DNS over HTTPS = Off, or DNS server assignment > Edit > Automatic (DHCP).
 
 ### Trusted root certificates
 

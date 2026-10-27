@@ -27,7 +27,10 @@ struct RegistryValueRef {
     std::wstring key;                 // PowerShell path as the commands write it: HKLM:\SOFTWARE\...
     std::wstring name;                // value name
     bool         eachSubkey = false;  // the commands set the value in every direct subkey of key
-    bool         neverSaved = false;  // it can hold a secret (a stored password): never backed up, never restored
+    // Never backed up, never restored: the value can hold a secret (a stored password),
+    // or putting it back would expose passwords again (WDigest, automatic sign-in). A
+    // step whose values are all marked so keeps the catalog's undo.
+    bool         neverSaved = false;
 };
 
 struct CheckInfo {
