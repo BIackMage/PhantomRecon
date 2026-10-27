@@ -48,20 +48,26 @@ const std::vector<CheckScript>& GetCheckScripts()
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name ConsentPromptBehaviorAdmin -Value 5
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name PromptOnSecureDesktop -Value 1)~",
           L"",
-          false, true, true, L"", L"" },
+          false, true, true, L"", L"",
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System)~", L"EnableLUA" },
+            { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System)~", L"ConsentPromptBehaviorAdmin" },
+            { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System)~", L"PromptOnSecureDesktop" } } },
         { L"hard.autoplay",
           LR"~(if (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer')) { New-Item 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Force | Out-Null }
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Name NoDriveTypeAutoRun -Value 255 -Type DWord
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Name NoAutorun -Value 1 -Type DWord)~",
           LR"~(Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Name NoDriveTypeAutoRun,NoAutorun)~",
-          false, true, false, L"", L"" },
+          false, true, false, L"", L"",
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer)~", L"NoDriveTypeAutoRun" },
+            { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer)~", L"NoAutorun" } } },
         { L"hard.wsh",
           LR"~(if (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings')) { New-Item 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings' -Force | Out-Null }
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings' -Name Enabled -Value 0 -Type DWord)~",
           LR"~(Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings' -Name Enabled -Value 1 -Type DWord)~",
           false, true, false,
           L"Skip this step if anything on this PC uses .vbs or .js scripts (some company login scripts do).",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings)~", L"Enabled" } } },
         { L"hard.psv2",
           L"Disable-WindowsOptionalFeature -Online -FeatureName MicrosoftWindowsPowerShellV2Root -NoRestart",
           L"Enable-WindowsOptionalFeature -Online -FeatureName MicrosoftWindowsPowerShellV2Root -NoRestart",
@@ -72,14 +78,16 @@ Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\H
           LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name Enabled -Value 0 -Type DWord)~",
           false, true, true,
           L"If Windows Security > Device security > Core isolation details lists incompatible drivers, update or remove them first: memory integrity stays off while one is installed.",
-          L"If Group Policy turned memory integrity on, set that policy back instead." },
+          L"If Group Policy turned memory integrity on, set that policy back instead.",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity)~", L"Enabled" } } },
         { L"hard.driverblocklist",
           LR"~(if (-not (Test-Path 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config')) { New-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Force | Out-Null }
 Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name VulnerableDriverBlocklistEnable -Value 1 -Type DWord)~",
           LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name VulnerableDriverBlocklistEnable -Value 0 -Type DWord)~",
           false, true, true,
           L"If a device stops working after the restart, its driver is on the list: get a current driver from the vendor.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config)~", L"VulnerableDriverBlocklistEnable" } } },
         { L"backup.restore",
           L"Enable-ComputerRestore -Drive ($env:SystemDrive + '\\')",
           L"Disable-ComputerRestore -Drive ($env:SystemDrive + '\\')",
@@ -93,7 +101,8 @@ Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name Vulner
           LR"~(Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name RunAsPPL)~",
           false, true, true,
           L"Some old smart card drivers and plug-ins fail to load with it. Events 3065 and 3066 in Microsoft-Windows-CodeIntegrity/Operational show anything blocked.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Lsa)~", L"RunAsPPL" } } },
         { L"acct.guest",
           L"Get-LocalUser | Where-Object { $_.SID -like '*-501' } | Disable-LocalUser",
           L"Get-LocalUser | Where-Object { $_.SID -like '*-501' } | Enable-LocalUser",
@@ -115,7 +124,8 @@ Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name Vulner
           LR"~(Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name InactivityTimeoutSecs)~",
           false, true, true,
           L"This sets the 15-minute limit for every user of this PC.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System)~", L"InactivityTimeoutSecs" } } },
 
         // ------------------------------------------------------------------ Services and privileges
         { L"msi.alwayselevated",
@@ -124,7 +134,9 @@ Remove-ItemProperty 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer' -Name 
           L"",
           false, true, false,
           L"If Group Policy sets it, change the policy too: Windows Installer > Always install with elevated privileges = Disabled.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer)~", L"AlwaysInstallElevated" },
+            { LR"~(HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer)~", L"AlwaysInstallElevated" } } },
 
         // ------------------------------------------------------------------ Network exposure
         { L"fw.profiles",
@@ -135,19 +147,22 @@ Remove-ItemProperty 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer' -Name 
           LR"~(if (-not (Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient')) { New-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Force | Out-Null }
 Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Name EnableMulticast -Value 0 -Type DWord)~",
           LR"~(Remove-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Name EnableMulticast)~",
-          false, true, false, L"", L"" },
+          false, true, false, L"", L"",
+          { { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient)~", L"EnableMulticast" } } },
         { L"net.nbtns",
           LR"~(Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters\Interfaces' | ForEach-Object { Set-ItemProperty $_.PSPath -Name NetbiosOptions -Value 2 })~",
           LR"~(Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters\Interfaces' | ForEach-Object { Set-ItemProperty $_.PSPath -Name NetbiosOptions -Value 0 })~",
           false, true, false,
           L"Very old shares that only resolve by NetBIOS name will stop resolving.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters\Interfaces)~", L"NetbiosOptions", true } } },
         { L"net.mdns",
           LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' -Name EnableMDNS -Value 0 -Type DWord)~",
           LR"~(Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' -Name EnableMDNS)~",
           false, true, true,
           L"Some casting and printer discovery features use mDNS. Test them after the restart.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters)~", L"EnableMDNS" } } },
         { L"net.smbsigning",
           L"Set-SmbClientConfiguration -RequireSecuritySignature $true -Force",
           L"Set-SmbClientConfiguration -RequireSecuritySignature $false -Force",
@@ -195,7 +210,10 @@ if (-not (Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Module
 Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging' -Name EnableModuleLogging -Value 1 -Type DWord
 Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames' -Name '*' -Value '*')~",
           LR"~(Remove-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging','HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging' -Recurse)~",
-          false, true, false, L"", L"" },
+          false, true, false, L"", L"",
+          { { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging)~", L"EnableScriptBlockLogging" },
+            { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging)~", L"EnableModuleLogging" },
+            { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames)~", L"*" } } },
     };
     return scripts;
 }
@@ -203,7 +221,9 @@ Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLog
 void AttachCheckScripts(std::vector<CheckInfo>& catalog)
 {
     int attached = 0;
+    size_t registryValues = 0;
     for (const CheckScript& s : GetCheckScripts()) {
+        registryValues += s.registry.size();
         bool found = false;
         for (CheckInfo& info : catalog) {
             if (info.id != s.id) continue;
@@ -214,11 +234,13 @@ void AttachCheckScripts(std::vector<CheckInfo>& catalog)
             info.scriptNeedsRestart = s.needsRestart;
             info.fixScriptNote = s.fixNote;
             info.undoScriptNote = s.undoNote;
+            info.scriptRegistry = s.registry;
             found = true;
             ++attached;
             break;
         }
         if (!found) DebugLog(std::wstring(L"No catalog row for script entry ") + s.id);
     }
-    DebugLog(L"Scripts attached to " + std::to_wstring(attached) + L" of " + std::to_wstring(catalog.size()) + L" checks");
+    DebugLog(L"Scripts attached to " + std::to_wstring(attached) + L" of " + std::to_wstring(catalog.size()) + L" checks, " +
+             std::to_wstring(registryValues) + L" registry value(s) declared for exact undo");
 }

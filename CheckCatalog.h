@@ -19,6 +19,16 @@
 
 enum class Severity { Info = 0, Low = 1, Medium = 2, High = 3, Critical = 4 };
 
+// A registry value a fix step's commands set or remove. The fix plan saves its state
+// before the step runs, so the undo plan can put back exactly what was there
+// (FixScriptBackup.h). Declared in CheckScripts.cpp next to the commands; a test makes
+// sure every registry-writing command line has its value declared here.
+struct RegistryValueRef {
+    std::wstring key;                 // PowerShell path as the commands write it: HKLM:\SOFTWARE\...
+    std::wstring name;                // value name
+    bool         eachSubkey = false;  // the commands set the value in every direct subkey of key
+};
+
 struct CheckInfo {
     std::wstring id;
     std::wstring title;
@@ -44,6 +54,7 @@ struct CheckInfo {
     bool         scriptNeedsRestart = false;  // the change takes effect after a restart
     std::wstring fixScriptNote;               // one line shown before the fix step's question, may be empty
     std::wstring undoScriptNote;              // the same for the undo step
+    std::vector<RegistryValueRef> scriptRegistry;   // every registry value the fixScript sets or removes
 };
 
 // Every check in report order.
