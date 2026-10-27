@@ -72,6 +72,7 @@
     <ClCompile Include="TestFixUndoBackup.cpp" />
     <ClCompile Include="TestBiggestWins.cpp" />
     <ClCompile Include="PowerShellRun.cpp" />
+    <ClCompile Include="TestFixPackReview.cpp" />
     <ClCompile Include="TestFixAuditChecksA.cpp" />
     <ClCompile Include="TestFixAuditChecksB.cpp" />
     <ClCompile Include="TestFixReportsCli.cpp" />

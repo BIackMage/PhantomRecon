@@ -596,8 +596,8 @@ Start-Service Spooler)~" });
         L"normal users can change, or where downloads and temporary files land, is listed first: whatever replaced that "
         L"program would get the same open door. Those rules, and rules that allow everything, make this a WARNING and are "
         L"the ones the fix plan turns off; the others are listed as INFO for review and do not lower the score. Windows' own rule groups (their group name is a Windows resource such as "
-        L"@FirewallAPI.dll,-25000) and Store app rules are managed by Windows and limited to one program, service or port, so "
-        L"they are skipped unless they allow everything. Rules limited to certain remote addresses, or to Private and Domain "
+        L"@FirewallAPI.dll,-25000) are managed by Windows and limited to one program, service or port, so they are skipped "
+        L"unless they allow everything. Store app rules apply only to their own app, so they are always skipped. Rules limited to certain remote addresses, or to Private and Domain "
         L"networks only, are not listed. The rules are read through the Windows Firewall API; nothing is changed.",
         LR"~(For each rule you do not need on public networks, turn it off: Windows Defender Firewall with Advanced Security (wf.msc) > Inbound Rules > the rule > Disable Rule. Or keep it for home networks only: the rule's Properties > Advanced > untick Public.
 Or elevated PowerShell, by the rule's unique name (the first command shows it):

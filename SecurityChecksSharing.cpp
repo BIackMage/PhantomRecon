@@ -420,10 +420,18 @@ SecurityCheckResult CheckFirewallRules()
     }
     facts.rulesRead = static_cast<int>(rules.size());
 
+    // The local store, for each rule's unique name (the fix plan) and for the Store app
+    // binding by package family name, which INetFwRule does not show.
+    std::vector<FirewallStoreRule> store = facts.apiOk ? ReadFirewallStore() : std::vector<FirewallStoreRule>();
     std::vector<FirewallRuleFacts> reported;
     std::map<std::wstring, ProgramPlace> places;
+    int storePackages = 0;
     for (FirewallRuleFacts& r : rules) {
         if (!IsPublicAnyAddressAllow(r)) continue;
+        if (TrimW(r.packageId).empty() && AllowsEverything(r)) {
+            r.packageId = StorePackageForRule(r, store);
+            if (!r.packageId.empty()) storePackages++;
+        }
         if (!IsReportedFirewallRule(r)) {
             facts.windowsManagedSkipped++;
             continue;
@@ -439,6 +447,7 @@ SecurityCheckResult CheckFirewallRules()
         reported.push_back(r);
     }
     facts.reported = static_cast<int>(reported.size());
+    DebugLog(std::to_wstring(storePackages) + L" rule(s) bound to a Store app only in the local store (PFN or AppPkgId)");
 
     std::wstring text;
     result.status = FirewallRulesStatus(facts, &text);
@@ -452,7 +461,6 @@ SecurityCheckResult CheckFirewallRules()
     if (result.status == CHECK_WARNING) {
         // The fix plan turns off only the risky rules, and needs each one's unique name
         // exactly; otherwise the step is left to do by hand rather than fixing only some.
-        std::vector<FirewallStoreRule> store = ReadFirewallStore();
         std::vector<std::wstring> ids;
         std::set<std::wstring> seen;
         int unmatched = 0;

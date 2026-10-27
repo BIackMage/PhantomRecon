@@ -353,8 +353,10 @@ bool IsWindowsManagedRule(const FirewallRuleFacts& rule)
 
 bool AllowsEverything(const FirewallRuleFacts& rule)
 {
-    return TrimW(rule.application).empty() && TrimW(rule.service).empty() && rule.protocol == kFirewallProtocolAny &&
-           AnyText(rule.localPorts);
+    // A rule bound to a Store app package applies only to that app's processes, even
+    // with no program, service or port set.
+    return TrimW(rule.packageId).empty() && TrimW(rule.application).empty() && TrimW(rule.service).empty() &&
+           rule.protocol == kFirewallProtocolAny && AnyText(rule.localPorts);
 }
 
 bool IsReportedFirewallRule(const FirewallRuleFacts& rule)
@@ -455,7 +457,7 @@ std::wstring FirewallRulesStatus(const FirewallRulesFacts& facts, std::wstring* 
     }
     if (facts.apiOk && facts.windowsManagedSkipped > 0 && status != CHECK_NA) {
         t += L" " + std::to_wstring(facts.windowsManagedSkipped) + L" rule(s) of Windows' own groups and Store apps that are "
-             L"limited to a program, service or port were not judged.";
+             L"limited to one app, program, service or port were not judged.";
     }
     if (text) *text = t;
     DebugLog(L"Firewall rules: api " + std::to_wstring(facts.apiOk) + L", public on " + std::to_wstring(facts.publicOn) +
@@ -496,6 +498,9 @@ FirewallStoreRule ParseFirewallRuleData(const std::wstring& id, const std::wstri
         else if (EqualsI(key, L"Svc")) r.service = value;
         else if (EqualsI(key, L"Name")) r.name = value;
         else if (EqualsI(key, L"EmbedCtxt")) r.grouping = value;
+        else if (EqualsI(key, L"AppPkgId") || EqualsI(key, L"PFN")) {
+            if (r.package.empty()) r.package = value;
+        }
         else if (EqualsI(key, L"RA4") || EqualsI(key, L"RA6") || EqualsI(key, L"RA42") || EqualsI(key, L"RA62")) {
             if (!AnyText(value) && !EqualsI(value, L"Any")) r.remoteAny = false;
         }
@@ -540,6 +545,19 @@ std::vector<std::wstring> MatchFirewallStoreIds(const FirewallRuleFacts& rule, c
         if (FirewallRuleKey(s) == key) ids.push_back(s.id);
     }
     return ids;
+}
+
+std::wstring StorePackageForRule(const FirewallRuleFacts& rule, const std::vector<FirewallStoreRule>& store)
+{
+    std::wstring key = FirewallRuleKey(rule);
+    std::wstring package;
+    for (const FirewallStoreRule& s : store) {
+        if (!s.parsed || !s.active || !s.inbound || !s.allow || !s.allPublic || !s.remoteAny) continue;
+        if (FirewallRuleKey(s) != key) continue;
+        if (TrimW(s.package).empty()) return L"";   // one entry for any app: nothing is assumed
+        if (package.empty()) package = TrimW(s.package);
+    }
+    return package;
 }
 
 bool HasWildcardCharacters(const std::wstring& name)

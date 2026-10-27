@@ -154,7 +154,7 @@ struct FirewallRuleFacts {
     std::wstring grouping;          // INetFwRule::Grouping, "@FirewallAPI.dll,-25000" for Windows' own groups
     std::wstring application;       // program path, expanded; "" for any program
     std::wstring service;           // service short name; "" for any
-    std::wstring packageId;         // INetFwRule3::LocalAppPackageId: a Store app's rule
+    std::wstring packageId;         // INetFwRule3::LocalAppPackageId, or the store's PFN (StorePackageForRule): a Store app's rule
     std::wstring localPorts;        // "*", "80,443", "RPC", ...
     std::wstring remoteAddresses;   // "*" for any address
     long         protocol = kFirewallProtocolAny;
@@ -178,8 +178,8 @@ bool IsPublicAnyAddressAllow(const FirewallRuleFacts& rule);
 // a rule bound to a Store app package (Windows writes those from the app's manifest).
 bool IsWindowsManagedRule(const FirewallRuleFacts& rule);
 
-// No program, no service, every protocol and every local port: the rule opens the
-// whole PC.
+// No program, no service, no Store app package, every protocol and every local port:
+// the rule opens the whole PC.
 bool AllowsEverything(const FirewallRuleFacts& rule);
 
 // The rule this check lists: IsPublicAnyAddressAllow and, for a rule Windows
@@ -232,6 +232,7 @@ struct FirewallStoreRule {
     std::wstring application;    // App, as stored (the check expands it)
     std::wstring service;        // Svc
     std::wstring localPorts;     // LPort values joined with ","
+    std::wstring package;        // AppPkgId or PFN: the Store app the rule is limited to, "" for none
     long         protocol = kFirewallProtocolAny;
     bool         allPublic = false;   // applies to the Public profile (no Profile entry means every profile)
     bool         remoteAny = true;    // no RA4 / RA6 entry
@@ -251,6 +252,11 @@ std::wstring FirewallRuleKey(const FirewallStoreRule& rule);
 // The unique names of the store entries that match the rule and that this check
 // would report as well. Empty when none does.
 std::vector<std::wstring> MatchFirewallStoreIds(const FirewallRuleFacts& rule, const std::vector<FirewallStoreRule>& store);
+
+// The Store app package the rule is limited to, taken from its store entries: a
+// package family name (PFN) binding is not visible through INetFwRule. "" when no
+// entry matches the rule or any matching entry names no package.
+std::wstring StorePackageForRule(const FirewallRuleFacts& rule, const std::vector<FirewallStoreRule>& store);
 
 // True when PowerShell's -Name parameter would read the name as a wildcard pattern.
 bool HasWildcardCharacters(const std::wstring& name);
