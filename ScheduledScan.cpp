@@ -23,10 +23,40 @@ std::wstring WeeklyScanTaskName()
     return L"Phantom Recon Weekly Fast Scan";
 }
 
-std::wstring WeeklyScanArguments(const std::wstring& baselinePath, const std::wstring& reportsDir)
+std::wstring WeeklyScanArguments(const std::wstring& baselinePath, const std::wstring& reportsDir, bool auditHistory)
 {
-    return L"--fast --baseline \"" + baselinePath + L"\" --report \"" + JoinPath(reportsDir, L"weekly_report.html") +
-           L"\" --csv \"" + JoinPath(reportsDir, L"weekly_scan.csv") + L"\" --notify --quiet";
+    // Every path is a file inside a folder, never one ending in a backslash, so the
+    // closing quote is never escaped when the program splits its command line.
+    std::wstring args = L"--fast --audit --baseline \"" + baselinePath + L"\" --report \"" +
+                        JoinPath(reportsDir, L"weekly_report.html") + L"\" --csv \"" + JoinPath(reportsDir, L"weekly_scan.csv") +
+                        L"\" --notify-on-change --quiet";
+    if (!auditHistory) args += L" --no-history";
+    return args;
+}
+
+std::wstring WeeklyTaskCommandLine(const std::wstring& exePath, const std::wstring& arguments)
+{
+    return L"\"" + exePath + L"\" " + arguments;
+}
+
+WeeklyTaskPlan PlanWeeklyTask(const std::wstring& exePath, const std::wstring& baselinePath, const std::wstring& reportsDir,
+                              bool auditHistory, bool portable)
+{
+    WeeklyTaskPlan plan;
+    if (portable) {
+        plan.error = L"Portable mode never creates scheduled tasks.";
+    }
+    else if (exePath.empty() || baselinePath.empty() || reportsDir.empty()) {
+        plan.error = L"The weekly task needs the program, a baseline and a reports folder.";
+    }
+    else {
+        plan.ok = true;
+        plan.exePath = exePath;
+        plan.arguments = WeeklyScanArguments(baselinePath, reportsDir, auditHistory);
+        plan.commandLine = WeeklyTaskCommandLine(exePath, plan.arguments);
+    }
+    DebugLog(plan.ok ? L"Plan: " + plan.commandLine : L"Plan refused: " + plan.error);
+    return plan;
 }
 
 static std::wstring HrText(HRESULT hr)
@@ -75,9 +105,10 @@ static ITaskService* ConnectService(std::wstring& error)
     return service;
 }
 
-bool RegisterWeeklyScan(const std::wstring& exePath, const std::wstring& baselinePath,
-                        const std::wstring& reportsDir, std::wstring& error)
+bool RegisterWeeklyScan(const std::wstring& exePath, const std::wstring& baselinePath, const std::wstring& reportsDir,
+                        bool auditHistory, std::wstring& commandLine, std::wstring& error)
 {
+    commandLine.clear();
     // A task without a usable baseline would fail every Sunday, quietly. Refuse instead.
     Baseline check;
     if (baselinePath.empty() || !FileExists(baselinePath) || !check.LoadFromFile(baselinePath)) {
@@ -86,8 +117,10 @@ bool RegisterWeeklyScan(const std::wstring& exePath, const std::wstring& baselin
         DebugLog(L"Register refused: " + error);
         return false;
     }
-    if (IsPortableMode()) {
-        error = L"Portable mode never creates scheduled tasks.";
+    WeeklyTaskPlan plan = PlanWeeklyTask(exePath, baselinePath, reportsDir, auditHistory, IsPortableMode());
+    if (!plan.ok) {
+        error = plan.error;
+        DebugLog(L"Register refused: " + error);
         return false;
     }
     ComScope com;
@@ -103,7 +136,9 @@ bool RegisterWeeklyScan(const std::wstring& exePath, const std::wstring& baselin
         IRegistrationInfo* info = NULL;
         if (SUCCEEDED(task->get_RegistrationInfo(&info)) && info) {
             info->put_Author(_bstr_t(L"Phantom Recon"));
-            info->put_Description(_bstr_t(L"Weekly Fast Scan against your Phantom Recon baseline. Remove it from Phantom Recon's Schedule menu."));
+            info->put_Description(_bstr_t(L"Weekly check-up: a Fast Scan against your Phantom Recon baseline and the security "
+                                          L"audit, with a notification when something got worse. Remove it from Phantom "
+                                          L"Recon's Scans menu or with PhantomReconCli.exe --unschedule-weekly."));
             info->Release();
         }
         IPrincipal* principal = NULL;
@@ -143,9 +178,9 @@ bool RegisterWeeklyScan(const std::wstring& exePath, const std::wstring& baselin
         if (SUCCEEDED(hr) && SUCCEEDED(task->get_Actions(&actions)) && actions &&
             SUCCEEDED(actions->Create(TASK_ACTION_EXEC, &action)) && action &&
             SUCCEEDED(action->QueryInterface(IID_IExecAction, reinterpret_cast<void**>(&exec))) && exec) {
-            exec->put_Path(_bstr_t(exePath.c_str()));
-            exec->put_Arguments(_bstr_t(WeeklyScanArguments(baselinePath, reportsDir).c_str()));
-            exec->put_WorkingDirectory(_bstr_t(DirectoryOf(exePath).c_str()));
+            exec->put_Path(_bstr_t(plan.exePath.c_str()));
+            exec->put_Arguments(_bstr_t(plan.arguments.c_str()));
+            exec->put_WorkingDirectory(_bstr_t(DirectoryOf(plan.exePath).c_str()));
         }
         else if (SUCCEEDED(hr)) {
             hr = E_FAIL;
@@ -169,7 +204,8 @@ bool RegisterWeeklyScan(const std::wstring& exePath, const std::wstring& baselin
     if (task) task->Release();
     if (root) root->Release();
     service->Release();
-    DebugLog(ok ? L"Registered weekly scan" : L"Register failed: " + error);
+    if (ok) commandLine = plan.commandLine;
+    DebugLog(ok ? L"Registered weekly scan: " + plan.commandLine : L"Register failed: " + error);
     return ok;
 }
 
@@ -212,4 +248,55 @@ bool IsWeeklyScanRegistered()
     }
     service->Release();
     return found;
+}
+
+// The first exec action of a task definition.
+static bool ReadExecAction(ITaskDefinition* definition, std::wstring& exePath, std::wstring& arguments)
+{
+    bool ok = false;
+    IActionCollection* actions = NULL;
+    IAction* action = NULL;
+    IExecAction* exec = NULL;
+    if (SUCCEEDED(definition->get_Actions(&actions)) && actions &&
+        SUCCEEDED(actions->get_Item(1, &action)) && action &&
+        SUCCEEDED(action->QueryInterface(IID_IExecAction, reinterpret_cast<void**>(&exec))) && exec) {
+        BSTR path = NULL;
+        BSTR args = NULL;
+        if (SUCCEEDED(exec->get_Path(&path))) {
+            exePath = path ? path : L"";
+            ok = true;
+        }
+        if (SUCCEEDED(exec->get_Arguments(&args))) arguments = args ? args : L"";
+        if (path) SysFreeString(path);
+        if (args) SysFreeString(args);
+    }
+    if (exec) exec->Release();
+    if (action) action->Release();
+    if (actions) actions->Release();
+    return ok;
+}
+
+bool ReadWeeklyScanCommand(std::wstring& exePath, std::wstring& arguments)
+{
+    exePath.clear();
+    arguments.clear();
+    ComScope com;
+    std::wstring error;
+    ITaskService* service = ConnectService(error);
+    if (!service) return false;
+    bool ok = false;
+    ITaskFolder* root = NULL;
+    IRegisteredTask* task = NULL;
+    ITaskDefinition* definition = NULL;
+    if (SUCCEEDED(service->GetFolder(_bstr_t(L"\\"), &root)) && root &&
+        SUCCEEDED(root->GetTask(_bstr_t(WeeklyScanTaskName().c_str()), &task)) && task &&
+        SUCCEEDED(task->get_Definition(&definition)) && definition) {
+        ok = ReadExecAction(definition, exePath, arguments);
+    }
+    if (definition) definition->Release();
+    if (task) task->Release();
+    if (root) root->Release();
+    service->Release();
+    DebugLog(ok ? L"Registered task runs: " + WeeklyTaskCommandLine(exePath, arguments) : L"No readable weekly task");
+    return ok;
 }

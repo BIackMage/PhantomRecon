@@ -111,6 +111,7 @@
     <ClInclude Include="targetver.h" />
     <ClInclude Include="TextUtils.h" />
     <ClInclude Include="Version.h" />
+    <ClInclude Include="CliNotification.h" />
     <ClInclude Include="CliRunner.h" />
     <ClInclude Include="Redactor.h" />
     <ClInclude Include="Reports.h" />
@@ -186,6 +187,7 @@
     <ClCompile Include="SecurityChecksHygiene.cpp" />
     <ClCompile Include="ServiceUtil.cpp" />
     <ClCompile Include="SystemInfo.cpp" />
+    <ClCompile Include="CliNotification.cpp" />
     <ClCompile Include="CliRunner.cpp" />
     <ClCompile Include="Redactor.cpp" />
     <ClCompile Include="ReportHistory.cpp" />

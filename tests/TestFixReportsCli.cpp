@@ -443,16 +443,18 @@ TEST(Fix5_FailedRunsNotify)
 TEST(Fix5_WeeklyTaskNeedsBaseline)
 {
     bool before = IsWeeklyScanRegistered();
-    std::wstring error;
-    CHECK(!RegisterWeeklyScan(L"C:\\x\\PhantomReconCli.exe", tf::TestDir() + L"missing.prbl", tf::TestDir(), error));
+    std::wstring error, commandLine;
+    CHECK(!RegisterWeeklyScan(L"C:\\x\\PhantomReconCli.exe", tf::TestDir() + L"missing.prbl", tf::TestDir(), true, commandLine, error));
     CHECK(error.find(L"baseline") != std::wstring::npos);
+    CHECK(commandLine.empty());
 
     // A file that is not a baseline is refused the same way.
     std::wstring junk = tf::TestDir() + L"junk.prbl";
     REQUIRE(WriteUtf8File(junk, L"not a baseline"));
     error.clear();
-    CHECK(!RegisterWeeklyScan(L"C:\\x\\PhantomReconCli.exe", junk, tf::TestDir(), error));
+    CHECK(!RegisterWeeklyScan(L"C:\\x\\PhantomReconCli.exe", junk, tf::TestDir(), true, commandLine, error));
     CHECK(error.find(L"baseline") != std::wstring::npos);
+    CHECK(commandLine.empty());
 
     std::wstring captured;
     CliEnvironment env;
