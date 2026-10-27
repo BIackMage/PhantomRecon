@@ -22,7 +22,13 @@
 //     keys the fix created when they are empty. It marks the entry as restored. A
 //     step without an entry runs the catalog's undo commands (the Windows default).
 //   - The undo script only writes values and keys its own step declares: an entry
-//     that names anything else stops the step before anything is written.
+//     that names anything else stops the step before anything is written. So does an
+//     entry with a value it cannot read back (an edited file: data that is not
+//     base64, a list count larger than the list, an unknown type): every value is
+//     read out of the entry before the first one is written.
+//   - For a value in each subkey (EachSubkey), a subkey that is gone at undo time (a
+//     network adapter removed after the fix) is not created again; a subkey added
+//     after the fix was never changed by it and is left alone.
 //   - A value marked neverSaved (a stored password, or a setting whose old value
 //     would expose passwords again) is never read into the backup nor restored; a
 //     step with only such values keeps the catalog's undo.

@@ -128,18 +128,20 @@ function Save-PRBackup([string]$Step, [object[]]$Values) {
     Write-Host ('Backup: ' + $states.Count + ' registry value(s) saved to ' + $backupPath)
 })PS";
 
-// The undo script: check an entry against the step's own declared values, put the
-// values back, remove the keys the fix created when they are empty, mark it restored.
+// The undo script: check an entry against the step's own declared values, read every
+// value out of it, and only then put the values back, remove the keys the fix created
+// when they are empty, and mark it restored. A subkey of an each-subkey value that is
+// gone now (an adapter removed after the fix) is not created again.
 static const wchar_t kRestoreHelpers[] = LR"PS(function Test-PRDeclared([string]$Key, [string]$Name, [object[]]$Values) {
     foreach ($v in $Values) {
         if (-not [string]::Equals($Name, $v.Name, [StringComparison]::OrdinalIgnoreCase)) { continue }
         if ($v.EachSubkey) {
             $prefix = $v.Key + '\'
-            if ($Key.Length -gt $prefix.Length -and $Key.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and $Key.IndexOf('\', $prefix.Length) -lt 0) { return $true }
+            if ($Key.Length -gt $prefix.Length -and $Key.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -and $Key.IndexOf('\', $prefix.Length) -lt 0) { return 'subkey' }
         }
-        elseif ([string]::Equals($Key, $v.Key, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        elseif ([string]::Equals($Key, $v.Key, [StringComparison]::OrdinalIgnoreCase)) { return 'key' }
     }
-    return $false
+    return ''
 }
 function Test-PRCreatedKey([string]$Key, [object[]]$Values) {
     if ($Key.Length -le 6) { return $false }
@@ -150,11 +152,36 @@ function Test-PRCreatedKey([string]$Key, [object[]]$Values) {
     }
     return $false
 }
-function Set-PRValueState($State) {
+function ConvertFrom-PRState($State) {
+    if (-not $State.Existed) { return [pscustomobject]@{ Remove = $true; Kind = $null; Value = $null } }
+    $data = [string]$State.Data
+    $kind = $null
+    $value = $null
+    switch ([string]$State.Type) {
+        'DWord' { $kind = [Microsoft.Win32.RegistryValueKind]::DWord; $value = [BitConverter]::ToInt32([BitConverter]::GetBytes([uint32]$data), 0) }
+        'QWord' { $kind = [Microsoft.Win32.RegistryValueKind]::QWord; $value = [BitConverter]::ToInt64([BitConverter]::GetBytes([uint64]$data), 0) }
+        'String' { $kind = [Microsoft.Win32.RegistryValueKind]::String; $value = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($data)) }
+        'ExpandString' { $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString; $value = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($data)) }
+        'MultiString' {
+            $parts = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($data)).Split([char]0)
+            $count = [int]$State.Count
+            if ($count -lt 0 -or $count -ge $parts.Length) { throw ('the list holds ' + ($parts.Length - 1) + ' string(s), not ' + $count) }
+            $list = [string[]]::new($count)
+            for ($i = 0; $i -lt $count; $i++) { $list[$i] = $parts[$i] }
+            $kind = [Microsoft.Win32.RegistryValueKind]::MultiString
+            $value = $list
+        }
+        'Binary' { $kind = [Microsoft.Win32.RegistryValueKind]::Binary; $value = [byte[]][Convert]::FromBase64String($data) }
+        'None' { $kind = [Microsoft.Win32.RegistryValueKind]::None; $value = [byte[]][Convert]::FromBase64String($data) }
+        default { throw ('the backup holds a registry type this plan cannot write: ' + $State.Type) }
+    }
+    return [pscustomobject]@{ Remove = $false; Kind = $kind; Value = $value }
+}
+function Set-PRValueState($State, $Decoded, [bool]$SubkeyMustExist) {
     $hive = Get-PRHive ([string]$State.Key)
     $sub = ([string]$State.Key).Substring(6)
     $name = [string]$State.Name
-    if (-not $State.Existed) {
+    if ($Decoded.Remove) {
         $k = $hive.OpenSubKey($sub, $true)
         if ($null -ne $k) {
             try { $k.DeleteValue($name, $false) }
@@ -162,25 +189,15 @@ function Set-PRValueState($State) {
         }
         return
     }
-    $data = [string]$State.Data
-    $k = $hive.CreateSubKey($sub)
-    try {
-        switch ([string]$State.Type) {
-            'DWord' { $k.SetValue($name, [BitConverter]::ToInt32([BitConverter]::GetBytes([uint32]$data), 0), [Microsoft.Win32.RegistryValueKind]::DWord) }
-            'QWord' { $k.SetValue($name, [BitConverter]::ToInt64([BitConverter]::GetBytes([uint64]$data), 0), [Microsoft.Win32.RegistryValueKind]::QWord) }
-            'String' { $k.SetValue($name, [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($data)), [Microsoft.Win32.RegistryValueKind]::String) }
-            'ExpandString' { $k.SetValue($name, [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($data)), [Microsoft.Win32.RegistryValueKind]::ExpandString) }
-            'MultiString' {
-                $parts = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($data)).Split([char]0)
-                $list = [string[]]::new([int]$State.Count)
-                for ($i = 0; $i -lt $list.Length; $i++) { $list[$i] = $parts[$i] }
-                $k.SetValue($name, $list, [Microsoft.Win32.RegistryValueKind]::MultiString)
-            }
-            'Binary' { $k.SetValue($name, [byte[]][Convert]::FromBase64String($data), [Microsoft.Win32.RegistryValueKind]::Binary) }
-            'None' { $k.SetValue($name, [byte[]][Convert]::FromBase64String($data), [Microsoft.Win32.RegistryValueKind]::None) }
-            default { throw ('The backup holds a registry type this plan cannot write: ' + $State.Type) }
+    if ($SubkeyMustExist) {
+        $k = $hive.OpenSubKey($sub, $true)
+        if ($null -eq $k) {
+            Write-Host ('Backup: ' + $State.Key + ' is gone now, so it is not created again.')
+            return
         }
     }
+    else { $k = $hive.CreateSubKey($sub) }
+    try { $k.SetValue($name, $Decoded.Value, $Decoded.Kind) }
     finally { $k.Close() }
 }
 function Remove-PREmptyKey([string]$Path) {
@@ -206,13 +223,24 @@ function Restore-PRBackup([string]$Step, [object[]]$Values) {
     foreach ($e in $all) { if ($e.Step -eq $Step -and $null -eq $entry) { $entry = $e } }
     if ($null -eq $entry) { return 'none' }
     if ($entry.Restored) { return 'done' }
-    foreach ($s in @($entry.Values)) {
-        if (-not (Test-PRDeclared ([string]$s.Key) ([string]$s.Name) $Values)) { throw ('The backup names a registry value this step does not change, so nothing was put back: ' + $s.Key + ' ' + $s.Name) }
+    $states = @($entry.Values)
+    $where = New-Object System.Collections.Generic.List[string]
+    foreach ($s in $states) {
+        $declared = Test-PRDeclared ([string]$s.Key) ([string]$s.Name) $Values
+        if (-not $declared) { throw ('The backup names a registry value this step does not change, so nothing was put back: ' + $s.Key + ' ' + $s.Name) }
+        $where.Add($declared)
     }
     foreach ($c in @($entry.CreatedKeys)) {
         if (-not (Test-PRCreatedKey ([string]$c) $Values)) { throw ('The backup names a registry key this step does not create, so nothing was put back: ' + $c) }
     }
-    foreach ($s in @($entry.Values)) { Set-PRValueState $s }
+    # Every value is read out of the backup before the first one is written, so a damaged
+    # entry stops the step with nothing changed.
+    $decoded = New-Object System.Collections.Generic.List[object]
+    foreach ($s in $states) {
+        try { $decoded.Add((ConvertFrom-PRState $s)) }
+        catch { throw ('The backup holds a value that cannot be read back, so nothing was put back: ' + $s.Key + ' ' + $s.Name + ' (' + $_.Exception.Message + ')') }
+    }
+    for ($i = 0; $i -lt $states.Length; $i++) { Set-PRValueState $states[$i] $decoded[$i] ($where[$i] -eq 'subkey') }
     foreach ($c in @(@($entry.CreatedKeys) | Sort-Object -Property Length -Descending)) { Remove-PREmptyKey ([string]$c) }
     $entry.Restored = (Get-Date).ToString('s')
     Write-PRBackup $all
