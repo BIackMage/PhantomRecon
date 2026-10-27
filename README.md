@@ -170,9 +170,26 @@ PhantomReconCli.exe --audit --report audit.html
 PhantomReconCli.exe --baseline-scan "C:\Program Files"
 PhantomReconCli.exe --full "C:\Program Files" --report changes.html --csv changes.csv
 
-# Weekly Fast Scan as one visible, removable scheduled task
+# Weekly check-up (Fast Scan and audit) as one visible, removable scheduled task
 PhantomReconCli.exe --schedule-weekly
+PhantomReconCli.exe --unschedule-weekly
 ```
+
+The weekly check-up (**Scans > Weekly Fast Scan** or `--schedule-weekly`) is one task in
+Task Scheduler that runs as you, never as administrator, every Sunday at 10:00. It runs
+`PhantomReconCli.exe --fast --audit --baseline <baseline> --report <reports>\weekly_report.html
+--csv <reports>\weekly_scan.csv --notify-on-change --quiet`, and the exact line is shown
+before the task is created. Because it runs the audit, the audit history gets a record
+every week even if you never open the window (with history off, the task gets
+`--no-history`). It needs a baseline that loads and is never created in portable mode.
+A desktop notification appears only when something got worse or the run failed, and
+says what changed, for example "2 new problems since 20 Oct (score 61, down 4). Open
+Phantom Recon to see them. Scan: nothing new, changed or missing." "Worse" means new
+problems, a check that went from WARNING to FAIL or a lower score since the last audit,
+or new or changed files against the baseline. On the command line `--notify-on-change`
+does the same for any audit or scan, and `--notify` notifies after every run. A task
+made by version 1.0.0 (Fast Scan only) keeps working; `--schedule-weekly`, or the menu
+item, replaces it with the new command.
 
 Exit code 0 means nothing needs attention, 1 means something does, 2 means an error.
 `PhantomReconCli.exe --help` lists every option.

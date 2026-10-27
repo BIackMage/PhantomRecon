@@ -5,6 +5,7 @@
 #include "AuditHistory.h"
 #include "Baseline.h"
 #include "CheckCatalog.h"
+#include "CliNotification.h"
 #include "FileIO.h"
 #include "FixScript.h"
 #include "FixScriptBackup.h"
@@ -42,8 +43,11 @@ std::wstring CliUsageText()
         L"  --diff <older> <newer>      Compare two baseline files\n"
         L"  --make-samples <folder>     Write the harmless demo files and a demo baseline\n"
         L"  --findings-md <file>        Write the list of every check (docs/FINDINGS.md)\n"
-        L"  --schedule-weekly           Run --fast every Sunday as you (creates one scheduled task;\n"
-        L"                              needs a baseline, so take one first)\n"
+        L"  --schedule-weekly           Weekly check-up: every Sunday, as you and never elevated, run\n"
+        L"                              --fast and --audit with a report and --notify-on-change\n"
+        L"                              (creates one scheduled task and prints its command line;\n"
+        L"                              needs a baseline, so take one first; with --no-history the\n"
+        L"                              task keeps no audit history)\n"
         L"  --unschedule-weekly         Remove that scheduled task\n"
         L"  --history                   Show the last 20 audits on this PC: date, score, pass, warn, fail\n"
         L"\n"
@@ -66,6 +70,10 @@ std::wstring CliUsageText()
         L"  --redact                    Hide user, computer and domain names in every file written\n"
         L"                              (HTML, JSON, Navigator, CSV and text)\n"
         L"  --notify                    Show a desktop notification when done, also when the run fails\n"
+        L"  --notify-on-change          Show it only when something got worse or the run failed: new\n"
+        L"                              problems or a lower score since the last audit, or new or\n"
+        L"                              changed files in the scan (a calm week stays quiet)\n"
+        L"                              (--notify and --notify-on-change need --audit or a scan)\n"
         L"  --quiet                     Print only errors\n"
         L"  --no-history                Do not read or write the audit history (phantom_recon_history.jsonl);\n"
         L"                              without it, --audit records its result and says what changed\n"
@@ -135,6 +143,7 @@ CliOptions ParseCliArguments(const std::vector<std::wstring>& args)
         else if (a == L"--no-fuzzy") o.noFuzzy = true;
         else if (a == L"--redact") o.redact = true;
         else if (a == L"--notify") o.notify = true;
+        else if (a == L"--notify-on-change") o.notifyOnChange = true;
         else if (a == L"--quiet") o.quiet = true;
         else if (a == L"--portable") { /* read by IsPortableMode() */ }
         else if (a == L"--schedule-weekly") o.scheduleWeekly = true;
@@ -144,6 +153,9 @@ CliOptions ParseCliArguments(const std::vector<std::wstring>& args)
         else o.error = L"Unknown option: " + args[i];
     }
     if (o.error.empty() && o.showHistory && o.noHistory) o.error = L"--history shows the audit history; it cannot be used with --no-history";
+    if (o.error.empty() && o.notify && o.notifyOnChange) {
+        o.error = L"Pick one of --notify (always) or --notify-on-change (only when something got worse)";
+    }
     int scans = (!o.baselineScanRoot.empty() ? 1 : 0) + (!o.fullScanRoot.empty() ? 1 : 0) + (o.fastScan ? 1 : 0) + (!o.diffOlder.empty() ? 1 : 0);
     if (o.error.empty() && scans > 1) o.error = L"Pick one of --baseline-scan, --full, --fast or --diff per run";
     if (!o.error.empty() || o.help || o.version) return o;
@@ -165,6 +177,10 @@ CliOptions ParseCliArguments(const std::vector<std::wstring>& args)
         o.error = L"--fix-script needs a file name ending in .ps1 (PowerShell runs no other)";
     else if (!o.csvPath.empty() && scans == 0) o.error = L"--csv writes scan rows; add --baseline-scan, --full, --fast or --diff";
     else if (reports && !o.audit && scans == 0) o.error = L"--report, --json and --navigator need --audit or a scan";
+    else if ((o.notify || o.notifyOnChange) && !o.audit && scans == 0) {
+        o.error = std::wstring(o.notify ? L"--notify" : L"--notify-on-change") +
+                  L" reports the result of an audit or a scan; add --audit, --baseline-scan, --full, --fast or --diff";
+    }
     return o;
 }
 
@@ -220,12 +236,51 @@ static bool PrintCliHistory(const CliEnvironment& env)
     return true;
 }
 
+// The facts the notification is built from (CliNotification.h).
+static NotificationFacts NotificationFactsFor(const ReportData& report, int exitCode, const std::wstring& error)
+{
+    NotificationFacts f;
+    f.exitCode = exitCode;
+    f.error = error;
+    f.hasAudit = report.hasAudit;
+    f.score = report.score.score;
+    f.hasHistory = report.hasHistory;
+    f.comparison = report.history;
+    f.hasScan = report.hasScan;
+    f.baselineScan = report.scan.mode == ScanMode::Baseline;
+    f.scanPrograms = report.scan.executables;
+    f.scanAdded = report.scan.added;
+    f.scanChanged = report.scan.changed;
+    f.scanMissing = report.scan.missing;
+    f.scanHighRisk = report.scan.highRisk;
+    return f;
+}
+
+// --notify: always. --notify-on-change: only when the run failed or something got
+// worse. The console hears which, unless --quiet (the weekly task's case).
+static void NotifyIfAsked(const CliOptions& o, const CliEnvironment& env, const NotificationFacts& facts)
+{
+    if (!o.notify && !o.notifyOnChange) return;
+    if (!ShouldShowNotification(facts, !o.notify)) {
+        Say(env, o, L"No notification: nothing got worse and the run did not fail.\n");
+        DebugLog(L"Notification skipped (--notify-on-change, nothing worse)");
+        return;
+    }
+    CliNotification notice = BuildCliNotification(facts);
+    Say(env, o, L"Notification: " + notice.title + L"\n  " + notice.text + L"\n");
+    if (env.notify) env.notify(notice.title, notice.text);
+    DebugLog(L"Notification shown: " + notice.title);
+}
+
 int RunCli(const CliOptions& o, const CliEnvironment& env)
 {
     if (!o.error.empty()) {
         Error(env, o.error);
         if (env.out) env.out(L"Run with --help for the list of options.\n");
-        if (o.notify && env.notify) env.notify(L"Phantom Recon: the run failed", o.error);
+        NotificationFacts failed;
+        failed.exitCode = 2;
+        failed.error = o.error;
+        NotifyIfAsked(o, env, failed);
         return 2;
     }
     if (o.help) {
@@ -243,25 +298,15 @@ int RunCli(const CliOptions& o, const CliEnvironment& env)
     FillReportHost(report, o.redact);
 
     // Every error from here on goes through fail(), and every way out through finish(),
-    // so --notify is shown for a failed run too (a weekly task has no other voice).
+    // so a notification is shown for a failed run too (a weekly task has no other voice).
     auto fail = [&](const std::wstring& text) {
         Error(env, text);
         if (firstError.empty()) firstError = text;
         exitCode = 2;
     };
     auto finish = [&]() -> int {
-        if (o.notify && env.notify) {
-            std::wstring text;
-            if (report.hasScan) {
-                text = std::to_wstring(report.scan.added) + L" new, " + std::to_wstring(report.scan.changed) + L" changed, " +
-                       std::to_wstring(report.scan.missing) + L" missing.";
-            }
-            if (report.hasAudit) text += (text.empty() ? L"" : L" ") + std::wstring(L"Hardening score ") + std::to_wstring(report.score.score) + L"/100.";
-            if (!firstError.empty()) text = L"Error: " + firstError + (text.empty() ? L"" : L" " + text);
-            std::wstring title = exitCode == 2 ? L"Phantom Recon: the run failed"
-                               : exitCode == 1 ? L"Phantom Recon: please review" : L"Phantom Recon: all clear";
-            env.notify(title, o.redact ? RedactText(text) : text);
-        }
+        // Only the error can hold a name or a path; the rest is numbers and dates.
+        NotifyIfAsked(o, env, NotificationFactsFor(report, exitCode, o.redact ? RedactText(firstError) : firstError));
         DebugLog(L"RunCli finished with exit code " + std::to_wstring(exitCode));
         return exitCode;
     };
@@ -295,7 +340,7 @@ int RunCli(const CliOptions& o, const CliEnvironment& env)
             fail(error);
             return finish();
         }
-        Say(env, o, L"Weekly scan removed.\n");
+        Say(env, o, L"Weekly check-up removed (task \"" + WeeklyScanTaskName() + L"\"), or there was none.\n");
     }
 
     if (o.audit) {
@@ -469,14 +514,17 @@ int RunCli(const CliOptions& o, const CliEnvironment& env)
     // After the scan, so "--baseline-scan <folder> --schedule-weekly" works in one run.
     // RegisterWeeklyScan refuses when the baseline is missing or unreadable.
     if (o.scheduleWeekly) {
-        std::wstring error;
+        std::wstring error, commandLine;
         std::wstring reports = env.defaultReportsDir;
-        if (!RegisterWeeklyScan(env.exePathForSchedule, baselinePath, reports, error)) {
+        if (!RegisterWeeklyScan(env.exePathForSchedule, baselinePath, reports, !o.noHistory, commandLine, error)) {
             fail(error + (FileExists(baselinePath) ? L"" : L" Use --baseline-scan <folder> to take one."));
         }
         else {
             EnsureDirectory(reports);
-            Say(env, o, L"Weekly Fast Scan scheduled for Sundays at 10:00. Reports go to " + reports + L"\n");
+            Say(env, o, L"Weekly check-up scheduled for Sundays at 10:00 as task \"" + WeeklyScanTaskName() +
+                        L"\": a Fast Scan against the baseline and the security audit, with a notification only when "
+                        L"something got worse. Reports go to " + reports + L"\nThe task runs:\n  " + commandLine +
+                        L"\nRemove it with --unschedule-weekly.\n");
         }
     }
 

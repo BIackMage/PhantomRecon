@@ -360,45 +360,101 @@ static void CmdCancelScanKey(AppState& app, HWND hWnd)
     CmdCancelScan(app, hWnd);
 }
 
+static const wchar_t kWeeklyTitle[] = L"Weekly Fast Scan";
+
+// The weekly task as this program would create it now: the console program next to
+// this one, the active baseline, the reports folder and the audit history setting.
+static WeeklyTaskPlan CurrentWeeklyPlan(AppState& app)
+{
+    return PlanWeeklyTask(JoinPath(GetExeDirectory(), L"PhantomReconCli.exe"), app.baselineFilePath,
+                          EffectiveReportsDirectory(app.settings), app.settings.auditHistory, IsPortableMode());
+}
+
+// What the task does, for the confirmations.
+static std::wstring DescribeWeeklyTask(AppState& app)
+{
+    return L"It runs as you (never as administrator) every Sunday at 10:00: it compares installed programs with your "
+           L"baseline, runs the security audit" + std::wstring(app.settings.auditHistory ? L" (kept in the audit history)" : L"") +
+           L" and writes an HTML report to:\n" + EffectiveReportsDirectory(app.settings) +
+           L"\nA desktop notification appears only when something got worse or the run failed.";
+}
+
+// Register (or replace) the task and say how it went.
+static void RegisterWeeklyTaskAndReport(AppState& app, HWND hWnd)
+{
+    std::wstring error, commandLine;
+    std::wstring reports = EffectiveReportsDirectory(app.settings);
+    EnsureDirectory(reports);
+    if (!RegisterWeeklyScan(JoinPath(GetExeDirectory(), L"PhantomReconCli.exe"), app.baselineFilePath, reports,
+            app.settings.auditHistory, commandLine, error)) {
+        MessageBoxW(hWnd, (L"The task could not be created:\n" + error).c_str(), kWeeklyTitle, MB_OK | MB_ICONERROR);
+        return;
+    }
+    DebugLog(L"Weekly task registered: " + commandLine);
+    MessageBoxW(hWnd, (L"The weekly check-up is on. The task runs:\n\n" + commandLine).c_str(), kWeeklyTitle,
+        MB_OK | MB_ICONINFORMATION);
+}
+
+static void RemoveWeeklyTaskAndReport(HWND hWnd)
+{
+    std::wstring error;
+    if (!RemoveWeeklyScan(error)) {
+        MessageBoxW(hWnd, (L"The task could not be removed:\n" + error).c_str(), kWeeklyTitle, MB_OK | MB_ICONERROR);
+        return;
+    }
+    DebugLog(L"Weekly task removed");
+    MessageBoxW(hWnd, L"The weekly check-up is off.", kWeeklyTitle, MB_OK | MB_ICONINFORMATION);
+}
+
+// The task exists. When it runs something other than what this version would create
+// (a task made by 1.0.0, another baseline, the history setting changed), offer to
+// replace it; otherwise offer to remove it.
+static void ManageExistingWeeklyTask(AppState& app, HWND hWnd)
+{
+    std::wstring oldExe, oldArgs;
+    bool readable = ReadWeeklyScanCommand(oldExe, oldArgs);
+    WeeklyTaskPlan plan = CurrentWeeklyPlan(app);
+    bool canReplace = plan.ok && FileExists(app.baselineFilePath) && FileExists(plan.exePath);
+    bool differs = !readable || !EqualsI(oldExe, plan.exePath) || oldArgs != plan.arguments;
+    if (!canReplace || !differs) {
+        if (MessageBoxW(hWnd, L"Stop the weekly check-up and remove its scheduled task?", kWeeklyTitle,
+                MB_YESNO | MB_ICONQUESTION) == IDYES) RemoveWeeklyTaskAndReport(hWnd);
+        return;
+    }
+    std::wstring text = L"The weekly task runs:\n" + (readable ? WeeklyTaskCommandLine(oldExe, oldArgs) : L"(could not be read)") +
+                        L"\n\nThis version would run:\n" + plan.commandLine + L"\n\n" + DescribeWeeklyTask(app) +
+                        L"\n\nYes: replace the task with the new command.\nNo: remove the task.\nCancel: leave it as it is.";
+    int answer = MessageBoxW(hWnd, text.c_str(), kWeeklyTitle, MB_YESNOCANCEL | MB_ICONQUESTION);
+    if (answer == IDYES) RegisterWeeklyTaskAndReport(app, hWnd);
+    else if (answer == IDNO) RemoveWeeklyTaskAndReport(hWnd);
+}
+
 static void CmdWeeklyScan(AppState& app, HWND hWnd)
 {
     if (IsPortableMode()) {
-        MessageBoxW(hWnd, L"Portable mode never creates scheduled tasks.", L"Weekly Fast Scan", MB_OK | MB_ICONINFORMATION);
+        MessageBoxW(hWnd, L"Portable mode never creates scheduled tasks.", kWeeklyTitle, MB_OK | MB_ICONINFORMATION);
         return;
     }
-    std::wstring error;
     if (IsWeeklyScanRegistered()) {
-        if (MessageBoxW(hWnd, L"Stop the weekly Fast Scan and remove its scheduled task?", L"Weekly Fast Scan",
-                MB_YESNO | MB_ICONQUESTION) != IDYES) return;
-        if (!RemoveWeeklyScan(error)) {
-            MessageBoxW(hWnd, (L"The task could not be removed:\n" + error).c_str(), L"Weekly Fast Scan", MB_OK | MB_ICONERROR);
-            return;
-        }
-        MessageBoxW(hWnd, L"The weekly Fast Scan is off.", L"Weekly Fast Scan", MB_OK | MB_ICONINFORMATION);
+        ManageExistingWeeklyTask(app, hWnd);
         return;
     }
-
     if (!FileExists(app.baselineFilePath)) {
-        MessageBoxW(hWnd, L"Take a baseline first. The weekly scan compares against it.", L"Weekly Fast Scan", MB_OK | MB_ICONWARNING);
+        MessageBoxW(hWnd, L"Take a baseline first. The weekly scan compares against it.", kWeeklyTitle, MB_OK | MB_ICONWARNING);
         return;
     }
-    std::wstring cli = JoinPath(GetExeDirectory(), L"PhantomReconCli.exe");
-    if (!FileExists(cli)) {
-        MessageBoxW(hWnd, (L"The weekly scan runs the command-line program, which should be next to this one:\n" + cli).c_str(),
-            L"Weekly Fast Scan", MB_OK | MB_ICONERROR);
+    WeeklyTaskPlan plan = CurrentWeeklyPlan(app);
+    if (!plan.ok || !FileExists(plan.exePath)) {
+        std::wstring why = plan.ok ? L"The weekly scan runs the command-line program, which should be next to this one:\n" +
+                                     plan.exePath : plan.error;
+        MessageBoxW(hWnd, why.c_str(), kWeeklyTitle, MB_OK | MB_ICONERROR);
         return;
     }
-    std::wstring reports = EffectiveReportsDirectory(app.settings);
-    std::wstring text = L"This creates one task in Task Scheduler, named \"" + WeeklyScanTaskName() + L"\".\n"
-                        L"It runs as you every Sunday at 10:00, compares installed programs with your baseline and "
-                        L"writes an HTML report to:\n" + reports + L"\n\nYou can turn it off here or in Task Scheduler. Create it?";
-    if (MessageBoxW(hWnd, text.c_str(), L"Weekly Fast Scan", MB_YESNO | MB_ICONQUESTION) != IDYES) return;
-    EnsureDirectory(reports);
-    if (!RegisterWeeklyScan(cli, app.baselineFilePath, reports, error)) {
-        MessageBoxW(hWnd, (L"The task could not be created:\n" + error).c_str(), L"Weekly Fast Scan", MB_OK | MB_ICONERROR);
-        return;
-    }
-    MessageBoxW(hWnd, L"The weekly Fast Scan is on.", L"Weekly Fast Scan", MB_OK | MB_ICONINFORMATION);
+    std::wstring text = L"This creates one task in Task Scheduler, named \"" + WeeklyScanTaskName() + L"\".\n" +
+                        DescribeWeeklyTask(app) + L"\n\nThe task will run:\n" + plan.commandLine +
+                        L"\n\nYou can turn it off here or in Task Scheduler. Create it?";
+    if (MessageBoxW(hWnd, text.c_str(), kWeeklyTitle, MB_YESNO | MB_ICONQUESTION) != IDYES) return;
+    RegisterWeeklyTaskAndReport(app, hWnd);
 }
 
 // ---------------------------------------------------------------------------

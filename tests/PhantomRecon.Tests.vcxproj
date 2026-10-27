@@ -76,6 +76,7 @@
     <ClCompile Include="TestFixAuditChecksA.cpp" />
     <ClCompile Include="TestFixAuditChecksB.cpp" />
     <ClCompile Include="TestFixReportsCli.cpp" />
+    <ClCompile Include="TestWeeklyCheckup.cpp" />
     <ClCompile Include="TestFixWindowApp.cpp" />
     <ClCompile Include="TestFixToolsCi.cpp" />
     <ClCompile Include="TestPlatformChecks.cpp" />

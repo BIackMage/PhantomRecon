@@ -20,7 +20,9 @@
 // with nothing to do (no --audit, scan, --make-samples, --findings-md or
 // schedule change) are an error; only a run with no arguments shows the help.
 // A failed scan step does not stop the audit reports from being written, and
-// --notify fires on every finished run, failed ones included.
+// --notify fires on every finished run, failed ones included. --notify-on-change
+// fires only on a failed run or when something got worse (CliNotification.h).
+// Both need --audit or a scan, so there is something to report.
 // ---------------------------------------------------------------------------
 
 struct CliOptions {
@@ -46,7 +48,8 @@ struct CliOptions {
     std::wstring revocation = L"cache";  // --revocation off|cache|online
     bool noFuzzy = false;             // --no-fuzzy
     bool redact = false;              // --redact
-    bool notify = false;              // --notify
+    bool notify = false;              // --notify: always notify when done
+    bool notifyOnChange = false;      // --notify-on-change: notify only when worse or failed
     bool quiet = false;               // --quiet
     bool scheduleWeekly = false;      // --schedule-weekly
     bool unscheduleWeekly = false;    // --unschedule-weekly
