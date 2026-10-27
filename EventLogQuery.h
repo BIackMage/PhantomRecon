@@ -86,6 +86,10 @@ bool ParseEventXml(const std::wstring& xml, EventRecord& out);
 // "2026-10-25T11:31:18.9171017Z" (fraction optional) to a UTC FILETIME value.
 bool ParseEventSystemTime(const std::wstring& text, unsigned long long& fileTime);
 
+// A UTC FILETIME value as this PC's local time on that date, "2026-10-25 13:31"
+// (daylight saving as it was then, not as it is now). "(time unknown)" for 0.
+std::wstring EventTimeText(unsigned long long fileTime);
+
 // Replace the five XML entities and numeric character references (&#65; &#x41;).
 // Unknown entities are left as written.
 std::wstring DecodeXmlEntities(const std::wstring& text);

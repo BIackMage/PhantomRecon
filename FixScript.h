@@ -73,8 +73,10 @@ std::wstring BuildUndoScript(const std::vector<SecurityCheckResult>& results, co
 std::wstring PowerShellQuote(const std::wstring& value);
 
 // True when a value from this PC can go into a command exactly: not empty, at most
-// 2,048 characters, no control or line-break character, no unpaired surrogate, and no
-// double quote (Windows PowerShell 5.1 drops those when it starts a native program).
+// 2,048 characters, no control or line-break character, no unpaired surrogate, no
+// double quote (Windows PowerShell 5.1 drops those when it starts a native program),
+// and no backslash at the end (5.1 quotes an argument with a space without escaping
+// it, so the program would read it as an escape of the closing quote).
 bool IsScriptSafeValue(const std::wstring& value);
 
 // C:\x\plan.ps1 -> C:\x\plan-undo.ps1. A path without .ps1 gets -undo.ps1 appended.

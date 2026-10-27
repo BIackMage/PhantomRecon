@@ -1,5 +1,8 @@
 #pragma once
 
+#include <map>
+#include <string>
+
 #include "SecurityChecks.h"
 
 // ---------------------------------------------------------------------------
@@ -23,3 +26,7 @@ SecurityCheckResult CheckEventsFailedLogons();
 
 // events.defender: Microsoft Defender detections (1116, 1117) and real-time protection off (5001), 30 days.
 SecurityCheckResult CheckEventsDefender();
+
+// SID text ("S-1-5-21-...-1001") to account name for every local account of this PC,
+// read from its own account database. events.newaccounts names members by it.
+std::map<std::wstring, std::wstring> LocalAccountSids();

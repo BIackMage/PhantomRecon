@@ -53,6 +53,14 @@ static bool IsControlOrBreak(wchar_t c)
 bool IsScriptSafeValue(const std::wstring& value)
 {
     if (value.empty() || value.size() > kMaxSafeValueChars) return false;
+    // Windows PowerShell 5.1 wraps a native argument with a space in double quotes
+    // without escaping a backslash before the closing one, so the program reads the
+    // backslash as an escape and gets a different value ("name=My Net\" reaches netsh
+    // mangled and netsh answers with exit code 0).
+    if (value.back() == L'\\') {
+        DebugLog(L"IsScriptSafeValue: a value ending in a backslash is not carried into a command");
+        return false;
+    }
     for (size_t i = 0; i < value.size(); ++i) {
         wchar_t c = value[i];
         if (IsControlOrBreak(c) || c == L'"') return false;
@@ -178,7 +186,7 @@ static FixStep MakeStep(const CheckInfo& info, const SecurityCheckResult& result
         }
         else if (!allSafe) {
             reason = L"A name on this PC holds a character a command cannot carry exactly (a line break, a control "
-                     L"character or a double quote), so this step is done by hand.";
+                     L"character, a double quote or a backslash at the end), so this step is done by hand.";
         }
         else {
             step.kind = FixStepKind::Command;
