@@ -56,6 +56,7 @@
   <ItemGroup>
     <ClInclude Include="AppPaths.h" />
     <ClInclude Include="AttackMapping.h" />
+    <ClInclude Include="AuditHistory.h" />
     <ClInclude Include="AuditRules.h" />
     <ClInclude Include="BackgroundWorker.h" />
     <ClInclude Include="Baseline.h" />
@@ -105,6 +106,7 @@
     <ClInclude Include="CliRunner.h" />
     <ClInclude Include="Redactor.h" />
     <ClInclude Include="Reports.h" />
+    <ClInclude Include="ReportHistory.h" />
     <ClInclude Include="ResultsModel.h" />
     <ClInclude Include="SampleData.h" />
     <ClInclude Include="ScheduledScan.h" />
@@ -116,6 +118,8 @@
   <ItemGroup>
     <ClCompile Include="AppPaths.cpp" />
     <ClCompile Include="AttackMapping.cpp" />
+    <ClCompile Include="AuditHistory.cpp" />
+    <ClCompile Include="AuditHistoryText.cpp" />
     <ClCompile Include="AuditRules.cpp" />
     <ClCompile Include="AuditRunner.cpp" />
     <ClCompile Include="BackgroundWorker.cpp" />
@@ -168,6 +172,7 @@
     <ClCompile Include="SystemInfo.cpp" />
     <ClCompile Include="CliRunner.cpp" />
     <ClCompile Include="Redactor.cpp" />
+    <ClCompile Include="ReportHistory.cpp" />
     <ClCompile Include="ReportHtml.cpp" />
     <ClCompile Include="ReportJson.cpp" />
     <ClCompile Include="ResultsModel.cpp" />

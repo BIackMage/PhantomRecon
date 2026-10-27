@@ -4,6 +4,7 @@
 
 #include "../pch.h"
 #include "../AppPaths.h"
+#include "../AuditHistory.h"
 #include "../CliRunner.h"
 #include "../StringConv.h"
 
@@ -85,6 +86,7 @@ int wmain(int argc, wchar_t** argv)
     env.exePathForSchedule = GetExePath();
     env.defaultBaselinePath = AppFilePath(L"phantom_recon_baseline.prbl");
     env.defaultReportsDir = DefaultReportsDirectory();
+    env.historyPath = DefaultAuditHistoryPath();   // --no-history turns it off in RunCli
 
     return RunCli(ParseCliArguments(args), env);
 }

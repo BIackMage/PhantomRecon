@@ -2,6 +2,7 @@
 #include "MainLayout.h"
 
 #include "AppPaths.h"
+#include "AuditHistory.h"
 #include "DetailText.h"
 #include "GuiComponents.h"
 #include "SystemInfo.h"
@@ -107,8 +108,11 @@ void LayoutMainControls(AppState& app)
     x += panelW + gap;
     MoveWindow(c.scoreTitle, x, top, scoreW, kTitleHeight, TRUE);
     MoveWindow(c.scoreValue, x, bodyTop, scoreW, 90, TRUE);
-    MoveWindow(c.scoreCaption, x, bodyTop + 94, scoreW, 64, TRUE);
-    MoveWindow(c.findingsButton, x + 10, bodyTop + bodyH - 32, scoreW - 20, 30, TRUE);
+    // The caption has up to four lines (label, counts, time, change since the last
+    // audit) and uses the room down to the Findings button.
+    const int buttonTop = bodyTop + bodyH - 32;
+    MoveWindow(c.scoreCaption, x, bodyTop + 94, scoreW, buttonTop - 2 - (bodyTop + 94), TRUE);
+    MoveWindow(c.findingsButton, x + 10, buttonTop, scoreW - 20, 30, TRUE);
 
     // Progress row.
     int y = top + kPanelHeight + 10;
@@ -154,6 +158,16 @@ COLORREF ScoreColor(const AppState& app)
     return p.Bad;
 }
 
+// The fourth caption line: what changed since the last audit ("+6 since 20 Oct").
+// Empty when history is off; says so when the file could not be read or written.
+static std::wstring ScoreHistoryLine(const AuditState& audit)
+{
+    if (!audit.hasHistory) return audit.historyError.empty() ? L"" : L"history not available";
+    std::wstring line = HistoryScoreLine(audit.history);
+    if (!audit.historyError.empty()) line += L" (not saved)";
+    return line;
+}
+
 void UpdateScoreDisplay(AppState& app)
 {
     MainControls& c = app.controls;
@@ -176,6 +190,8 @@ void UpdateScoreDisplay(AppState& app)
         SetWindowTextW(c.scoreValue, std::to_wstring(s.score).c_str());
         std::wstring caption = s.label + L"\n" + std::to_wstring(s.fail) + L" fail, " + std::to_wstring(s.warn) +
                                L" warning, " + std::to_wstring(s.pass) + L" pass\n" + app.audit.finishedAt;
+        std::wstring historyLine = ScoreHistoryLine(app.audit);
+        if (!historyLine.empty()) caption += L"\n" + historyLine;
         SetWindowTextW(c.scoreCaption, caption.c_str());
     }
     else {

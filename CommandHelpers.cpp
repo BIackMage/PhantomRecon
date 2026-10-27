@@ -79,6 +79,12 @@ ReportData BuildReportData(AppState& app)
         data.hasAudit = true;
         data.audit = app.audit.results;
         data.score = app.audit.score;
+        if (app.audit.hasHistory) {
+            data.hasHistory = true;
+            data.history = app.audit.history;
+            data.historyRecords = app.audit.historyRecords;
+            DebugLog(L"Report includes the audit history (" + std::to_wstring(data.historyRecords.size()) + L" records)");
+        }
     }
     if (app.results.TotalCount() > 0) {
         data.hasScan = true;

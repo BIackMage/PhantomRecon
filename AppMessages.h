@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "AuditHistory.h"
 #include "HardeningScore.h"
 #include "ScanCore.h"
 #include "ScanTypes.h"
@@ -70,6 +71,13 @@ struct AuditFinishedPayload {
     std::wstring                     finishedAt;  // local time
     bool                             cancelled = false;
     std::wstring                     error;       // set when the audit stopped on an internal error
+
+    // Audit history, compared on the audit thread (AuditHistory.h). hasHistory is false
+    // when history is off, the audit was cancelled, or the file could not be read.
+    bool                     hasHistory = false;
+    AuditComparison          history;
+    std::vector<AuditRecord> historyRecords;      // recent records for the report chart
+    std::wstring             historyError;        // why the file could not be read or written
 };
 
 // Sent once per LLM request when the response (or error) is in.

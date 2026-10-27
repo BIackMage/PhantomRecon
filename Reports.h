@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "AttackMapping.h"
+#include "AuditHistory.h"
 #include "HardeningScore.h"
 #include "ScanCore.h"
 #include "SecurityChecks.h"
@@ -25,6 +26,12 @@ struct ReportData {
     bool                             hasAudit = false;
     std::vector<SecurityCheckResult> audit;
     HardeningScore                   score;
+
+    // Audit history (AuditHistory.h). Only set when history is on; it holds check ids,
+    // statuses, scores and dates, never names, so redaction leaves it as it is.
+    bool                     hasHistory = false;
+    AuditComparison          history;
+    std::vector<AuditRecord> historyRecords;   // recent records, oldest first, for the chart
 
     bool                 hasScan = false;
     ScanSummary          scan;

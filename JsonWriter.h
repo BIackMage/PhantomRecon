@@ -6,10 +6,14 @@
 // ---------------------------------------------------------------------------
 // JsonWriter: a small streaming JSON writer with correct string escaping.
 // Produces pretty-printed UTF-16 text; convert with WideToUtf8 to save.
+// SetCompact(true) before the first value writes everything on one line
+// instead (no line breaks, no indent), for files with one record per line.
 // ---------------------------------------------------------------------------
 
 class JsonWriter {
 public:
+    void SetCompact(bool compact) { m_compact = compact; }
+
     void BeginObject();
     void EndObject();
     void BeginArray();
@@ -41,6 +45,7 @@ private:
     std::vector<Level> m_stack;
     std::wstring       m_out;
     bool               m_afterKey = false;
+    bool               m_compact = false;
 
     void BeforeValue();
     void Newline();

@@ -58,6 +58,7 @@
     <ClInclude Include="TestFramework.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="TestAuditHistory.cpp" />
     <ClCompile Include="TestBaselineScan.cpp" />
     <ClCompile Include="TestCatalogReports.cpp" />
     <ClCompile Include="TestEvents.cpp" />

@@ -50,6 +50,8 @@ struct CliOptions {
     bool quiet = false;               // --quiet
     bool scheduleWeekly = false;      // --schedule-weekly
     bool unscheduleWeekly = false;    // --unschedule-weekly
+    bool showHistory = false;         // --history: print the recent audit history
+    bool noHistory = false;           // --no-history: neither read nor write the audit history
     std::wstring error;               // set when parsing failed
 };
 
@@ -63,6 +65,7 @@ struct CliEnvironment {
     std::wstring exePathForSchedule;    // program the weekly task should run
     std::wstring defaultBaselinePath;
     std::wstring defaultReportsDir;
+    std::wstring historyPath;           // audit history file (AuditHistory.h); empty: history off
 };
 
 int RunCli(const CliOptions& options, const CliEnvironment& env);

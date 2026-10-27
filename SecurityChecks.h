@@ -75,6 +75,11 @@ std::wstring GetSecuritySummary(const std::vector<SecurityCheckResult>& results)
 // Full plain-text report (UTF-8) with explanation and fix for every finding.
 bool WriteSecurityReport(const std::wstring& outputPath, const std::vector<SecurityCheckResult>& results);
 
+// The same with one paragraph after the score line (the audit history paragraph,
+// BuildHistoryParagraph in AuditHistory.h). An empty paragraph adds nothing.
+bool WriteSecurityReport(const std::wstring& outputPath, const std::vector<SecurityCheckResult>& results,
+                         const std::wstring& historyParagraph);
+
 // --- Core checks (SecurityChecks.cpp) ---
 SecurityCheckResult CheckUnquotedServicePaths();
 SecurityCheckResult CheckWritableServiceExes();
