@@ -38,6 +38,7 @@ struct CliOptions {
     std::wstring jsonPath;            // --json <file>
     std::wstring navigatorPath;       // --navigator <file>
     std::wstring textReportPath;      // --text <file>
+    std::wstring fixScriptPath;       // --fix-script <file.ps1> (and <file>-undo.ps1 next to it)
     std::wstring findingsMdPath;      // --findings-md <file>
     std::wstring samplesDir;          // --make-samples <dir>
     std::wstring exclusions;          // --exclude "<list>"

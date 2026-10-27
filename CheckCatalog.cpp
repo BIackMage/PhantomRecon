@@ -2,6 +2,7 @@
 #include "CheckCatalog.h"
 
 #include "AttackMapping.h"
+#include "CheckScripts.h"
 #include "Version.h"
 
 #include <sstream>
@@ -656,7 +657,11 @@ Logs land in Event Viewer > Applications and Services Logs > Microsoft > Windows
 
 const std::vector<CheckInfo>& GetCheckCatalog()
 {
-    static const std::vector<CheckInfo> catalog = BuildCatalog();
+    static const std::vector<CheckInfo> catalog = [] {
+        std::vector<CheckInfo> rows = BuildCatalog();
+        AttachCheckScripts(rows);   // fixScript, undoScript and their traits (CheckScripts.cpp)
+        return rows;
+    }();
     return catalog;
 }
 

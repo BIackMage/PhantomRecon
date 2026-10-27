@@ -56,6 +56,7 @@
 #define ID_REPORT_NAVIGATOR             32790
 #define ID_REPORT_REDACT                32791
 #define ID_REPORT_OPEN_FOLDER           32792
+#define ID_REPORT_FIX_SCRIPT            32803
 
 // Results menu and the list's right-click menu
 #define ID_RESULTS_DETAILS              32793
@@ -76,7 +77,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        131
-#define _APS_NEXT_COMMAND_VALUE         32803
+#define _APS_NEXT_COMMAND_VALUE         32804
 #define _APS_NEXT_CONTROL_VALUE         1106
 #define _APS_NEXT_SYMED_VALUE           111
 #endif

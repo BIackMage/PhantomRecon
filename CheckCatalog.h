@@ -30,6 +30,19 @@ struct CheckInfo {
     std::wstring explanation;                // what it is and why it matters, plain words
     std::wstring fix;                        // exact steps or commands
     std::wstring undo;                       // how to reverse the fix
+
+    // --- Fix plan (FixScript.cpp) ---
+    // Set by name in CheckScripts.cpp after the rows above are built, never by position
+    // in a row, so these must stay after every field the rows fill in order.
+    // PowerShell, one complete statement per line, copied from the fix and undo text.
+    // Empty: the plan shows the prose as a step the user does by hand.
+    std::wstring fixScript;
+    std::wstring undoScript;
+    bool         scriptPerTarget = false;     // the lines use $target, once per SecurityCheckResult::targets entry
+    bool         scriptNeedsAdmin = true;     // the commands need an elevated PowerShell
+    bool         scriptNeedsRestart = false;  // the change takes effect after a restart
+    std::wstring fixScriptNote;               // one line shown before the fix step's question, may be empty
+    std::wstring undoScriptNote;              // the same for the undo step
 };
 
 // Every check in report order.

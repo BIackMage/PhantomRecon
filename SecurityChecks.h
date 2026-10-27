@@ -26,6 +26,12 @@ struct SecurityCheckResult {
     std::wstring name;       // display title (from the catalog)
     std::wstring status;     // one of the CHECK_* strings
     std::wstring detail;     // human-readable evidence
+
+    // The exact things the finding is about, as read from Windows (for net.wifiopen the
+    // profile names), when a fix command can name them one by one. Only checks whose
+    // catalog row has scriptPerTarget fill it. Untrusted text: the fix plan puts each
+    // value into PowerShell only as a single-quoted literal (FixScript.cpp).
+    std::vector<std::wstring> targets;
 };
 
 class Baseline;

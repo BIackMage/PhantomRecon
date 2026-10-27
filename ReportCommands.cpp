@@ -6,6 +6,7 @@
 #include "AuditController.h"
 #include "CommandHelpers.h"
 #include "FindingsWindow.h"
+#include "FixScript.h"
 #include "GuiComponents.h"
 #include "MainLayout.h"
 #include "Reports.h"
@@ -93,6 +94,51 @@ static void SaveReport(AppState& app, HWND hWnd, ReportKind kind)
         MessageBoxW(hWnd, (L"Saved:\n" + path).c_str(), L"JSON Report", MB_OK | MB_ICONINFORMATION);
     }
 }
+
+static const wchar_t kFilterPowerShell[] = L"PowerShell script (*.ps1)\0*.ps1\0All files (*.*)\0*.*\0";
+
+void SaveFixScriptFiles(AppState& app, HWND owner)
+{
+    if (!app.audit.hasResults) {
+        MessageBoxW(owner, L"The audit has not finished yet.", L"Fix Script", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    std::wstring path = BrowseForSaveFile(owner, L"Save the fix script", kFilterPowerShell, L"ps1",
+        DefaultReportPath(app, L"phantom-recon-fix", L".ps1"));
+    if (path.empty()) return;
+    if (!HasPs1Extension(path)) path += L".ps1";   // PowerShell's -File runs nothing else
+
+    // The dialog asked about the fix script only; an older undo script may hold the
+    // only way back from steps applied earlier, so it is not replaced without asking.
+    std::wstring undoPath = UndoScriptPathFor(path);
+    if (FileExists(undoPath)) {
+        std::wstring ask = L"An undo script with this name already exists:\n" + undoPath +
+            L"\n\nIt may be the only record of how to undo steps you applied from an earlier plan. Replace it?";
+        if (MessageBoxW(owner, ask.c_str(), L"Fix Script", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
+            DebugLog(L"Fix script not saved: the user kept the existing undo script " + undoPath);
+            return;
+        }
+    }
+
+    bool redact = app.settings.redactReports;
+    FixScriptOptions options;
+    options.redacted = redact;
+    std::wstring error;
+    if (!SaveFixScripts(path, redact ? RedactAuditResults(app.audit.results) : app.audit.results, options, undoPath, error)) {
+        MessageBoxW(owner, (L"Could not save the fix script:\n" + error).c_str(), L"Fix Script", MB_OK | MB_ICONERROR);
+        return;
+    }
+    DebugLog(L"Fix script saved to " + path + L" and " + undoPath + (redact ? L" (names hidden)" : L""));
+    // Not opened with the shell: on some PCs the default action for .ps1 runs it.
+    std::wstring text = L"Saved:\n" + path + L"\n" + undoPath +
+        L"\n\nOpen the fix script in a text editor and read every step before you run it. Phantom Recon does not run it."
+        L"\n\nTo see the steps without changing anything, in PowerShell:\n"
+        L"powershell -NoProfile -ExecutionPolicy Bypass -File \"" + path + L"\" -ListOnly";
+    if (redact) text += L"\n\nNames are hidden, so steps that name files, services or networks on this PC are done by hand.";
+    MessageBoxW(owner, text.c_str(), L"Fix Script", MB_OK | MB_ICONINFORMATION);
+}
+
+static void CmdReportFixScript(AppState& app, HWND hWnd) { SaveFixScriptFiles(app, hWnd); }
 
 static void CmdReportHtml(AppState& app, HWND hWnd)      { SaveReport(app, hWnd, ReportKind::Html); }
 static void CmdReportJson(AppState& app, HWND hWnd)      { SaveReport(app, hWnd, ReportKind::Json); }
@@ -206,6 +252,7 @@ bool DispatchReportCommand(AppState& app, HWND hWnd, int commandId)
         { ID_REPORT_HTML,          CmdReportHtml },
         { ID_REPORT_JSON,          CmdReportJson },
         { ID_REPORT_NAVIGATOR,     CmdReportNavigator },
+        { ID_REPORT_FIX_SCRIPT,    CmdReportFixScript },
         { ID_REPORT_REDACT,        CmdReportRedact },
         { ID_REPORT_OPEN_FOLDER,   CmdReportOpenFolder },
         { IDM_ABOUT,               CmdAbout },

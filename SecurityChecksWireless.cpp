@@ -153,6 +153,9 @@ SecurityCheckResult CheckOpenWifi()
     result.status = OpenWifiStatus(facts, &text);
     result.detail = text;
     if (!listed.Empty()) result.detail += L"\n" + listed.Text();
+    // The exact names, for the fix plan's one command per network (not capped like the
+    // evidence: each one is a network the plan should offer to fix).
+    if (result.status == CHECK_FAIL || result.status == CHECK_WARNING) result.targets = facts.openAutoProfiles;
     if (!note.empty() && result.status == CHECK_NA) result.detail += L" " + note;
     DebugLog(L"Open Wi-Fi -> " + result.status);
     return result;

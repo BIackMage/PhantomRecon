@@ -77,6 +77,7 @@ BEGIN
         MENUITEM "Save &HTML Report...",                 ID_REPORT_HTML
         MENUITEM "Save &JSON Report...",                 ID_REPORT_JSON
         MENUITEM "Save ATT&&CK &Navigator Layer...",     ID_REPORT_NAVIGATOR
+        MENUITEM "Save &Fix Script...",                  ID_REPORT_FIX_SCRIPT
         MENUITEM SEPARATOR
         MENUITEM "&Hide Names in Reports",               ID_REPORT_REDACT
         MENUITEM "&Open Reports Folder",                 ID_REPORT_OPEN_FOLDER
