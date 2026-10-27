@@ -1,6 +1,8 @@
 #pragma once
 
 #include "SecurityChecks.h"
+#include "SecurityChecksPlatform.h"   // memory integrity, driver block list, Smart App Control, exploit protection, screen lock, System Restore
+#include "SecurityChecksWireless.h"   // open Wi-Fi networks
 
 // ---------------------------------------------------------------------------
 // Every check function, grouped by the file that implements it. The audit

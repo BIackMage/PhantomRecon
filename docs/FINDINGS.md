@@ -357,6 +357,118 @@ Office macros are small programs inside documents. Documents from the internet w
 
     Change the same Trust Center setting back.
 
+### Memory integrity (core isolation)
+
+- Check id: `hard.hvci`
+- Severity: Medium
+- MITRE ATT&CK: T1068 Exploitation for Privilege Escalation
+- CIS Controls v8: 10.5
+- CIS Windows Benchmark: Turn On Virtualization Based Security: Virtualization Based Protection of Code Integrity: Enabled with UEFI lock
+
+Memory integrity (hypervisor-protected code integrity, HVCI) uses the processor's virtualization features to check drivers and kernel code before they run, in a part of memory Windows itself cannot change. Malware with administrator rights then cannot load unsigned kernel code or patch the kernel in memory. It needs virtualization switched on in the firmware. An incompatible driver blocks it: Windows leaves memory integrity off, or stops it at the next start, and names the driver in Windows Security.
+
+**How to fix**
+
+    Windows Security > Device security > Core isolation details > Memory integrity = On, then restart.
+    If Windows lists incompatible drivers there, update or uninstall those drivers first (the list names each .sys file and its publisher). Memory integrity stays off while one is installed.
+    If memory integrity is on but not running, restart. If it still does not run, check that virtualization (Intel VT-x or AMD-V / SVM) is enabled in the UEFI firmware setup.
+    Or elevated PowerShell, then restart:
+      New-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Force | Out-Null
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name Enabled -Value 1 -Type DWord
+
+**How to undo**
+
+    Windows Security > Device security > Core isolation details > Memory integrity = Off, then restart. Or elevated PowerShell, then restart:
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name Enabled -Value 0 -Type DWord
+    If Group Policy turned it on (Device Guard > Turn On Virtualization Based Security), set that policy back instead.
+
+### Vulnerable driver block list
+
+- Check id: `hard.driverblocklist`
+- Severity: Medium
+- MITRE ATT&CK: T1068 Exploitation for Privilege Escalation, T1562.001 Disable or Modify Tools
+- CIS Controls v8: 10.5
+
+Some signed drivers from hardware and software vendors have known security holes. Because they are validly signed, Windows would load them, and malware that already has administrator rights installs one to reach the kernel, often to switch security software off. Microsoft keeps a list of these drivers; with the block list on, Windows refuses to load them. It is on by default on Windows 11 22H2 and later, and whenever memory integrity, Smart App Control or S mode is on.
+
+**How to fix**
+
+    Windows Security > Device security > Core isolation details > Microsoft Vulnerable Driver Blocklist = On, then restart. Or elevated PowerShell, then restart:
+      New-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Force | Out-Null
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name VulnerableDriverBlocklistEnable -Value 1 -Type DWord
+    If a device stops working afterwards, its driver is on the list: get a current driver from the vendor.
+
+**How to undo**
+
+    Same switch, Off, then restart. Or elevated PowerShell, then restart:
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name VulnerableDriverBlocklistEnable -Value 0 -Type DWord
+
+### Smart App Control
+
+- Check id: `hard.smartapp`
+- Severity: Low
+- MITRE ATT&CK: T1204.002 Malicious File
+- CIS Controls v8: 2.5
+
+Smart App Control (Windows 11 22H2 and later) blocks programs that are neither signed by a trusted publisher nor known to be safe by Microsoft's cloud service. A new Windows 11 install starts it in evaluation mode, where it watches without blocking and then turns itself on or off. Most PCs end up with it off, and once it is off Windows only offers it again after a reset or a clean install. That is why this check counts for little in the score.
+
+**How to fix**
+
+    Windows Security > App and browser control > Smart App Control settings.
+    In evaluation mode you can choose On there now.
+    When it is Off, the switch cannot be turned back On: Windows offers Smart App Control again only after a reset (Settings > System > Recovery > Reset this PC) or a clean install of Windows 11. A reset removes your installed apps, and your files too unless you choose Keep my files, so back up first. A reset is rarely worth it for this alone; Microsoft Defender, SmartScreen and the other checks here still protect the PC.
+
+**How to undo**
+
+    Windows Security > App and browser control > Smart App Control settings > Off. Turning it off cannot be undone without a reset.
+
+### System exploit protection
+
+- Check id: `hard.exploitprot`
+- Severity: Medium
+- MITRE ATT&CK: T1203 Exploitation for Client Execution, T1068 Exploitation for Privilege Escalation
+- CIS Controls v8: 10.5
+- CIS Windows Benchmark: Enable Structured Exception Handling Overwrite Protection (SEHOP): Enabled
+
+Windows has system-wide defences that make a bug in a program much harder to turn into running code: Data Execution Prevention (DEP) stops code from running out of data memory, SEHOP blocks a classic way of hijacking a program's error handling, address space layout randomization (ASLR) puts code at unpredictable addresses, and Control Flow Guard (CFG) checks where indirect calls go. They are on by default; a setting that turns one off for the whole system weakens every program. This check reads the system DEP policy, the SEHOP registry value, and the bottom-up ASLR, high-entropy ASLR and CFG fields of the system mitigation settings. Mandatory ASLR and per-program settings are not judged.
+
+**How to fix**
+
+    Save the current settings first (elevated PowerShell):
+      Get-ProcessMitigation -RegistryConfigFilePath exploit-backup.xml
+    Windows Security > App and browser control > Exploit protection settings > System settings: set Control flow guard (CFG), Data Execution Prevention (DEP), Randomize memory allocations (Bottom-up ASLR), High-entropy ASLR and Validate exception chains (SEHOP) to Use default (On). Restart.
+    Or elevated PowerShell, then restart:
+      Set-ProcessMitigation -System -Enable DEP,SEHOP,BottomUp,HighEntropy,CFG
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' -Name DisableExceptionChainValidation -Value 0 -Type DWord
+    If the system DEP policy is AlwaysOff, it is a boot setting (elevated Command Prompt, then restart; if the drive uses BitLocker, run Suspend-BitLocker -MountPoint C: -RebootCount 1 first):
+      bcdedit /set {current} nx OptIn
+
+**How to undo**
+
+    Restore the saved settings (elevated PowerShell, then restart):
+      Set-ProcessMitigation -PolicyFilePath exploit-backup.xml
+      Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' -Name DisableExceptionChainValidation -Value 1 -Type DWord   (only if it was 1 before)
+      bcdedit /set {current} nx AlwaysOff   (only if it was AlwaysOff before; not recommended)
+
+### System Restore for the system drive
+
+- Check id: `backup.restore`
+- Severity: Low
+- MITRE ATT&CK: T1490 Inhibit System Recovery
+
+System Restore keeps restore points: snapshots of Windows system files, drivers, installed programs and the registry. After a bad driver, update or program install it can put Windows back the way it was. Ransomware and other malware turn it off and delete restore points so a PC cannot be rolled back. Restore points are not a backup of your personal files: they do not keep documents and photos, and they live on the same drive, so a failed or stolen drive takes them along. Keep a real backup as well (File History, OneDrive or an external drive). Which drives are protected can only be read with administrator rights.
+
+**How to fix**
+
+    System Properties > System Protection (Win+R, SystemPropertiesProtection) > select the system drive (C:) > Configure > Turn on system protection, Max Usage 5 to 10 percent > OK. Or elevated PowerShell:
+      Enable-ComputerRestore -Drive 'C:\'
+    If Group Policy turned it off (Computer Configuration > Administrative Templates > System > System Restore > Turn off System Restore), set that policy to Not Configured.
+
+**How to undo**
+
+    Same screen > Configure > Disable system protection (this deletes the drive's restore points). Or elevated PowerShell:
+      Disable-ComputerRestore -Drive 'C:\'
+
 ## Credential protection
 
 ### LSA protection
@@ -485,6 +597,27 @@ Local password rules decide how hard a password is to guess and whether a guesse
 **How to undo**
 
     net accounts /minpwlen:<old> /lockoutthreshold:<old>   (the old values are in this report's evidence)
+
+### Screen lock when away
+
+- Check id: `acct.screenlock`
+- Severity: Medium
+- CIS Controls v8: 4.3
+- CIS Windows Benchmark: Interactive logon: Machine inactivity limit: 900 or fewer second(s), but not 0
+
+If the PC stays unlocked when you walk away, anyone who sits down can use your account, read your mail and approve prompts as you. Windows can lock on its own after a time without input: through the machine inactivity limit (a security policy for every user) or a screen saver that asks for the password on resume. This check passes when either locks within 15 minutes. Sleep also locks the PC when Windows asks for sign-in on wake; this check does not read power plans, so a PC that sleeps quickly and asks for sign-in on wake is safer than a WARNING here suggests. Windows+L locks the PC at once.
+
+**How to fix**
+
+    For this user: Settings > Personalization > Lock screen > Screen saver: choose a screen saver, set Wait to 15 minutes or less and tick On resume, display logon screen.
+    For every user (elevated PowerShell; takes effect after a restart):
+      Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name InactivityTimeoutSecs -Value 900 -Type DWord
+    Also: Settings > Accounts > Sign-in options > If you've been away, when should Windows require you to sign in again? = When PC wakes up from sleep.
+
+**How to undo**
+
+    Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name InactivityTimeoutSecs   (then restart)
+    Screen saver: set it back to (None) in the same Settings screen.
 
 ## Services and privileges
 
@@ -853,6 +986,26 @@ Automatic proxy detection makes the PC look for proxy settings on the local netw
 **How to undo**
 
     Turn Automatically detect settings back On.
+
+### Open Wi-Fi networks that connect automatically
+
+- Check id: `net.wifiopen`
+- Severity: Medium
+- MITRE ATT&CK: T1557 Adversary-in-the-Middle
+
+A saved Wi-Fi network without a password (an open network, as in many cafes, hotels and airports) is recognised only by its name. If it is set to connect automatically, the PC joins any network that uses that name, including one set up nearby to watch or change the traffic. Turning off automatic connection for open networks, or forgetting them, stops that. Networks with a WPA2 or WPA3 password and Enhanced Open (OWE) networks are not listed. This check never reads Wi-Fi passwords.
+
+**How to fix**
+
+    For each network listed (Command Prompt; elevated if the network is saved for all users):
+      netsh wlan set profileparameter name="<name>" connectionmode=manual
+    Or in Settings > Network and internet > Wi-Fi > Manage known networks > the network: untick Connect automatically when in range, or Forget it. From the command line:
+      netsh wlan delete profile name="<name>"
+
+**How to undo**
+
+    netsh wlan set profileparameter name="<name>" connectionmode=auto
+    A forgotten network: connect to it again from the Wi-Fi list.
 
 ### Hosts file redirects
 

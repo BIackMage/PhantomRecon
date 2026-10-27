@@ -62,6 +62,7 @@
     <ClInclude Include="CheckCatalog.h" />
     <ClInclude Include="CheckHelpers.h" />
     <ClInclude Include="DebugTrace.h" />
+    <ClInclude Include="DeviceGuard.h" />
     <ClInclude Include="DetailText.h" />
     <ClInclude Include="FileAnalysis.h" />
     <ClInclude Include="FileIO.h" />
@@ -78,6 +79,7 @@
     <ClInclude Include="pch.h" />
     <ClInclude Include="PeFile.h" />
     <ClInclude Include="PeOrdinals.h" />
+    <ClInclude Include="PlatformRules.h" />
     <ClInclude Include="RegistryEnumerator.h" />
     <ClInclude Include="RegUtil.h" />
     <ClInclude Include="ScanCore.h" />
@@ -87,6 +89,8 @@
     <ClInclude Include="ScriptAnalysis.h" />
     <ClInclude Include="SecurityCheckModules.h" />
     <ClInclude Include="SecurityChecks.h" />
+    <ClInclude Include="SecurityChecksPlatform.h" />
+    <ClInclude Include="SecurityChecksWireless.h" />
     <ClInclude Include="ServiceUtil.h" />
     <ClInclude Include="StringConv.h" />
     <ClInclude Include="SystemInfo.h" />
@@ -114,6 +118,7 @@
     <ClCompile Include="CheckCatalog.cpp" />
     <ClCompile Include="CheckHelpers.cpp" />
     <ClCompile Include="DebugTrace.cpp" />
+    <ClCompile Include="DeviceGuard.cpp" />
     <ClCompile Include="DetailText.cpp" />
     <ClCompile Include="FileAnalysis.cpp" />
     <ClCompile Include="FileIO.cpp" />
@@ -128,6 +133,7 @@
     <ClCompile Include="MalwareScoring.cpp" />
     <ClCompile Include="PeFile.cpp" />
     <ClCompile Include="PeOrdinals.cpp" />
+    <ClCompile Include="PlatformRules.cpp" />
     <ClCompile Include="RegistryEnumerator.cpp" />
     <ClCompile Include="RegUtil.cpp" />
     <ClCompile Include="ScanCore.cpp" />
@@ -143,9 +149,11 @@
     <ClCompile Include="SecurityChecksNetwork.cpp" />
     <ClCompile Include="SecurityChecksPaths.cpp" />
     <ClCompile Include="SecurityChecksPersistence.cpp" />
+    <ClCompile Include="SecurityChecksPlatform.cpp" />
     <ClCompile Include="SecurityChecksProcesses.cpp" />
     <ClCompile Include="SecurityChecksSoftware.cpp" />
     <ClCompile Include="SecurityChecksTasks.cpp" />
+    <ClCompile Include="SecurityChecksWireless.cpp" />
     <ClCompile Include="ServiceUtil.cpp" />
     <ClCompile Include="SystemInfo.cpp" />
     <ClCompile Include="CliRunner.cpp" />

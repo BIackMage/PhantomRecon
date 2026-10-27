@@ -194,6 +194,85 @@ The disk must use GPT and the PC must boot in UEFI mode, not Legacy or CSM.)~",
 With Group Policy (Office templates): User Configuration > Microsoft Office > Security Settings > Trust Center > Block macros from running in Office files from the internet = Enabled.)~",
         LR"~(Change the same Trust Center setting back.)~" });
 
+    add({ L"hard.hvci", L"Memory integrity (core isolation)", CAT_PLATFORM, Severity::Medium,
+        { L"T1068" }, { L"10.5" },
+        L"Turn On Virtualization Based Security: Virtualization Based Protection of Code Integrity: Enabled with UEFI lock",
+        L"Memory integrity (hypervisor-protected code integrity, HVCI) uses the processor's virtualization features to check "
+        L"drivers and kernel code before they run, in a part of memory Windows itself cannot change. Malware with administrator "
+        L"rights then cannot load unsigned kernel code or patch the kernel in memory. It needs virtualization switched on in "
+        L"the firmware. An incompatible driver blocks it: Windows leaves memory integrity off, or stops it at the next start, "
+        L"and names the driver in Windows Security.",
+        LR"~(Windows Security > Device security > Core isolation details > Memory integrity = On, then restart.
+If Windows lists incompatible drivers there, update or uninstall those drivers first (the list names each .sys file and its publisher). Memory integrity stays off while one is installed.
+If memory integrity is on but not running, restart. If it still does not run, check that virtualization (Intel VT-x or AMD-V / SVM) is enabled in the UEFI firmware setup.
+Or elevated PowerShell, then restart:
+  New-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Force | Out-Null
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name Enabled -Value 1 -Type DWord)~",
+        LR"~(Windows Security > Device security > Core isolation details > Memory integrity = Off, then restart. Or elevated PowerShell, then restart:
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name Enabled -Value 0 -Type DWord
+If Group Policy turned it on (Device Guard > Turn On Virtualization Based Security), set that policy back instead.)~" });
+
+    add({ L"hard.driverblocklist", L"Vulnerable driver block list", CAT_PLATFORM, Severity::Medium,
+        { L"T1068", L"T1562.001" }, { L"10.5" }, L"",
+        L"Some signed drivers from hardware and software vendors have known security holes. Because they are validly signed, "
+        L"Windows would load them, and malware that already has administrator rights installs one to reach the kernel, often "
+        L"to switch security software off. Microsoft keeps a list of these drivers; with the block list on, Windows refuses "
+        L"to load them. It is on by default on Windows 11 22H2 and later, and whenever memory integrity, Smart App Control or "
+        L"S mode is on.",
+        LR"~(Windows Security > Device security > Core isolation details > Microsoft Vulnerable Driver Blocklist = On, then restart. Or elevated PowerShell, then restart:
+  New-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Force | Out-Null
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name VulnerableDriverBlocklistEnable -Value 1 -Type DWord
+If a device stops working afterwards, its driver is on the list: get a current driver from the vendor.)~",
+        LR"~(Same switch, Off, then restart. Or elevated PowerShell, then restart:
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name VulnerableDriverBlocklistEnable -Value 0 -Type DWord)~" });
+
+    add({ L"hard.smartapp", L"Smart App Control", CAT_PLATFORM, Severity::Low,
+        { L"T1204.002" }, { L"2.5" }, L"",
+        L"Smart App Control (Windows 11 22H2 and later) blocks programs that are neither signed by a trusted publisher nor known "
+        L"to be safe by Microsoft's cloud service. A new Windows 11 install starts it in evaluation mode, where it watches "
+        L"without blocking and then turns itself on or off. Most PCs end up with it off, and once it is off Windows only "
+        L"offers it again after a reset or a clean install. That is why this check counts for little in the score.",
+        LR"~(Windows Security > App and browser control > Smart App Control settings.
+In evaluation mode you can choose On there now.
+When it is Off, the switch cannot be turned back On: Windows offers Smart App Control again only after a reset (Settings > System > Recovery > Reset this PC) or a clean install of Windows 11. A reset removes your installed apps, and your files too unless you choose Keep my files, so back up first. A reset is rarely worth it for this alone; Microsoft Defender, SmartScreen and the other checks here still protect the PC.)~",
+        LR"~(Windows Security > App and browser control > Smart App Control settings > Off. Turning it off cannot be undone without a reset.)~" });
+
+    add({ L"hard.exploitprot", L"System exploit protection", CAT_PLATFORM, Severity::Medium,
+        { L"T1203", L"T1068" }, { L"10.5" }, L"Enable Structured Exception Handling Overwrite Protection (SEHOP): Enabled",
+        L"Windows has system-wide defences that make a bug in a program much harder to turn into running code: Data Execution "
+        L"Prevention (DEP) stops code from running out of data memory, SEHOP blocks a classic way of hijacking a program's "
+        L"error handling, address space layout randomization (ASLR) puts code at unpredictable addresses, and Control Flow "
+        L"Guard (CFG) checks where indirect calls go. They are on by default; a setting that turns one off for the whole "
+        L"system weakens every program. This check reads the system DEP policy, the SEHOP registry value, and the bottom-up "
+        L"ASLR, high-entropy ASLR and CFG fields of the system mitigation settings. Mandatory ASLR and per-program settings "
+        L"are not judged.",
+        LR"~(Save the current settings first (elevated PowerShell):
+  Get-ProcessMitigation -RegistryConfigFilePath exploit-backup.xml
+Windows Security > App and browser control > Exploit protection settings > System settings: set Control flow guard (CFG), Data Execution Prevention (DEP), Randomize memory allocations (Bottom-up ASLR), High-entropy ASLR and Validate exception chains (SEHOP) to Use default (On). Restart.
+Or elevated PowerShell, then restart:
+  Set-ProcessMitigation -System -Enable DEP,SEHOP,BottomUp,HighEntropy,CFG
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' -Name DisableExceptionChainValidation -Value 0 -Type DWord
+If the system DEP policy is AlwaysOff, it is a boot setting (elevated Command Prompt, then restart; if the drive uses BitLocker, run Suspend-BitLocker -MountPoint C: -RebootCount 1 first):
+  bcdedit /set {current} nx OptIn)~",
+        LR"~(Restore the saved settings (elevated PowerShell, then restart):
+  Set-ProcessMitigation -PolicyFilePath exploit-backup.xml
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel' -Name DisableExceptionChainValidation -Value 1 -Type DWord   (only if it was 1 before)
+  bcdedit /set {current} nx AlwaysOff   (only if it was AlwaysOff before; not recommended))~" });
+
+    add({ L"backup.restore", L"System Restore for the system drive", CAT_PLATFORM, Severity::Low,
+        { L"T1490" }, {}, L"",
+        L"System Restore keeps restore points: snapshots of Windows system files, drivers, installed programs and the registry. "
+        L"After a bad driver, update or program install it can put Windows back the way it was. Ransomware and other malware "
+        L"turn it off and delete restore points so a PC cannot be rolled back. Restore points are not a backup of your personal "
+        L"files: they do not keep documents and photos, and they live on the same drive, so a failed or stolen drive takes them "
+        L"along. Keep a real backup as well (File History, OneDrive or an external drive). Which drives are protected can only "
+        L"be read with administrator rights.",
+        LR"~(System Properties > System Protection (Win+R, SystemPropertiesProtection) > select the system drive (C:) > Configure > Turn on system protection, Max Usage 5 to 10 percent > OK. Or elevated PowerShell:
+  Enable-ComputerRestore -Drive 'C:\'
+If Group Policy turned it off (Computer Configuration > Administrative Templates > System > System Restore > Turn off System Restore), set that policy to Not Configured.)~",
+        LR"~(Same screen > Configure > Disable system protection (this deletes the drive's restore points). Or elevated PowerShell:
+  Disable-ComputerRestore -Drive 'C:\')~" });
+
     // ------------------------------------------------------------------ Credential protection
     add({ L"lsa.ppl", L"LSA protection", CAT_CREDS, Severity::High,
         { L"T1003.001" }, { L"4.1" }, L"Configure LSASS to run as a protected process: Enabled with UEFI Lock",
@@ -256,6 +335,21 @@ Add-LocalGroupMember -SID S-1-5-32-544 -Member 'name')~" });
   net accounts /minpwlen:14 /lockoutthreshold:5 /lockoutwindow:15 /lockoutduration:15
 Domain-joined PCs take these from the domain policy instead.)~",
         LR"~(net accounts /minpwlen:<old> /lockoutthreshold:<old>   (the old values are in this report's evidence))~" });
+
+    add({ L"acct.screenlock", L"Screen lock when away", CAT_CREDS, Severity::Medium,
+        {}, { L"4.3" }, L"Interactive logon: Machine inactivity limit: 900 or fewer second(s), but not 0",
+        L"If the PC stays unlocked when you walk away, anyone who sits down can use your account, read your mail and approve "
+        L"prompts as you. Windows can lock on its own after a time without input: through the machine inactivity limit (a "
+        L"security policy for every user) or a screen saver that asks for the password on resume. This check passes when either "
+        L"locks within 15 minutes. Sleep also locks the PC when Windows asks for sign-in on wake; this check does not read power "
+        L"plans, so a PC that sleeps quickly and asks for sign-in on wake is safer than a WARNING here suggests. Windows+L locks "
+        L"the PC at once.",
+        LR"~(For this user: Settings > Personalization > Lock screen > Screen saver: choose a screen saver, set Wait to 15 minutes or less and tick On resume, display logon screen.
+For every user (elevated PowerShell; takes effect after a restart):
+  Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name InactivityTimeoutSecs -Value 900 -Type DWord
+Also: Settings > Accounts > Sign-in options > If you've been away, when should Windows require you to sign in again? = When PC wakes up from sleep.)~",
+        LR"~(Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name InactivityTimeoutSecs   (then restart)
+Screen saver: set it back to (None) in the same Settings screen.)~" });
 
     // ------------------------------------------------------------------ Services and privileges
     add({ L"svc.unquoted", L"Unquoted service paths", CAT_SERVICES, Severity::High,
@@ -440,6 +534,20 @@ Never expose port 3389 directly to the internet.)~",
         LR"~(Settings > Network and internet > Proxy > Automatically detect settings = Off.
 If your organization relies on WPAD, use a fixed setup script address instead.)~",
         LR"~(Turn Automatically detect settings back On.)~" });
+
+    add({ L"net.wifiopen", L"Open Wi-Fi networks that connect automatically", CAT_NETWORK, Severity::Medium,
+        { L"T1557" }, {}, L"",
+        L"A saved Wi-Fi network without a password (an open network, as in many cafes, hotels and airports) is recognised only "
+        L"by its name. If it is set to connect automatically, the PC joins any network that uses that name, including one set "
+        L"up nearby to watch or change the traffic. Turning off automatic connection for open networks, or forgetting them, "
+        L"stops that. Networks with a WPA2 or WPA3 password and Enhanced Open (OWE) networks are not listed. This check never "
+        L"reads Wi-Fi passwords.",
+        LR"~(For each network listed (Command Prompt; elevated if the network is saved for all users):
+  netsh wlan set profileparameter name="<name>" connectionmode=manual
+Or in Settings > Network and internet > Wi-Fi > Manage known networks > the network: untick Connect automatically when in range, or Forget it. From the command line:
+  netsh wlan delete profile name="<name>")~",
+        LR"~(netsh wlan set profileparameter name="<name>" connectionmode=auto
+A forgotten network: connect to it again from the Wi-Fi list.)~" });
 
     add({ L"net.hosts", L"Hosts file redirects", CAT_NETWORK, Severity::Medium,
         { L"T1562.001" }, { L"9.2" }, L"",

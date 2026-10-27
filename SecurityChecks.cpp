@@ -4,6 +4,7 @@
 #include "AppPaths.h"
 #include "AuditRules.h"
 #include "CheckCatalog.h"
+#include "DeviceGuard.h"
 #include "RegUtil.h"
 #include "ServiceUtil.h"
 #include "TextUtils.h"
@@ -196,21 +197,11 @@ SecurityCheckResult CheckCredentialGuard()
     SecurityCheckResult result = MakeCheckResult(L"lsa.credguard");
 
     // Preferred: ask Device Guard which security services are running
-    // (SecurityServicesRunning: 1 = Credential Guard, 2 = memory integrity / HVCI).
-    WmiResult wmi = WmiQuery(L"ROOT\\Microsoft\\Windows\\DeviceGuard",
-        L"SELECT SecurityServicesRunning, VirtualizationBasedSecurityStatus FROM Win32_DeviceGuard",
-        { L"SecurityServicesRunning", L"VirtualizationBasedSecurityStatus" });
-    bool wmiKnows = false;
-    bool running = false;
-    std::wstring vbsStatus;
-    if (wmi.ok && !wmi.rows.empty()) {
-        wmiKnows = true;
-        std::wstring services = wmi.rows[0][L"SecurityServicesRunning"];
-        for (const std::wstring& v : SplitW(services, L'\n')) {
-            if (v == L"1") running = true;   // 1 = Credential Guard
-        }
-        vbsStatus = wmi.rows[0][L"VirtualizationBasedSecurityStatus"];
-    }
+    // (shared with the memory integrity check, DeviceGuard.cpp).
+    DeviceGuardStatus deviceGuard = ReadDeviceGuardStatus();
+    bool wmiKnows = deviceGuard.ok;
+    bool running = wmiKnows && DeviceGuardHas(deviceGuard.running, kDeviceGuardCredentialGuard);
+    int vbsStatus = deviceGuard.vbsStatus;
 
     // Fallback and confirmation: LsaIso.exe is the Credential Guard process.
     bool lsaIso = false;
@@ -251,7 +242,7 @@ SecurityCheckResult CheckCredentialGuard()
         result.status = CHECK_WARNING;
         result.detail = L"Credential Guard is not running.";
         if (wmiKnows) {
-            const wchar_t* vbs = vbsStatus == L"2" ? L"running" : vbsStatus == L"1" ? L"enabled but not running" : L"off";
+            const wchar_t* vbs = vbsStatus == 2 ? L"running" : vbsStatus == 1 ? L"enabled but not running" : L"off";
             result.detail += std::wstring(L" Virtualization-based security is ") + vbs + L".";
         }
         if (!edition.empty()) result.detail += L" Windows edition: " + edition + L".";
