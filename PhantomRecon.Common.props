@@ -22,6 +22,15 @@
   are the only way to read a crash dump from that build.
 -->
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    The engine's folders (src\core\...). Every project includes engine headers by file
+    name ("ScanCore.h"), so a header can move between these folders without touching
+    the files that include it. Header names are unique across the engine.
+  -->
+  <PropertyGroup>
+    <PhantomReconCore>$(MSBuildThisFileDirectory)src\core\</PhantomReconCore>
+    <PhantomReconCoreIncludes>$(PhantomReconCore)common;$(PhantomReconCore)scan;$(PhantomReconCore)analysis;$(PhantomReconCore)audit;$(PhantomReconCore)audit\checks;$(PhantomReconCore)audit\rules;$(PhantomReconCore)fixplan;$(PhantomReconCore)history;$(PhantomReconCore)reports;$(PhantomReconCore)ai;$(PhantomReconCore)program</PhantomReconCoreIncludes>
+  </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
@@ -30,7 +39,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(SolutionDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(PhantomReconCoreIncludes);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
@@ -40,6 +49,9 @@
     <Lib>
       <TreatLibWarningAsErrors>true</TreatLibWarningAsErrors>
     </Lib>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(PhantomReconCoreIncludes);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>

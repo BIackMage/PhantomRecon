@@ -6,15 +6,15 @@
 
 #include "TestFramework.h"
 
-#include "../CheckCatalog.h"
-#include "../CheckScripts.h"
-#include "../CliRunner.h"
-#include "../FileIO.h"
-#include "../FixScript.h"
-#include "../SecurityChecks.h"
-#include "../StringConv.h"
-#include "../TextUtils.h"
-#include "../Version.h"
+#include "CheckCatalog.h"
+#include "CheckScripts.h"
+#include "CliRunner.h"
+#include "FileIO.h"
+#include "FixScript.h"
+#include "SecurityChecks.h"
+#include "StringConv.h"
+#include "TextUtils.h"
+#include "Version.h"
 
 #include <windows.h>
 #include <algorithm>

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_EXE_DIR = ROOT / "x64" / "Release"
 REPO_URL = "https://github.com/BIackMage/PhantomRecon"
+VERSION_H = pathlib.Path("src") / "core" / "common" / "Version.h"   # the one version source in the code
 
 # v1.2.3 or v1.2.3-rc.4. Nothing else: no "vv1.2.3", no "V1.2.3", no trailing text.
 TAG_PATTERN = re.compile(r"v(?P<version>(?P<core>\d+\.\d+\.\d+)(?:-rc\.(?P<rc>\d+))?)")
@@ -67,7 +68,7 @@ def tag_from_environment(variable: str = "RELEASE_TAG") -> ReleaseTag:
 
 
 def header_version(root: pathlib.Path = ROOT) -> str:
-    text = (root / "Version.h").read_text(encoding="utf-8")
+    text = (root / VERSION_H).read_text(encoding="utf-8")
     found = VERSION_H_PATTERN.findall(text)
     if len(found) != 1:
         raise ValueError(f"Version.h must define PHANTOMRECON_VERSION_W exactly once, found {len(found)}")

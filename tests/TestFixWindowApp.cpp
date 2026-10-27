@@ -7,11 +7,11 @@
 
 #include "TestFramework.h"
 
-#include "../AiConsent.h"
-#include "../BackgroundWorker.h"
-#include "../ResultsModel.h"
-#include "../SettingsValues.h"
-#include "../TextUtils.h"
+#include "AiConsent.h"
+#include "BackgroundWorker.h"
+#include "ResultsModel.h"
+#include "SettingsValues.h"
+#include "TextUtils.h"
 
 #include <windows.h>
 #include <chrono>

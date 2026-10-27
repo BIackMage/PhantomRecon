@@ -5,18 +5,18 @@
 
 #include "TestFramework.h"
 
-#include "../AppPaths.h"
-#include "../Baseline.h"
-#include "../FileIO.h"
-#include "../FuzzyHash.h"
-#include "../HashUtils.h"
-#include "../KnownGood.h"
-#include "../RegistryEnumerator.h"
-#include "../SampleData.h"
-#include "../ScanCore.h"
-#include "../ScanCsv.h"
-#include "../ScoringConfig.h"
-#include "../TextUtils.h"
+#include "AppPaths.h"
+#include "Baseline.h"
+#include "FileIO.h"
+#include "FuzzyHash.h"
+#include "HashUtils.h"
+#include "KnownGood.h"
+#include "RegistryEnumerator.h"
+#include "SampleData.h"
+#include "ScanCore.h"
+#include "ScanCsv.h"
+#include "ScoringConfig.h"
+#include "TextUtils.h"
 
 #include <windows.h>
 #include <winioctl.h>

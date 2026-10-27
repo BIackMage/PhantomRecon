@@ -8,14 +8,14 @@
 #include "TestFramework.h"
 #include "PowerShellRun.h"
 
-#include "../AppPaths.h"
-#include "../CheckCatalog.h"
-#include "../CheckScripts.h"
-#include "../FileIO.h"
-#include "../FixScript.h"
-#include "../FixScriptBackup.h"
-#include "../SecurityChecks.h"
-#include "../TextUtils.h"
+#include "AppPaths.h"
+#include "CheckCatalog.h"
+#include "CheckScripts.h"
+#include "FileIO.h"
+#include "FixScript.h"
+#include "FixScriptBackup.h"
+#include "SecurityChecks.h"
+#include "TextUtils.h"
 
 #include <windows.h>
 #include <cstdio>

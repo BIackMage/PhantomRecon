@@ -2,7 +2,7 @@
 
 #include "TestFramework.h"
 
-#include "../FileIO.h"
+#include "FileIO.h"
 
 #include <cstdio>
 #include <vector>

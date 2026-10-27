@@ -3,19 +3,19 @@
 
 #include "TestFramework.h"
 
-#include "../AppPaths.h"
-#include "../CheckHelpers.h"
-#include "../CliRunner.h"
-#include "../FileIO.h"
-#include "../FileOrigin.h"
-#include "../JsonReader.h"
-#include "../LLMClient.h"
-#include "../ScanCore.h"
-#include "../ScanCsv.h"
-#include "../ScriptAnalysis.h"
-#include "../SecurityChecks.h"
-#include "../StartupRequest.h"
-#include "../TextUtils.h"
+#include "AppPaths.h"
+#include "CheckHelpers.h"
+#include "CliRunner.h"
+#include "FileIO.h"
+#include "FileOrigin.h"
+#include "JsonReader.h"
+#include "LLMClient.h"
+#include "ScanCore.h"
+#include "ScanCsv.h"
+#include "ScriptAnalysis.h"
+#include "SecurityChecks.h"
+#include "StartupRequest.h"
+#include "TextUtils.h"
 
 #include <windows.h>
 #include <ntsecapi.h>

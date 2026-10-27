@@ -5,15 +5,15 @@
 
 #include "TestFramework.h"
 
-#include "../CheckCatalog.h"
-#include "../CheckScripts.h"
-#include "../EventLogQuery.h"
-#include "../EventRules.h"
-#include "../FileIO.h"
-#include "../FixScript.h"
-#include "../SecurityChecks.h"
-#include "../SecurityChecksEvents.h"
-#include "../TextUtils.h"
+#include "CheckCatalog.h"
+#include "CheckScripts.h"
+#include "EventLogQuery.h"
+#include "EventRules.h"
+#include "FileIO.h"
+#include "FixScript.h"
+#include "SecurityChecks.h"
+#include "SecurityChecksEvents.h"
+#include "TextUtils.h"
 
 #include <windows.h>
 #include <cstdio>

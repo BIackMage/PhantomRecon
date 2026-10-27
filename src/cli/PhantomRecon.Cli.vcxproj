@@ -36,7 +36,7 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="..\PhantomRecon.Common.props" />
+    <Import Project="..\..\PhantomRecon.Common.props" />
   </ImportGroup>
   <PropertyGroup>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
@@ -57,7 +57,7 @@
     <ClCompile Include="CliMain.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\PhantomRecon.Core.vcxproj">
+    <ProjectReference Include="..\core\PhantomRecon.Core.vcxproj">
       <Project>{6be1bd7f-5bc6-4da8-82a3-510fe409851c}</Project>
     </ProjectReference>
   </ItemGroup>

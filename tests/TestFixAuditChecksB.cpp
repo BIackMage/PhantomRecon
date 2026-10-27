@@ -11,13 +11,13 @@
 
 #include "TestFramework.h"
 
-#include "../AppPaths.h"
-#include "../CheckHelpers.h"
-#include "../FileIO.h"
-#include "../SecurityCheckModules.h"
-#include "../SecurityChecks.h"
-#include "../SystemInfo.h"
-#include "../TextUtils.h"
+#include "AppPaths.h"
+#include "CheckHelpers.h"
+#include "FileIO.h"
+#include "SecurityCheckModules.h"
+#include "SecurityChecks.h"
+#include "SystemInfo.h"
+#include "TextUtils.h"
 
 #include <windows.h>
 #include <aclapi.h>

@@ -4,13 +4,13 @@
 #include "TestFramework.h"
 #include "JsonCheck.h"
 
-#include "../BiggestWins.h"
-#include "../CheckCatalog.h"
-#include "../FileIO.h"
-#include "../HardeningScore.h"
-#include "../Reports.h"
-#include "../SecurityChecks.h"
-#include "../TextUtils.h"
+#include "BiggestWins.h"
+#include "CheckCatalog.h"
+#include "FileIO.h"
+#include "HardeningScore.h"
+#include "Reports.h"
+#include "SecurityChecks.h"
+#include "TextUtils.h"
 
 #include <set>
 #include <string>

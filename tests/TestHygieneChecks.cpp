@@ -5,12 +5,12 @@
 
 #include "TestFramework.h"
 
-#include "../CheckCatalog.h"
-#include "../FixScript.h"
-#include "../HardeningScore.h"
-#include "../HygieneRules.h"
-#include "../SecurityCheckModules.h"
-#include "../TextUtils.h"
+#include "CheckCatalog.h"
+#include "FixScript.h"
+#include "HardeningScore.h"
+#include "HygieneRules.h"
+#include "SecurityCheckModules.h"
+#include "TextUtils.h"
 
 #include <windows.h>
 #include <cstdio>

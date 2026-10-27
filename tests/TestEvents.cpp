@@ -5,16 +5,16 @@
 #include "TestFramework.h"
 #include "JsonCheck.h"
 
-#include "../CheckCatalog.h"
-#include "../DetailText.h"
-#include "../EventLogQuery.h"
-#include "../EventRules.h"
-#include "../HardeningScore.h"
-#include "../Redactor.h"
-#include "../Reports.h"
-#include "../SecurityChecksEvents.h"
-#include "../SystemInfo.h"
-#include "../TextUtils.h"
+#include "CheckCatalog.h"
+#include "DetailText.h"
+#include "EventLogQuery.h"
+#include "EventRules.h"
+#include "HardeningScore.h"
+#include "Redactor.h"
+#include "Reports.h"
+#include "SecurityChecksEvents.h"
+#include "SystemInfo.h"
+#include "TextUtils.h"
 
 #include <windows.h>
 

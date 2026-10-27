@@ -4,17 +4,17 @@
 #include "TestFramework.h"
 #include "JsonCheck.h"
 
-#include "../AppPaths.h"
-#include "../AuditHistory.h"
-#include "../CheckCatalog.h"
-#include "../CliRunner.h"
-#include "../FileIO.h"
-#include "../JsonReader.h"
-#include "../JsonWriter.h"
-#include "../ReportHistory.h"
-#include "../Reports.h"
-#include "../StringConv.h"
-#include "../TextUtils.h"
+#include "AppPaths.h"
+#include "AuditHistory.h"
+#include "CheckCatalog.h"
+#include "CliRunner.h"
+#include "FileIO.h"
+#include "JsonReader.h"
+#include "JsonWriter.h"
+#include "ReportHistory.h"
+#include "Reports.h"
+#include "StringConv.h"
+#include "TextUtils.h"
 
 #include <map>
 #include <string>

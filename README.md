@@ -231,10 +231,32 @@ msbuild PhantomRecon.sln /p:Configuration=Release /p:Platform=x64
 
 | Project | Builds |
 |---------|--------|
-| `PhantomRecon.Core` | The engine, as a static library. No windows. |
-| `PhantomRecon` | `PhantomRecon.exe`, the Windows app |
-| `cli\PhantomRecon.Cli` | `PhantomReconCli.exe`, the console program |
+| `src\core\PhantomRecon.Core` | The engine, as a static library. No windows. |
+| `src\app\PhantomRecon` | `PhantomRecon.exe`, the Windows app |
+| `src\cli\PhantomRecon.Cli` | `PhantomReconCli.exe`, the console program |
 | `tests\PhantomRecon.Tests` | `PhantomReconTests.exe`, the automated tests |
+
+### Where things are
+
+```
+src/core/       the engine (no windows)
+  common/       paths, files, registry, WMI, JSON, text, version
+  scan/         the file scan, baselines, CSV, results list
+  analysis/     one file: signatures, PE headers, scoring, origin, scripts, fuzzy hash
+  audit/        the security audit: catalog, runner, score, biggest wins, ATT&CK
+    checks/     the checks, one file per topic
+    rules/      pure verdict logic the checks use (tested with made-up facts)
+  fixplan/      the fix and undo scripts
+  history/      past audits and what changed
+  reports/      HTML, JSON and text reports, name hiding
+  ai/           the optional AI panel's client and consent rules
+  program/      console program logic, weekly task, settings values
+src/app/        the Windows app (commands/, windows/, ui/, resources/)
+src/cli/        the console program
+tests/          the automated tests
+tools/          build, check and release scripts (Python)
+docs/           checks list, ideas, roadmap, video outline
+```
 
 GitHub Actions builds and tests every push to any branch and every pull request; a
 change to documentation only gets the text checks. The tests run twice, as

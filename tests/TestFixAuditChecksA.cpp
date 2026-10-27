@@ -3,13 +3,13 @@
 
 #include "TestFramework.h"
 
-#include "../AuditRules.h"
-#include "../CheckCatalog.h"
-#include "../CheckHelpers.h"
-#include "../RegUtil.h"
-#include "../SecurityCheckModules.h"
-#include "../TextUtils.h"
-#include "../WmiQuery.h"
+#include "AuditRules.h"
+#include "CheckCatalog.h"
+#include "CheckHelpers.h"
+#include "RegUtil.h"
+#include "SecurityCheckModules.h"
+#include "TextUtils.h"
+#include "WmiQuery.h"
 
 #include <windows.h>
 #include <oleauto.h>

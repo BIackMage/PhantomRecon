@@ -2,11 +2,11 @@
 // All the work happens in CliRunner (engine library); this file only wires up
 // console output, the optional desktop notification and the exit code.
 
-#include "../pch.h"
-#include "../AppPaths.h"
-#include "../AuditHistory.h"
-#include "../CliRunner.h"
-#include "../StringConv.h"
+#include "pch.h"
+#include "AppPaths.h"
+#include "AuditHistory.h"
+#include "CliRunner.h"
+#include "StringConv.h"
 
 #include <windows.h>
 #include <shellapi.h>

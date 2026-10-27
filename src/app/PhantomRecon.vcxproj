@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <!-- PhantomRecon.exe: the Windows app. Window code only; the engine comes from PhantomRecon.Core. -->
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
@@ -36,7 +36,7 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="PhantomRecon.Common.props" />
+    <Import Project="..\..\PhantomRecon.Common.props" />
   </ImportGroup>
   <PropertyGroup>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
@@ -47,59 +47,64 @@
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions>_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <!-- The window app's own folders; the engine's come from PhantomRecon.Common.props. -->
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)commands;$(ProjectDir)windows;$(ProjectDir)ui;$(ProjectDir)resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir)resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="AiSidebar.h" />
-    <ClInclude Include="AppDialogs.h" />
     <ClInclude Include="AppMessages.h" />
     <ClInclude Include="AppState.h" />
     <ClInclude Include="AuditController.h" />
-    <ClInclude Include="CommandHelpers.h" />
-    <ClInclude Include="DetailWindow.h" />
-    <ClInclude Include="FindingsWindow.h" />
-    <ClInclude Include="GuiComponents.h" />
-    <ClInclude Include="MainCommands.h" />
-    <ClInclude Include="MainLayout.h" />
+    <ClInclude Include="commands\CommandHelpers.h" />
+    <ClInclude Include="commands\MainCommands.h" />
     <ClInclude Include="PhantomRecon.h" />
-    <ClInclude Include="resource.h" />
+    <ClInclude Include="resources\resource.h" />
     <ClInclude Include="ScanEngine.h" />
-    <ClInclude Include="SettingsDialog.h" />
     <ClInclude Include="StartupArgs.h" />
-    <ClInclude Include="Theme.h" />
+    <ClInclude Include="ui\GuiComponents.h" />
+    <ClInclude Include="ui\MainLayout.h" />
+    <ClInclude Include="ui\Theme.h" />
+    <ClInclude Include="windows\AiSidebar.h" />
+    <ClInclude Include="windows\AppDialogs.h" />
+    <ClInclude Include="windows\DetailWindow.h" />
+    <ClInclude Include="windows\FindingsWindow.h" />
+    <ClInclude Include="windows\SettingsDialog.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="AiSidebar.cpp" />
-    <ClCompile Include="AppDialogs.cpp" />
     <ClCompile Include="AppMessages.cpp" />
     <ClCompile Include="AuditController.cpp" />
-    <ClCompile Include="CommandHelpers.cpp" />
-    <ClCompile Include="DetailWindow.cpp" />
-    <ClCompile Include="FindingsWindow.cpp" />
-    <ClCompile Include="GuiComponents.cpp" />
-    <ClCompile Include="MainCommands.cpp" />
-    <ClCompile Include="MainLayout.cpp" />
+    <ClCompile Include="commands\CommandHelpers.cpp" />
+    <ClCompile Include="commands\MainCommands.cpp" />
+    <ClCompile Include="commands\ReportCommands.cpp" />
+    <ClCompile Include="commands\ResultsCommands.cpp" />
     <ClCompile Include="PhantomRecon.cpp" />
-    <ClCompile Include="ReportCommands.cpp" />
-    <ClCompile Include="ResultsCommands.cpp" />
     <ClCompile Include="ScanEngine.cpp" />
-    <ClCompile Include="SettingsDialog.cpp" />
     <ClCompile Include="StartupArgs.cpp" />
-    <ClCompile Include="Theme.cpp" />
+    <ClCompile Include="ui\GuiComponents.cpp" />
+    <ClCompile Include="ui\MainLayout.cpp" />
+    <ClCompile Include="ui\Theme.cpp" />
+    <ClCompile Include="windows\AiSidebar.cpp" />
+    <ClCompile Include="windows\AppDialogs.cpp" />
+    <ClCompile Include="windows\DetailWindow.cpp" />
+    <ClCompile Include="windows\FindingsWindow.cpp" />
+    <ClCompile Include="windows\SettingsDialog.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="PhantomRecon.rc" />
+    <ResourceCompile Include="resources\PhantomRecon.rc" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="small.ico" />
-    <Image Include="PhantomRecon.ico" />
+    <Image Include="resources\small.ico" />
+    <Image Include="resources\PhantomRecon.ico" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="PhantomRecon.Core.vcxproj">
+    <ProjectReference Include="..\core\PhantomRecon.Core.vcxproj">
       <Project>{6be1bd7f-5bc6-4da8-82a3-510fe409851c}</Project>
     </ProjectReference>
   </ItemGroup>

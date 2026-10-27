@@ -31,9 +31,9 @@
 #include <shellapi.h>
 #include <shlobj.h>
 
-#include "../AppPaths.h"
-#include "../StringConv.h"
-#include "../SystemInfo.h"
+#include "AppPaths.h"
+#include "StringConv.h"
+#include "SystemInfo.h"
 
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib")

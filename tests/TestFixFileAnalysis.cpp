@@ -5,19 +5,19 @@
 
 #include "TestFramework.h"
 
-#include "../AppPaths.h"
-#include "../AttackMapping.h"
-#include "../DetailText.h"
-#include "../FileAnalysis.h"
-#include "../FileIO.h"
-#include "../FileOrigin.h"
-#include "../MalwareScoring.h"
-#include "../PeFile.h"
-#include "../SampleData.h"
-#include "../ScanCore.h"
-#include "../ScoringConfig.h"
-#include "../SystemInfo.h"
-#include "../TextUtils.h"
+#include "AppPaths.h"
+#include "AttackMapping.h"
+#include "DetailText.h"
+#include "FileAnalysis.h"
+#include "FileIO.h"
+#include "FileOrigin.h"
+#include "MalwareScoring.h"
+#include "PeFile.h"
+#include "SampleData.h"
+#include "ScanCore.h"
+#include "ScoringConfig.h"
+#include "SystemInfo.h"
+#include "TextUtils.h"
 
 #include <windows.h>
 #include <algorithm>

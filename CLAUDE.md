@@ -51,8 +51,9 @@ change that drifts from this is rejected, however useful it looks.
 6. **The engine has no UI.** Everything in `PhantomRecon.Core` must work from the console
    program and the tests. If it needs a window, it belongs in the app project.
 
-7. **One module per concern.** New check: a function in `SecurityChecks<Topic>.cpp`, a
-   row in `CheckCatalog.cpp`, an entry in `AuditRunner.cpp`. The tests fail if any of the
+7. **One module per concern.** New check: a function in
+   `src/core/audit/checks/SecurityChecks<Topic>.cpp`, a row in `CheckCatalog.cpp`, an
+   entry in `AuditRunner.cpp`. The tests fail if any of the
    three is missing. If its fix is an exact, safe command, add the script lines and every
    registry value they touch in `CheckScripts.cpp` (a test fails when the two disagree);
    otherwise the fix plan shows it as a step done by hand. Verdict logic goes in a pure
@@ -81,7 +82,30 @@ tracking in `AppMessages.cpp`.
 
 ## Module map
 
-Engine (`PhantomRecon.Core.vcxproj`, static library):
+Nothing but the solution, the shared props and the docs lives at the top level. Every
+source file sits in the folder of its concern; a new file goes into the folder whose
+row below owns it, and into that project's `.vcxproj` and `.vcxproj.filters`. Engine
+headers are included by file name (`#include "ScanCore.h"`): the engine folders are on
+the include path through `PhantomRecon.Common.props`, so header names must stay unique.
+A new engine folder goes into `PhantomReconCoreIncludes` there.
+
+Engine (`src/core/PhantomRecon.Core.vcxproj`, static library). Folders under `src/core/`:
+
+| Folder | Files |
+|--------|-------|
+| `common/` | `AppPaths`, `BackgroundWorker`, `DebugTrace`, `FileIO`, `HashUtils`, `JsonReader`, `JsonWriter`, `RegUtil`, `ServiceUtil`, `StringConv.h`, `SystemInfo`, `TextUtils.h`, `WmiQuery`, `Version.h`, `pch.h`, `framework.h`, `targetver.h` |
+| `scan/` | `ScanCore`, `ScanTypes.h`, `Baseline`, `ScanCsv`, `ResultsModel`, `KnownGood`, `ScoringConfig`, `SampleData`, `RegistryEnumerator` |
+| `analysis/` | `FileAnalysis`, `PeFile`, `PeOrdinals`, `MalwareScoring`, `FileOrigin`, `ScriptAnalysis`, `FuzzyHash` |
+| `audit/` | `AuditRunner`, `CheckCatalog`, `CheckHelpers`, `SecurityChecks`, `SecurityCheckModules.h`, `DeviceGuard`, `EventLogQuery`, `HardeningScore`, `BiggestWins`, `AttackMapping` |
+| `audit/checks/` | `SecurityChecks<Topic>.cpp`, one per topic |
+| `audit/rules/` | `AuditRules`, `PlatformRules`, `HostRules`, `HygieneRules`, `EventRules` |
+| `fixplan/` | `CheckScripts`, `FixScript`, `FixScriptBackup` |
+| `history/` | `AuditHistory`, `AuditHistoryText` |
+| `reports/` | `Reports.h`, `ReportHtml`, `ReportJson`, `ReportHistory`, `DetailText`, `Redactor` |
+| `ai/` | `LLMClient`, `AiConsent` |
+| `program/` | `CliRunner`, `CliNotification`, `ScheduledScan`, `StartupRequest`, `SettingsValues` |
+
+What each file owns:
 
 | File | Owns |
 |------|------|
@@ -114,7 +138,11 @@ Engine (`PhantomRecon.Core.vcxproj`, static library):
 | `BackgroundWorker.cpp`, `DebugTrace.cpp` | Joinable worker threads; trace lines (`PHANTOMRECON_TRACE=1`) |
 | `AppPaths.cpp`, `FileIO.cpp`, `RegUtil.cpp`, `ServiceUtil.cpp`, `WmiQuery.cpp`, `SystemInfo.cpp`, `HashUtils.cpp`, `TextUtils.h`, `StringConv.h` | Shared helpers |
 
-Window app (`PhantomRecon.vcxproj`):
+Window app (`src/app/PhantomRecon.vcxproj`). `PhantomRecon.cpp`, `AppState.h`,
+`AppMessages`, `StartupArgs`, `ScanEngine` and `AuditController` sit in `src/app/`; the
+command files in `commands/`; the secondary windows and the AI panel in `windows/`;
+`MainLayout`, `GuiComponents` and `Theme` in `ui/`; `resource.h`, the `.rc` and the icons
+in `resources/`.
 
 | File | Owns |
 |------|------|
@@ -128,7 +156,10 @@ Window app (`PhantomRecon.vcxproj`):
 | `AiSidebar.cpp` | The optional AI panel |
 | `AppState.h`, `AppMessages.h` | State and messages (threads come from `BackgroundWorker` in the engine) |
 
-Console program: `cli/CliMain.cpp`.
+Console program: `src/cli/CliMain.cpp`.
+
+Docs (`docs/`): `FINDINGS.md` (generated), `IDEAS.md`, `ROADMAP.md`, `VIDEO_OUTLINE.md`,
+`Notes.txt`.
 
 Tests (`tests/`, `PhantomReconTests.exe`):
 

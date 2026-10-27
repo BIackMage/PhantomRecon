@@ -2,13 +2,13 @@
 
 #include "TestFramework.h"
 
-#include "../AppPaths.h"
-#include "../Baseline.h"
-#include "../FileIO.h"
-#include "../ResultsModel.h"
-#include "../SampleData.h"
-#include "../ScanCore.h"
-#include "../ScanCsv.h"
+#include "AppPaths.h"
+#include "Baseline.h"
+#include "FileIO.h"
+#include "ResultsModel.h"
+#include "SampleData.h"
+#include "ScanCore.h"
+#include "ScanCsv.h"
 
 #include <atomic>
 #include <map>

@@ -2,15 +2,15 @@
 
 #include "TestFramework.h"
 
-#include "../AppPaths.h"
-#include "../FileAnalysis.h"
-#include "../FileIO.h"
-#include "../FuzzyHash.h"
-#include "../HashUtils.h"
-#include "../MalwareScoring.h"
-#include "../PeFile.h"
-#include "../SampleData.h"
-#include "../TextUtils.h"
+#include "AppPaths.h"
+#include "FileAnalysis.h"
+#include "FileIO.h"
+#include "FuzzyHash.h"
+#include "HashUtils.h"
+#include "MalwareScoring.h"
+#include "PeFile.h"
+#include "SampleData.h"
+#include "TextUtils.h"
 
 #include <windows.h>
 #include <algorithm>

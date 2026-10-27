@@ -2,7 +2,7 @@
 
 #include "TestFramework.h"
 
-#include "../ScheduledScan.h"
+#include "ScheduledScan.h"
 
 #include <string>
 #include <vector>

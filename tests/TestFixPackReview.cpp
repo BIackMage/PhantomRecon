@@ -3,7 +3,7 @@
 
 #include "TestFramework.h"
 
-#include "../HostRules.h"
+#include "HostRules.h"
 
 #include <windows.h>
 

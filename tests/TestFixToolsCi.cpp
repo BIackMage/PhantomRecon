@@ -4,12 +4,12 @@
 #include "TestFramework.h"
 #include "JsonCheck.h"
 
-#include "../AppPaths.h"
-#include "../FileIO.h"
-#include "../PeFile.h"
-#include "../ScanCore.h"
-#include "../ScoringConfig.h"
-#include "../TextUtils.h"
+#include "AppPaths.h"
+#include "FileIO.h"
+#include "PeFile.h"
+#include "ScanCore.h"
+#include "ScoringConfig.h"
+#include "TextUtils.h"
 
 #include <windows.h>
 #include <cmath>

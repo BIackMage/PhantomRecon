@@ -3,14 +3,14 @@
 #include "TestFramework.h"
 #include "JsonCheck.h"
 
-#include "../AttackMapping.h"
-#include "../CheckCatalog.h"
-#include "../DetailText.h"
-#include "../HardeningScore.h"
-#include "../Redactor.h"
-#include "../Reports.h"
-#include "../SecurityChecks.h"
-#include "../TextUtils.h"
+#include "AttackMapping.h"
+#include "CheckCatalog.h"
+#include "DetailText.h"
+#include "HardeningScore.h"
+#include "Redactor.h"
+#include "Reports.h"
+#include "SecurityChecks.h"
+#include "TextUtils.h"
 
 #include <algorithm>
 #include <cstdio>

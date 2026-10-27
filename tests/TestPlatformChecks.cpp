@@ -5,11 +5,11 @@
 
 #include "TestFramework.h"
 
-#include "../CheckCatalog.h"
-#include "../DeviceGuard.h"
-#include "../PlatformRules.h"
-#include "../Redactor.h"
-#include "../SecurityCheckModules.h"
+#include "CheckCatalog.h"
+#include "DeviceGuard.h"
+#include "PlatformRules.h"
+#include "Redactor.h"
+#include "SecurityCheckModules.h"
 
 #include <windows.h>
 #include <cstdio>

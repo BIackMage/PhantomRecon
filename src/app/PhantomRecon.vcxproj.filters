@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="commands">
+      <UniqueIdentifier>{61b368e8-dbb6-5aa3-b635-cdb5d45e4900}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="resources">
+      <UniqueIdentifier>{678ccd76-96fb-5ff5-93eb-a30113c4d908}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ui">
+      <UniqueIdentifier>{a83c5311-12a8-5ba5-9ab2-8b9462d32803}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="windows">
+      <UniqueIdentifier>{4ccc5f62-d798-5b90-9c31-664fdb3a52f9}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="windows\AiSidebar.h">
+      <Filter>windows</Filter>
+    </ClInclude>
+    <ClInclude Include="windows\AppDialogs.h">
+      <Filter>windows</Filter>
+    </ClInclude>
+    <ClInclude Include="AppMessages.h" />
+    <ClInclude Include="AppState.h" />
+    <ClInclude Include="AuditController.h" />
+    <ClInclude Include="commands\CommandHelpers.h">
+      <Filter>commands</Filter>
+    </ClInclude>
+    <ClInclude Include="windows\DetailWindow.h">
+      <Filter>windows</Filter>
+    </ClInclude>
+    <ClInclude Include="windows\FindingsWindow.h">
+      <Filter>windows</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\GuiComponents.h">
+      <Filter>ui</Filter>
+    </ClInclude>
+    <ClInclude Include="commands\MainCommands.h">
+      <Filter>commands</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\MainLayout.h">
+      <Filter>ui</Filter>
+    </ClInclude>
+    <ClInclude Include="PhantomRecon.h" />
+    <ClInclude Include="resources\resource.h">
+      <Filter>resources</Filter>
+    </ClInclude>
+    <ClInclude Include="ScanEngine.h" />
+    <ClInclude Include="windows\SettingsDialog.h">
+      <Filter>windows</Filter>
+    </ClInclude>
+    <ClInclude Include="StartupArgs.h" />
+    <ClInclude Include="ui\Theme.h">
+      <Filter>ui</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="windows\AiSidebar.cpp">
+      <Filter>windows</Filter>
+    </ClCompile>
+    <ClCompile Include="windows\AppDialogs.cpp">
+      <Filter>windows</Filter>
+    </ClCompile>
+    <ClCompile Include="AppMessages.cpp" />
+    <ClCompile Include="AuditController.cpp" />
+    <ClCompile Include="commands\CommandHelpers.cpp">
+      <Filter>commands</Filter>
+    </ClCompile>
+    <ClCompile Include="windows\DetailWindow.cpp">
+      <Filter>windows</Filter>
+    </ClCompile>
+    <ClCompile Include="windows\FindingsWindow.cpp">
+      <Filter>windows</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\GuiComponents.cpp">
+      <Filter>ui</Filter>
+    </ClCompile>
+    <ClCompile Include="commands\MainCommands.cpp">
+      <Filter>commands</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\MainLayout.cpp">
+      <Filter>ui</Filter>
+    </ClCompile>
+    <ClCompile Include="PhantomRecon.cpp" />
+    <ClCompile Include="commands\ReportCommands.cpp">
+      <Filter>commands</Filter>
+    </ClCompile>
+    <ClCompile Include="commands\ResultsCommands.cpp">
+      <Filter>commands</Filter>
+    </ClCompile>
+    <ClCompile Include="ScanEngine.cpp" />
+    <ClCompile Include="windows\SettingsDialog.cpp">
+      <Filter>windows</Filter>
+    </ClCompile>
+    <ClCompile Include="StartupArgs.cpp" />
+    <ClCompile Include="ui\Theme.cpp">
+      <Filter>ui</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources\PhantomRecon.rc">
+      <Filter>resources</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="resources\PhantomRecon.ico">
+      <Filter>resources</Filter>
+    </Image>
+    <Image Include="resources\small.ico">
+      <Filter>resources</Filter>
+    </Image>
+  </ItemGroup>
+</Project>

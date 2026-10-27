@@ -4,15 +4,15 @@
 
 #include "TestFramework.h"
 
-#include "../AuditHistory.h"
-#include "../Baseline.h"
-#include "../CheckCatalog.h"
-#include "../CliNotification.h"
-#include "../CliRunner.h"
-#include "../FileIO.h"
-#include "../JsonReader.h"
-#include "../ScheduledScan.h"
-#include "../StringConv.h"
+#include "AuditHistory.h"
+#include "Baseline.h"
+#include "CheckCatalog.h"
+#include "CliNotification.h"
+#include "CliRunner.h"
+#include "FileIO.h"
+#include "JsonReader.h"
+#include "ScheduledScan.h"
+#include "StringConv.h"
 
 #include <windows.h>
 #include <shellapi.h>

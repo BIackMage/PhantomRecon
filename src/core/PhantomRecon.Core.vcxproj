@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PhantomRecon.Core: the engine as a static library. No windows, no message
+  loop. The GUI app, the command line and the tests all link it.
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{6be1bd7f-5bc6-4da8-82a3-510fe409851c}</ProjectGuid>
+    <RootNamespace>PhantomReconCore</RootNamespace>
+    <!-- Pinned so every machine and CI build against the same headers and libraries. -->
+    <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\..\PhantomRecon.Common.props" />
+  </ImportGroup>
+  <PropertyGroup>
+    <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <!-- Keep the compiler's symbol file next to the objects, away from the programs' own .pdb files. -->
+      <ProgramDataBaseFileName>$(IntDir)$(ProjectName).pdb</ProgramDataBaseFileName>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="ai\AiConsent.h" />
+    <ClInclude Include="ai\LLMClient.h" />
+    <ClInclude Include="analysis\FileAnalysis.h" />
+    <ClInclude Include="analysis\FileOrigin.h" />
+    <ClInclude Include="analysis\FuzzyHash.h" />
+    <ClInclude Include="analysis\MalwareScoring.h" />
+    <ClInclude Include="analysis\PeFile.h" />
+    <ClInclude Include="analysis\PeOrdinals.h" />
+    <ClInclude Include="analysis\ScriptAnalysis.h" />
+    <ClInclude Include="audit\AttackMapping.h" />
+    <ClInclude Include="audit\BiggestWins.h" />
+    <ClInclude Include="audit\CheckCatalog.h" />
+    <ClInclude Include="audit\CheckHelpers.h" />
+    <ClInclude Include="audit\checks\SecurityChecksDrivers.h" />
+    <ClInclude Include="audit\checks\SecurityChecksEvents.h" />
+    <ClInclude Include="audit\checks\SecurityChecksHygiene.h" />
+    <ClInclude Include="audit\checks\SecurityChecksPlatform.h" />
+    <ClInclude Include="audit\checks\SecurityChecksSharing.h" />
+    <ClInclude Include="audit\checks\SecurityChecksSignin.h" />
+    <ClInclude Include="audit\checks\SecurityChecksWireless.h" />
+    <ClInclude Include="audit\DeviceGuard.h" />
+    <ClInclude Include="audit\EventLogQuery.h" />
+    <ClInclude Include="audit\HardeningScore.h" />
+    <ClInclude Include="audit\rules\AuditRules.h" />
+    <ClInclude Include="audit\rules\EventRules.h" />
+    <ClInclude Include="audit\rules\HostRules.h" />
+    <ClInclude Include="audit\rules\HygieneRules.h" />
+    <ClInclude Include="audit\rules\PlatformRules.h" />
+    <ClInclude Include="audit\SecurityCheckModules.h" />
+    <ClInclude Include="audit\SecurityChecks.h" />
+    <ClInclude Include="common\AppPaths.h" />
+    <ClInclude Include="common\BackgroundWorker.h" />
+    <ClInclude Include="common\DebugTrace.h" />
+    <ClInclude Include="common\FileIO.h" />
+    <ClInclude Include="common\framework.h" />
+    <ClInclude Include="common\HashUtils.h" />
+    <ClInclude Include="common\JsonReader.h" />
+    <ClInclude Include="common\JsonWriter.h" />
+    <ClInclude Include="common\pch.h" />
+    <ClInclude Include="common\RegUtil.h" />
+    <ClInclude Include="common\ServiceUtil.h" />
+    <ClInclude Include="common\StringConv.h" />
+    <ClInclude Include="common\SystemInfo.h" />
+    <ClInclude Include="common\targetver.h" />
+    <ClInclude Include="common\TextUtils.h" />
+    <ClInclude Include="common\Version.h" />
+    <ClInclude Include="common\WmiQuery.h" />
+    <ClInclude Include="fixplan\CheckScripts.h" />
+    <ClInclude Include="fixplan\FixScript.h" />
+    <ClInclude Include="fixplan\FixScriptBackup.h" />
+    <ClInclude Include="history\AuditHistory.h" />
+    <ClInclude Include="program\CliNotification.h" />
+    <ClInclude Include="program\CliRunner.h" />
+    <ClInclude Include="program\ScheduledScan.h" />
+    <ClInclude Include="program\SettingsValues.h" />
+    <ClInclude Include="program\StartupRequest.h" />
+    <ClInclude Include="reports\DetailText.h" />
+    <ClInclude Include="reports\Redactor.h" />
+    <ClInclude Include="reports\ReportHistory.h" />
+    <ClInclude Include="reports\Reports.h" />
+    <ClInclude Include="scan\Baseline.h" />
+    <ClInclude Include="scan\KnownGood.h" />
+    <ClInclude Include="scan\RegistryEnumerator.h" />
+    <ClInclude Include="scan\ResultsModel.h" />
+    <ClInclude Include="scan\SampleData.h" />
+    <ClInclude Include="scan\ScanCore.h" />
+    <ClInclude Include="scan\ScanCsv.h" />
+    <ClInclude Include="scan\ScanTypes.h" />
+    <ClInclude Include="scan\ScoringConfig.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="ai\AiConsent.cpp" />
+    <ClCompile Include="ai\LLMClient.cpp" />
+    <ClCompile Include="analysis\FileAnalysis.cpp" />
+    <ClCompile Include="analysis\FileOrigin.cpp" />
+    <ClCompile Include="analysis\FuzzyHash.cpp" />
+    <ClCompile Include="analysis\MalwareScoring.cpp" />
+    <ClCompile Include="analysis\PeFile.cpp" />
+    <ClCompile Include="analysis\PeOrdinals.cpp" />
+    <ClCompile Include="analysis\ScriptAnalysis.cpp" />
+    <ClCompile Include="audit\AttackMapping.cpp" />
+    <ClCompile Include="audit\AuditRunner.cpp" />
+    <ClCompile Include="audit\BiggestWins.cpp" />
+    <ClCompile Include="audit\CheckCatalog.cpp" />
+    <ClCompile Include="audit\CheckHelpers.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksAccounts.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksAudit.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksDefender.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksDrivers.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksEvents.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksExtra.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksHardening.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksHygiene.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksNetwork.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksPaths.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksPersistence.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksPlatform.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksProcesses.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksSharing.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksSignin.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksSoftware.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksTasks.cpp" />
+    <ClCompile Include="audit\checks\SecurityChecksWireless.cpp" />
+    <ClCompile Include="audit\DeviceGuard.cpp" />
+    <ClCompile Include="audit\EventLogQuery.cpp" />
+    <ClCompile Include="audit\HardeningScore.cpp" />
+    <ClCompile Include="audit\rules\AuditRules.cpp" />
+    <ClCompile Include="audit\rules\EventRules.cpp" />
+    <ClCompile Include="audit\rules\HostRules.cpp" />
+    <ClCompile Include="audit\rules\HygieneRules.cpp" />
+    <ClCompile Include="audit\rules\PlatformRules.cpp" />
+    <ClCompile Include="audit\SecurityChecks.cpp" />
+    <ClCompile Include="common\AppPaths.cpp" />
+    <ClCompile Include="common\BackgroundWorker.cpp" />
+    <ClCompile Include="common\DebugTrace.cpp" />
+    <ClCompile Include="common\FileIO.cpp" />
+    <ClCompile Include="common\HashUtils.cpp" />
+    <ClCompile Include="common\JsonReader.cpp" />
+    <ClCompile Include="common\JsonWriter.cpp" />
+    <ClCompile Include="common\RegUtil.cpp" />
+    <ClCompile Include="common\ServiceUtil.cpp" />
+    <ClCompile Include="common\SystemInfo.cpp" />
+    <ClCompile Include="common\WmiQuery.cpp" />
+    <ClCompile Include="fixplan\CheckScripts.cpp" />
+    <ClCompile Include="fixplan\FixScript.cpp" />
+    <ClCompile Include="fixplan\FixScriptBackup.cpp" />
+    <ClCompile Include="history\AuditHistory.cpp" />
+    <ClCompile Include="history\AuditHistoryText.cpp" />
+    <ClCompile Include="program\CliNotification.cpp" />
+    <ClCompile Include="program\CliRunner.cpp" />
+    <ClCompile Include="program\ScheduledScan.cpp" />
+    <ClCompile Include="program\SettingsValues.cpp" />
+    <ClCompile Include="program\StartupRequest.cpp" />
+    <ClCompile Include="reports\DetailText.cpp" />
+    <ClCompile Include="reports\Redactor.cpp" />
+    <ClCompile Include="reports\ReportHistory.cpp" />
+    <ClCompile Include="reports\ReportHtml.cpp" />
+    <ClCompile Include="reports\ReportJson.cpp" />
+    <ClCompile Include="scan\Baseline.cpp" />
+    <ClCompile Include="scan\KnownGood.cpp" />
+    <ClCompile Include="scan\RegistryEnumerator.cpp" />
+    <ClCompile Include="scan\ResultsModel.cpp" />
+    <ClCompile Include="scan\SampleData.cpp" />
+    <ClCompile Include="scan\ScanCore.cpp" />
+    <ClCompile Include="scan\ScanCsv.cpp" />
+    <ClCompile Include="scan\ScoringConfig.cpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

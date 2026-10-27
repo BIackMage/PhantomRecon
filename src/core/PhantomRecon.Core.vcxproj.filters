@@ -1,0 +1,474 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="ai">
+      <UniqueIdentifier>{3ed5930a-cd7a-50d5-9e7e-f467dbf3eb15}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="analysis">
+      <UniqueIdentifier>{cf328859-02f9-5dab-a0da-1212031ca034}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="audit">
+      <UniqueIdentifier>{8dbe226c-3288-5e06-b3df-4a5c1b4d6096}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="audit\checks">
+      <UniqueIdentifier>{fc4dd29e-161f-582c-8016-96f1c9b4b716}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="audit\rules">
+      <UniqueIdentifier>{c3a14de4-9acf-5a0f-b223-530a58c7765c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="common">
+      <UniqueIdentifier>{6f7d2207-a8f9-589f-83ad-54db9c57ccc6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="fixplan">
+      <UniqueIdentifier>{a05cc0df-2c28-5973-94b9-b0c282a2cb12}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="history">
+      <UniqueIdentifier>{fb852337-bb7e-53b7-9a95-47c7f4a00226}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="program">
+      <UniqueIdentifier>{4bdd8d75-25d2-5e33-8ca8-37adbbf3c592}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="reports">
+      <UniqueIdentifier>{a8c22ade-0660-543d-a0e7-6b5955a8ef2c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="scan">
+      <UniqueIdentifier>{95c861fe-3673-5e4c-818e-9bf129c82319}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="common\AppPaths.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\AttackMapping.h">
+      <Filter>audit</Filter>
+    </ClInclude>
+    <ClInclude Include="history\AuditHistory.h">
+      <Filter>history</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\rules\AuditRules.h">
+      <Filter>audit\rules</Filter>
+    </ClInclude>
+    <ClInclude Include="common\BackgroundWorker.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="scan\Baseline.h">
+      <Filter>scan</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\CheckCatalog.h">
+      <Filter>audit</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\CheckHelpers.h">
+      <Filter>audit</Filter>
+    </ClInclude>
+    <ClInclude Include="fixplan\CheckScripts.h">
+      <Filter>fixplan</Filter>
+    </ClInclude>
+    <ClInclude Include="common\DebugTrace.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\DeviceGuard.h">
+      <Filter>audit</Filter>
+    </ClInclude>
+    <ClInclude Include="reports\DetailText.h">
+      <Filter>reports</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\EventLogQuery.h">
+      <Filter>audit</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\rules\EventRules.h">
+      <Filter>audit\rules</Filter>
+    </ClInclude>
+    <ClInclude Include="analysis\FileAnalysis.h">
+      <Filter>analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="common\FileIO.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="analysis\FileOrigin.h">
+      <Filter>analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="fixplan\FixScript.h">
+      <Filter>fixplan</Filter>
+    </ClInclude>
+    <ClInclude Include="fixplan\FixScriptBackup.h">
+      <Filter>fixplan</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\BiggestWins.h">
+      <Filter>audit</Filter>
+    </ClInclude>
+    <ClInclude Include="common\framework.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="analysis\FuzzyHash.h">
+      <Filter>analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\HardeningScore.h">
+      <Filter>audit</Filter>
+    </ClInclude>
+    <ClInclude Include="common\HashUtils.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="common\JsonReader.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="common\JsonWriter.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="scan\KnownGood.h">
+      <Filter>scan</Filter>
+    </ClInclude>
+    <ClInclude Include="ai\LLMClient.h">
+      <Filter>ai</Filter>
+    </ClInclude>
+    <ClInclude Include="analysis\MalwareScoring.h">
+      <Filter>analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="common\pch.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="analysis\PeFile.h">
+      <Filter>analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="analysis\PeOrdinals.h">
+      <Filter>analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\rules\PlatformRules.h">
+      <Filter>audit\rules</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\rules\HostRules.h">
+      <Filter>audit\rules</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\rules\HygieneRules.h">
+      <Filter>audit\rules</Filter>
+    </ClInclude>
+    <ClInclude Include="scan\RegistryEnumerator.h">
+      <Filter>scan</Filter>
+    </ClInclude>
+    <ClInclude Include="common\RegUtil.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="scan\ScanCore.h">
+      <Filter>scan</Filter>
+    </ClInclude>
+    <ClInclude Include="scan\ScanCsv.h">
+      <Filter>scan</Filter>
+    </ClInclude>
+    <ClInclude Include="scan\ScanTypes.h">
+      <Filter>scan</Filter>
+    </ClInclude>
+    <ClInclude Include="scan\ScoringConfig.h">
+      <Filter>scan</Filter>
+    </ClInclude>
+    <ClInclude Include="analysis\ScriptAnalysis.h">
+      <Filter>analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\SecurityCheckModules.h">
+      <Filter>audit</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\SecurityChecks.h">
+      <Filter>audit</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\checks\SecurityChecksPlatform.h">
+      <Filter>audit\checks</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\checks\SecurityChecksWireless.h">
+      <Filter>audit\checks</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\checks\SecurityChecksSharing.h">
+      <Filter>audit\checks</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\checks\SecurityChecksSignin.h">
+      <Filter>audit\checks</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\checks\SecurityChecksDrivers.h">
+      <Filter>audit\checks</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\checks\SecurityChecksHygiene.h">
+      <Filter>audit\checks</Filter>
+    </ClInclude>
+    <ClInclude Include="audit\checks\SecurityChecksEvents.h">
+      <Filter>audit\checks</Filter>
+    </ClInclude>
+    <ClInclude Include="common\ServiceUtil.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="common\StringConv.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="common\SystemInfo.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="common\targetver.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="common\TextUtils.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="common\Version.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="program\CliNotification.h">
+      <Filter>program</Filter>
+    </ClInclude>
+    <ClInclude Include="program\CliRunner.h">
+      <Filter>program</Filter>
+    </ClInclude>
+    <ClInclude Include="reports\Redactor.h">
+      <Filter>reports</Filter>
+    </ClInclude>
+    <ClInclude Include="reports\Reports.h">
+      <Filter>reports</Filter>
+    </ClInclude>
+    <ClInclude Include="reports\ReportHistory.h">
+      <Filter>reports</Filter>
+    </ClInclude>
+    <ClInclude Include="scan\ResultsModel.h">
+      <Filter>scan</Filter>
+    </ClInclude>
+    <ClInclude Include="scan\SampleData.h">
+      <Filter>scan</Filter>
+    </ClInclude>
+    <ClInclude Include="program\ScheduledScan.h">
+      <Filter>program</Filter>
+    </ClInclude>
+    <ClInclude Include="program\StartupRequest.h">
+      <Filter>program</Filter>
+    </ClInclude>
+    <ClInclude Include="common\WmiQuery.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="ai\AiConsent.h">
+      <Filter>ai</Filter>
+    </ClInclude>
+    <ClInclude Include="program\SettingsValues.h">
+      <Filter>program</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="common\AppPaths.cpp">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\AttackMapping.cpp">
+      <Filter>audit</Filter>
+    </ClCompile>
+    <ClCompile Include="history\AuditHistory.cpp">
+      <Filter>history</Filter>
+    </ClCompile>
+    <ClCompile Include="history\AuditHistoryText.cpp">
+      <Filter>history</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\rules\AuditRules.cpp">
+      <Filter>audit\rules</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\AuditRunner.cpp">
+      <Filter>audit</Filter>
+    </ClCompile>
+    <ClCompile Include="common\BackgroundWorker.cpp">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="scan\Baseline.cpp">
+      <Filter>scan</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\CheckCatalog.cpp">
+      <Filter>audit</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\CheckHelpers.cpp">
+      <Filter>audit</Filter>
+    </ClCompile>
+    <ClCompile Include="fixplan\CheckScripts.cpp">
+      <Filter>fixplan</Filter>
+    </ClCompile>
+    <ClCompile Include="common\DebugTrace.cpp">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\DeviceGuard.cpp">
+      <Filter>audit</Filter>
+    </ClCompile>
+    <ClCompile Include="reports\DetailText.cpp">
+      <Filter>reports</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\EventLogQuery.cpp">
+      <Filter>audit</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\rules\EventRules.cpp">
+      <Filter>audit\rules</Filter>
+    </ClCompile>
+    <ClCompile Include="analysis\FileAnalysis.cpp">
+      <Filter>analysis</Filter>
+    </ClCompile>
+    <ClCompile Include="common\FileIO.cpp">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="analysis\FileOrigin.cpp">
+      <Filter>analysis</Filter>
+    </ClCompile>
+    <ClCompile Include="fixplan\FixScript.cpp">
+      <Filter>fixplan</Filter>
+    </ClCompile>
+    <ClCompile Include="fixplan\FixScriptBackup.cpp">
+      <Filter>fixplan</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\BiggestWins.cpp">
+      <Filter>audit</Filter>
+    </ClCompile>
+    <ClCompile Include="analysis\FuzzyHash.cpp">
+      <Filter>analysis</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\HardeningScore.cpp">
+      <Filter>audit</Filter>
+    </ClCompile>
+    <ClCompile Include="common\HashUtils.cpp">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="common\JsonReader.cpp">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="common\JsonWriter.cpp">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="scan\KnownGood.cpp">
+      <Filter>scan</Filter>
+    </ClCompile>
+    <ClCompile Include="ai\LLMClient.cpp">
+      <Filter>ai</Filter>
+    </ClCompile>
+    <ClCompile Include="analysis\MalwareScoring.cpp">
+      <Filter>analysis</Filter>
+    </ClCompile>
+    <ClCompile Include="analysis\PeFile.cpp">
+      <Filter>analysis</Filter>
+    </ClCompile>
+    <ClCompile Include="analysis\PeOrdinals.cpp">
+      <Filter>analysis</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\rules\PlatformRules.cpp">
+      <Filter>audit\rules</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\rules\HostRules.cpp">
+      <Filter>audit\rules</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\rules\HygieneRules.cpp">
+      <Filter>audit\rules</Filter>
+    </ClCompile>
+    <ClCompile Include="scan\RegistryEnumerator.cpp">
+      <Filter>scan</Filter>
+    </ClCompile>
+    <ClCompile Include="common\RegUtil.cpp">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="scan\ScanCore.cpp">
+      <Filter>scan</Filter>
+    </ClCompile>
+    <ClCompile Include="scan\ScanCsv.cpp">
+      <Filter>scan</Filter>
+    </ClCompile>
+    <ClCompile Include="scan\ScoringConfig.cpp">
+      <Filter>scan</Filter>
+    </ClCompile>
+    <ClCompile Include="analysis\ScriptAnalysis.cpp">
+      <Filter>analysis</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\SecurityChecks.cpp">
+      <Filter>audit</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksAccounts.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksAudit.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksDefender.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksEvents.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksExtra.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksHardening.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksNetwork.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksPaths.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksPersistence.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksPlatform.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksProcesses.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksSoftware.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksTasks.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksWireless.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksSharing.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksSignin.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksDrivers.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="audit\checks\SecurityChecksHygiene.cpp">
+      <Filter>audit\checks</Filter>
+    </ClCompile>
+    <ClCompile Include="common\ServiceUtil.cpp">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="common\SystemInfo.cpp">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="program\CliNotification.cpp">
+      <Filter>program</Filter>
+    </ClCompile>
+    <ClCompile Include="program\CliRunner.cpp">
+      <Filter>program</Filter>
+    </ClCompile>
+    <ClCompile Include="reports\Redactor.cpp">
+      <Filter>reports</Filter>
+    </ClCompile>
+    <ClCompile Include="reports\ReportHistory.cpp">
+      <Filter>reports</Filter>
+    </ClCompile>
+    <ClCompile Include="reports\ReportHtml.cpp">
+      <Filter>reports</Filter>
+    </ClCompile>
+    <ClCompile Include="reports\ReportJson.cpp">
+      <Filter>reports</Filter>
+    </ClCompile>
+    <ClCompile Include="scan\ResultsModel.cpp">
+      <Filter>scan</Filter>
+    </ClCompile>
+    <ClCompile Include="scan\SampleData.cpp">
+      <Filter>scan</Filter>
+    </ClCompile>
+    <ClCompile Include="program\ScheduledScan.cpp">
+      <Filter>program</Filter>
+    </ClCompile>
+    <ClCompile Include="program\StartupRequest.cpp">
+      <Filter>program</Filter>
+    </ClCompile>
+    <ClCompile Include="common\WmiQuery.cpp">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="ai\AiConsent.cpp">
+      <Filter>ai</Filter>
+    </ClCompile>
+    <ClCompile Include="program\SettingsValues.cpp">
+      <Filter>program</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>
