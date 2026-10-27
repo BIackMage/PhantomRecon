@@ -39,15 +39,31 @@ std::wstring WeeklyTaskCommandLine(const std::wstring& exePath, const std::wstri
     return L"\"" + exePath + L"\" " + arguments;
 }
 
+// Task Scheduler expands %NAME% in a task's program, arguments and working folder each
+// time it starts the task, so a path with two % signs could name another file then
+// than the one the user was shown. One % sign alone cannot form a name.
+static bool HasPercentPair(const std::wstring& path)
+{
+    size_t first = path.find(L'%');
+    return first != std::wstring::npos && path.find(L'%', first + 1) != std::wstring::npos;
+}
+
 WeeklyTaskPlan PlanWeeklyTask(const std::wstring& exePath, const std::wstring& baselinePath, const std::wstring& reportsDir,
                               bool auditHistory, bool portable)
 {
     WeeklyTaskPlan plan;
+    const std::wstring* percentPath = HasPercentPair(exePath) ? &exePath
+                                    : HasPercentPair(baselinePath) ? &baselinePath
+                                    : HasPercentPair(reportsDir) ? &reportsDir : nullptr;
     if (portable) {
         plan.error = L"Portable mode never creates scheduled tasks.";
     }
     else if (exePath.empty() || baselinePath.empty() || reportsDir.empty()) {
         plan.error = L"The weekly task needs the program, a baseline and a reports folder.";
+    }
+    else if (percentPath) {
+        plan.error = L"The path " + *percentPath + L" holds two % signs. Task Scheduler reads %NAME% as an environment "
+                     L"variable when it starts the task, so the task could use another path. Use a folder without % signs.";
     }
     else {
         plan.ok = true;

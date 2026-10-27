@@ -868,3 +868,114 @@ TEST(FixUndo_RerunsKeptKeysAndTamperedBackup)
     CHECK(Contains(damaged.output, "Failed: 1."));
     CHECK(GetRegValue(tamperKey, twiceName, v) && v == (RegValue{ REG_DWORD, Dword(1800) }));
 }
+
+// ---------------------------------------------------------------------------
+// Review fix: the each-subkey value (net.nbtns) when adapters come and go between the
+// fix and the undo. An adapter removed in between stays removed: the undo used to
+// create its key again (CreateSubKey) with the old value in it. An adapter added in
+// between was never changed by the fix and keeps its value.
+// ---------------------------------------------------------------------------
+TEST(FixUndo_EachSubkeyAdapterGoneOrAddedBeforeUndo)
+{
+    const CheckInfo* nbtns = FindCheckInfo(L"net.nbtns");
+    REQUIRE(nbtns != nullptr);
+    REQUIRE(nbtns->scriptRegistry.size() == 1 && nbtns->scriptRegistry[0].eachSubkey);
+    KeyCleanup cleanup(TestRootKey());
+    std::vector<CheckInfo> catalog = { MovedRow(*nbtns, TestRootKey() + L"\\Adapters", L"t.adapters") };
+    const std::wstring interfaces = SubkeyOf(catalog[0].scriptRegistry[0].key);
+    const std::wstring name = catalog[0].scriptRegistry[0].name;
+    const std::wstring kept = interfaces + L"\\Tcpip_{11111111-2222-4333-8444-555555555555}";
+    const std::wstring removed = interfaces + L"\\Tcpip_{22222222-3333-4444-8555-666666666666}";
+    const std::wstring added = interfaces + L"\\Tcpip_{33333333-4444-4555-8666-777777777777}";
+    REQUIRE(SetRegValue(kept, name, REG_DWORD, Dword(1)));
+    REQUIRE(SetRegValue(removed, name, REG_DWORD, Dword(0)));
+    Plan plan = WritePlan(L"adapters", catalog);
+
+    PsRunResult fixed = Run(plan.fixPath, "y\r\n");
+    bool fixOk = Contains(fixed.output, "Applied: 1. Skipped: 0. Failed: 0.");
+    CHECK(fixOk);
+    PrintOnFailure(fixed, fixOk);
+    RegValue v;
+    CHECK(GetRegValue(kept, name, v) && v == (RegValue{ REG_DWORD, Dword(2) }));
+
+    // Between the fix and the undo one adapter goes away and a new one appears.
+    DeleteRegTree(removed);
+    REQUIRE(!KeyExists(removed));
+    REQUIRE(SetRegValue(added, name, REG_DWORD, Dword(0)));
+
+    PsRunResult undone = Run(plan.undoPath, "y\r\n");
+    bool undoOk = Contains(undone.output, "Applied: 1. Skipped: 0. Failed: 0.") &&
+                  Contains(undone.output, "Applied from the backup: the exact values from before the fix are back.");
+    CHECK(undoOk);
+    PrintOnFailure(undone, undoOk);
+    CHECK(GetRegValue(kept, name, v) && v == (RegValue{ REG_DWORD, Dword(1) }));    // put back exactly
+    if (KeyExists(removed)) tf::Fail(__FILE__, __LINE__, "the undo created the key of an adapter removed after the fix");
+    CHECK_EQ(CountOf(undone.output, "is gone now, so it is not created again."), static_cast<size_t>(1));
+    CHECK(GetRegValue(added, name, v) && v == (RegValue{ REG_DWORD, Dword(0) }));   // never changed by the fix
+}
+
+// ---------------------------------------------------------------------------
+// Review fix: a backup entry with a value that cannot be read back (an edited file:
+// data that is not base64, a string list count larger than the list) stops the step
+// before anything is written. The undo used to write the values before the bad one
+// and then stop, leaving the step half put back.
+// ---------------------------------------------------------------------------
+TEST(FixUndo_DamagedValueInBackupChangesNothing)
+{
+    const CheckInfo* autoplay = FindCheckInfo(L"hard.autoplay");
+    REQUIRE(autoplay != nullptr);
+    REQUIRE(autoplay->scriptRegistry.size() == 2);
+    KeyCleanup cleanup(TestRootKey());
+
+    // Each edit changes the second value's text in the backup and keeps the first intact.
+    struct Damage {
+        const wchar_t*    id;
+        DWORD             secondType;
+        std::vector<BYTE> secondData;
+        const wchar_t*    pattern;       // the second value's text in the backup ($1 is kept)
+        const wchar_t*    replacement;   // written after $1
+    };
+    std::vector<Damage> damages = {
+        // Base64 of the UTF-16 text (the first value's data is the decimal 145, too short to match).
+        { L"t.damage.base64", REG_SZ, Sz(L"old text"), L"(\"Data\"\\s*:\\s*\")[A-Za-z0-9+/=]{8,}\"", L"not*base64!\"" },
+        // The list has 2 strings; the edited count says 9.
+        { L"t.damage.count", REG_MULTI_SZ, MultiSz({ L"a", L"b" }), L"(\"Count\"\\s*:\\s*)2\\b", L"9" },
+    };
+    for (const Damage& d : damages) {
+        std::string label = tf::Narrow(d.id);
+        std::vector<CheckInfo> catalog = { MovedRow(*autoplay, TestRootKey() + L"\\" + d.id, d.id) };
+        const std::wstring key = SubkeyOf(catalog[0].scriptRegistry[0].key);
+        const std::wstring& first = catalog[0].scriptRegistry[0].name;
+        const std::wstring& second = catalog[0].scriptRegistry[1].name;
+        REQUIRE(SetRegValue(key, first, REG_DWORD, Dword(145)));
+        REQUIRE(SetRegValue(key, second, d.secondType, d.secondData));
+        Plan plan = WritePlan(std::wstring(L"damage-") + (d.secondType == REG_SZ ? L"a" : L"b"), catalog);
+        PsRunResult fixed = Run(plan.fixPath, "y\r\n");
+        CHECK(Contains(fixed.output, "Applied: 1."));
+        std::map<std::wstring, RegValue> afterFix = Snapshot(TestRootKey() + L"\\" + d.id);
+
+        std::wstring json;
+        REQUIRE(ReadTextFile(plan.backupPath, json, 1024 * 1024));
+        std::wstring edited;
+        std::wsmatch m;
+        if (std::regex_search(json, m, std::wregex(d.pattern))) {
+            edited = m.prefix().str() + m[1].str() + d.replacement + m.suffix().str();
+        }
+        if (edited.empty()) {
+            tf::Fail(__FILE__, __LINE__, label + ": the backup does not hold the second value as expected:\n" + tf::Narrow(json));
+            continue;
+        }
+        REQUIRE(WriteUtf8File(plan.backupPath, edited, false));
+
+        PsRunResult undone = Run(plan.undoPath, "y\r\n");
+        bool stopped = Contains(undone.output, "Failed: 1.") && Contains(undone.output, "nothing was put back");
+        CHECK(stopped);
+        PrintOnFailure(undone, stopped);
+        // Nothing written: the first value still has the fix's 255, not the 145 from before.
+        CHECK(SameSnapshot(afterFix, Snapshot(TestRootKey() + L"\\" + d.id), (label + " after the stopped undo").c_str()));
+        // The entry is not marked as put back, so a repaired file can still be used.
+        std::wstring after;
+        REQUIRE(ReadTextFile(plan.backupPath, after, 1024 * 1024));
+        CHECK(after == edited);
+    }
+}

@@ -22,7 +22,8 @@ std::wstring WeeklyScanTaskName();
 // The arguments the task runs (exposed for tests).
 std::wstring WeeklyScanArguments(const std::wstring& baselinePath, const std::wstring& reportsDir, bool auditHistory);
 
-// The task as it would be created. Pure: no files read.
+// The task as it would be created. Pure: no files read. Refused in portable mode, and
+// when a path holds two % signs (Task Scheduler would expand %NAME% in it at run time).
 struct WeeklyTaskPlan {
     bool         ok = false;
     std::wstring error;          // why no task can be made (portable mode, no program)
