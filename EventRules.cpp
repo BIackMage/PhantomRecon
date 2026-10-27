@@ -140,6 +140,14 @@ EventVerdict LogClearedVerdict(const EventQueryResult& security, const EventQuer
         v.detail = std::to_wstring(clears.size()) + L" event log clear(s) in the last " + std::to_wstring(kLogClearedDays) +
                    L" days:\n" + list.Text() + notes + problems;
     }
+    else if (!Judgeable(security) && Judgeable(system)) {
+        // The Security log is the one an intruder clears (1102). Without it a clean System
+        // log is not enough for a PASS: say what was seen and what could not be.
+        v.status = CHECK_NA;
+        v.detail = L"No event log clear in the System log in the last " + std::to_wstring(kLogClearedDays) +
+                   L" days. The Security log, the one an intruder would clear, was not read, so this is not a PASS.\n" +
+                   notes + problems;
+    }
     else if (Judgeable(security) || Judgeable(system)) {
         std::vector<std::wstring> checked;
         if (Judgeable(security)) checked.push_back(L"Security");

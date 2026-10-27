@@ -303,6 +303,8 @@ void WriteHeader(ScriptText& s, const FixScriptOptions& o, const PlanCounts& c, 
         s.Comment(L"Reverses the steps of the fix plan " + other + L", which was saved with this file from");
         s.Comment(std::wstring(L"the same ") + PHANTOMRECON_NAME_W + L" " + PHANTOMRECON_VERSION_W +
                   L" audit. Phantom Recon never runs this script.");
+        s.Comment(L"Each step puts the setting back to the Windows default, not to the value it had");
+        s.Comment(L"before the fix. If you had set a value of your own, set it again by hand.");
     }
     else {
         s.Comment(std::wstring(L"The problems the ") + PHANTOMRECON_NAME_W + L" " + PHANTOMRECON_VERSION_W +

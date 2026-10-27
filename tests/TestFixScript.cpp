@@ -653,6 +653,11 @@ TEST(FixScript_UnscoredChecksAreNotSteps)
     CHECK_EQ(steps[0].checkId, std::wstring(L"net.llmnr"));
     CHECK(BuildFixSteps(results, true, false).size() == 1);
     CHECK(BuildFixSteps({ Result(L"events.defender", CHECK_WARNING) }, false, false).empty());
+
+    // The undo plan says plainly that it restores Windows defaults, not earlier values.
+    FixScriptOptions options;
+    CHECK(Contains(BuildUndoScript(results, options), L"not to the value it had"));
+    CHECK(!Contains(BuildFixScript(results, options), L"not to the value it had"));
 }
 
 // ---------------------------------------------------------------------------

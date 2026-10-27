@@ -229,10 +229,17 @@ TEST(Events_LogClearedVerdict)
     CHECK_HAS(v.detail, L"run as administrator to read the Security log");
     CHECK(v.detail.find(L"2026-10-20") < v.detail.find(L"2026-10-18"));   // newest first
 
+    // A clean System log alone is not a PASS: the Security log is the one an intruder clears.
     v = LogClearedVerdict(Res(L"Security", EventQueryStatus::AccessDenied), Res(L"System", EventQueryStatus::Ok));
-    CHECK_EQ(v.status, std::wstring(CHECK_PASS));
-    CHECK_HAS(v.detail, L"No event log was cleared in the last 30 days (System log checked)");
+    CHECK_EQ(v.status, std::wstring(CHECK_NA));
+    CHECK_HAS(v.detail, L"No event log clear in the System log in the last 30 days");
+    CHECK_HAS(v.detail, L"so this is not a PASS");
     CHECK_HAS(v.detail, L"run as administrator to read the Security log");
+
+    // Security readable, System not: the Security log alone is enough for a PASS.
+    v = LogClearedVerdict(Res(L"Security", EventQueryStatus::Ok), Res(L"System", EventQueryStatus::AccessDenied));
+    CHECK_EQ(v.status, std::wstring(CHECK_PASS));
+    CHECK_HAS(v.detail, L"(Security log checked)");
 
     // Administrator: both parts, sorted together.
     v = LogClearedVerdict(Res(L"Security", EventQueryStatus::Ok, { secCleared }), Res(L"System", EventQueryStatus::Ok, { appCleared }));
@@ -811,7 +818,8 @@ TEST(Events_ChecksRunHere)
         CHECK_HAS(results[2].detail, L"run as administrator to read the Security log");
         CHECK_EQ(results[3].status, std::wstring(CHECK_NA));
         CHECK_HAS(results[3].detail, L"run as administrator to read the Security log");
-        CHECK(results[0].status == CHECK_PASS || results[0].status == CHECK_WARNING);
+        // Without the Security log a clean System log is N/A, a clear in it still WARNING.
+        CHECK(results[0].status == CHECK_NA || results[0].status == CHECK_WARNING);
         CHECK_HAS(results[0].detail, L"Security part: N/A");
     }
     else {

@@ -123,7 +123,8 @@ def check_script_file(path: pathlib.Path, work: pathlib.Path) -> str:
 def smoke_fix_script(cli: pathlib.Path, work: pathlib.Path) -> None:
     fix, audit_json = work / "fix-plan.ps1", work / "audit.json"
     undo = work / "fix-plan-undo.ps1"
-    result = run_program([cli, "--audit", "--fix-script", fix, "--json", audit_json, "--quiet"])
+    # --no-history: the smoke test must not leave an audit history next to the program.
+    result = run_program([cli, "--audit", "--no-history", "--fix-script", fix, "--json", audit_json, "--quiet"])
     if result.returncode not in (0, 1):
         log("output:\n" + result.stdout + result.stderr)
     expect(result.returncode in (0, 1), f"--audit --fix-script exits 0 or 1 (got {result.returncode})")
