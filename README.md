@@ -186,7 +186,9 @@ A desktop notification appears only when something got worse or the run failed, 
 says what changed, for example "2 new problems since 20 Oct (score 61, down 4). Open
 Phantom Recon to see them. Scan: nothing new, changed or missing." "Worse" means new
 problems, a check that went from WARNING to FAIL or a lower score since the last audit,
-or new or changed files against the baseline. On the command line `--notify-on-change`
+or new or changed files against the baseline. The scan always compares with the
+baseline, not with last week, so after you install or update software on purpose, take a
+new baseline; otherwise those files count every Sunday. On the command line `--notify-on-change`
 does the same for any audit or scan, and `--notify` notifies after every run. A task
 made by version 1.0.0 (Fast Scan only) keeps working; `--schedule-weekly`, or the menu
 item, replaces it with the new command.

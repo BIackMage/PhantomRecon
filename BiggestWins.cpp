@@ -107,6 +107,12 @@ std::wstring BiggestWinsHeadline(const BiggestWinsResult& wins)
 {
     if (wins.wins.empty()) return L"";
     std::wstring which = wins.wins.size() == 1 ? L"Fix this one" : L"Fix these " + std::to_wstring(wins.wins.size());
+    // Near the top a small problem can be worth less than half a point, so the rounded
+    // score does not move; say that instead of "from 100 to 100".
+    if (wins.scoreAfter == wins.scoreBefore) {
+        return which + L" to clear what is left. The score already rounds to " + std::to_wstring(wins.scoreBefore) +
+               L", so the number will not change.";
+    }
     return which + L" and the score goes from " + std::to_wstring(wins.scoreBefore) + L" to " +
            std::to_wstring(wins.scoreAfter) + L".";
 }

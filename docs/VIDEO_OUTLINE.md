@@ -82,7 +82,7 @@ activity section (cleared logs, new services, Defender detections from this PC's
 event logs; run as administrator to include the Security log), the scan table. Then Scans > Weekly Fast Scan: one visible task every Sunday,
 removable from the same menu. It runs the scan and the audit, and it only shows a
 notification when something got worse ("2 new problems since 20 Oct"). "If Sunday is
-quiet, you are done."
+quiet, you are done. When you install something on purpose, take a new baseline that day."
 
 **9:00 The optional AI panel (30 s)**
 Click the AI tab on the right edge. It talks to a model on your own PC if you have one,

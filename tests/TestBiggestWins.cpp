@@ -276,4 +276,13 @@ TEST(BiggestWins_ShownInEveryReport)
     // One win: "this one".
     BiggestWinsResult one = ComputeBiggestWins({ With(ScoredIds(Severity::High, 1)[0], CHECK_FAIL) });
     CHECK(BiggestWinsHeadline(one).rfind(L"Fix this one and the score goes from 0 to 100.", 0) == 0);
+
+    // A problem worth less than half a point near the top: the number does not move, and
+    // the headline says so instead of "from 100 to 100".
+    BiggestWinsResult flat = one;
+    flat.scoreBefore = 100;
+    flat.scoreAfter = 100;
+    flat.totalPoints = 0;
+    CHECK_EQ(BiggestWinsHeadline(flat),
+             std::wstring(L"Fix this one to clear what is left. The score already rounds to 100, so the number will not change."));
 }
