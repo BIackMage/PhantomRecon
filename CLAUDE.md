@@ -94,6 +94,7 @@ Engine (`PhantomRecon.Core.vcxproj`, static library):
 | `AuditRules.cpp` | Pure verdict logic for the Defender, hardening, account, logging and firewall checks: facts in, status out |
 | `PlatformRules.cpp` | Pure verdict logic for the platform checks (`SecurityChecksPlatform.cpp`, `SecurityChecksWireless.cpp`): memory integrity, driver block list, Smart App Control, exploit protection, screen lock, System Restore, open Wi-Fi, and the WLAN profile XML reader |
 | `DeviceGuard.cpp` | One read of `Win32_DeviceGuard`, shared by the Credential Guard and memory integrity checks |
+| `EventLogQuery.cpp`, `EventRules.cpp` | This PC's own event logs (EvtQuery with a NULL session, never a remote one; capped, newest first); pure verdicts for the Recent activity checks, which are not scored |
 | `PeOrdinals.cpp` | Function names for imports by ordinal (ws2_32, wsock32, oleaut32) for the imphash and import scoring |
 | `HardeningScore.cpp`, `AttackMapping.cpp` | Score; ATT&CK names, finding codes, Navigator |
 | `ReportHtml.cpp`, `ReportJson.cpp`, `DetailText.cpp` | Reports; plain-text explanations for windows and AI |

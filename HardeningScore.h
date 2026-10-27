@@ -10,7 +10,9 @@
 // Each check carries a weight from its severity (Critical 10, High 6,
 // Medium 3, Low 1). PASS earns the full weight, WARNING half, FAIL nothing.
 // INFO, N/A and ERROR results do not count either way. The score is the
-// earned weight over the possible weight.
+// earned weight over the possible weight. Checks the catalog marks as not
+// scored (CheckInfo::scored, the "Recent activity" checks that report events)
+// are counted in pass / warn / fail but never weighed.
 // ---------------------------------------------------------------------------
 
 struct HardeningScore {

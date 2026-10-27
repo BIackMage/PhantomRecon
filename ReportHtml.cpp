@@ -78,7 +78,7 @@ static std::wstring ScoreRing(int score, const std::wstring& label)
       << L" stroke-dasharray=\"" << FormatFixed(filled, 1) << L" " << FormatFixed(circumference, 1) << L"\" transform=\"rotate(-90 66 66)\"/>"
       << L"<text x=\"66\" y=\"72\" text-anchor=\"middle\">" << score << L"</text></svg>"
       << L"<div><b style=\"font-size:20px\">Hardening score " << score << L"/100</b><div class=\"meta\">" << H(label)
-      << L". Every check is weighted by severity; a warning earns half.</div></div>";
+      << L". Every scored check is weighted by severity; a warning earns half. Recent activity checks report events and are not scored.</div></div>";
     return s.str();
 }
 
@@ -105,7 +105,8 @@ static void WriteFindings(std::wstringstream& html, const ReportData& d)
             bool attention = r.status == CHECK_FAIL || r.status == CHECK_WARNING;
             html << L"<article class=\"finding\" data-status=\"" << H(r.status) << L"\"" << (attention ? L"" : L" style=\"display:none\"") << L">"
                  << L"<div class=\"head\"><span class=\"pill " << StatusClass(r.status) << L"\">" << H(r.status) << L"</span>"
-                 << L"<h3>" << H(r.name) << L"</h3><span class=\"sev\">" << SeverityName(info->severity) << L" severity</span></div>";
+                 << L"<h3>" << H(r.name) << L"</h3><span class=\"sev\">" << SeverityName(info->severity) << L" severity"
+                 << (info->scored ? L"" : L", not scored") << L"</span></div>";
             html << L"<p>" << H(info->explanation) << L"</p>";
             html << L"<pre>" << H(r.detail) << L"</pre>";
             if (attention) {

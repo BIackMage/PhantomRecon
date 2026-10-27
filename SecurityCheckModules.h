@@ -3,6 +3,7 @@
 #include "SecurityChecks.h"
 #include "SecurityChecksPlatform.h"   // memory integrity, driver block list, Smart App Control, exploit protection, screen lock, System Restore
 #include "SecurityChecksWireless.h"   // open Wi-Fi networks
+#include "SecurityChecksEvents.h"   // the "Recent activity" checks, declared in their own header
 
 // ---------------------------------------------------------------------------
 // Every check function, grouped by the file that implements it. The audit

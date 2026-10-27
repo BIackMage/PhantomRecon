@@ -16,12 +16,14 @@ static const wchar_t* const CAT_LOGGING   = L"Logging and audit";
 static const wchar_t* const CAT_PERSIST   = L"Persistence";
 static const wchar_t* const CAT_UPDATES   = L"Updates and software";
 static const wchar_t* const CAT_RUNNING   = L"Running programs";
+static const wchar_t* const CAT_EVENTS    = L"Recent activity";
 
 const std::vector<std::wstring>& GetCheckCategories()
 {
+    // Recent activity comes last: it reports what happened, not how the PC is set up.
     static const std::vector<std::wstring> categories = {
         CAT_MALWARE, CAT_UPDATES, CAT_PLATFORM, CAT_CREDS, CAT_SERVICES,
-        CAT_NETWORK, CAT_PERSIST, CAT_RUNNING, CAT_LOGGING,
+        CAT_NETWORK, CAT_PERSIST, CAT_RUNNING, CAT_LOGGING, CAT_EVENTS,
     };
     return categories;
 }
@@ -651,6 +653,101 @@ That sets the Security log to 200 MB and turns on the PowerShell operational log
 Logs land in Event Viewer > Applications and Services Logs > Microsoft > Windows > PowerShell > Operational.)~",
         LR"~(Remove-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging','HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging' -Recurse)~" });
 
+    // ------------------------------------------------------------------ Recent activity
+    // These read this PC's own event logs and report what happened lately. They
+    // describe events, not settings, so they are not scored (the last field).
+    add({ L"events.logcleared", L"Event logs cleared", CAT_EVENTS, Severity::High,
+        { L"T1070.001" }, { L"8.11" }, L"",
+        L"Windows records when an event log is cleared: event 1102 in the Security log, and event 104 in the System log for "
+        L"any other log. Administrators sometimes clear logs on purpose, for example while fixing a problem or before handing "
+        L"a PC over. Malware and intruders clear them to hide what they did. This check reports the clears of the last 30 days "
+        L"and the account that cleared the log when the event names one. Reading the Security log needs administrator rights; "
+        L"without them only the System log is checked. It reports events, not a setting, so it does not change the hardening score.",
+        LR"~(Find out who cleared the log and why. Event Viewer (eventvwr.msc) > Windows Logs > Security, filter on event 1102, and Windows Logs > System, filter on event 104. Or PowerShell (elevated for the Security log):
+  Get-WinEvent -FilterHashtable @{LogName='Security'; Id=1102} -MaxEvents 20 | Format-List TimeCreated, Message
+  Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Microsoft-Windows-Eventlog'; Id=104} -MaxEvents 20 | Format-List TimeCreated, Message
+If nobody you know cleared it, treat the PC as possibly compromised: run a full scan (Start-MpScan -ScanType FullScan) and change the passwords of the accounts used on it.
+Make the Security log big enough that it never needs clearing (see Event log size and channels).)~",
+        LR"~(Nothing to undo: this check only reads the event logs. A cleared log cannot be brought back, except from a backup or a copy kept on another system.)~",
+        false });
+
+    add({ L"events.newservices", L"Services installed recently", CAT_EVENTS, Severity::Medium,
+        { L"T1543.003" }, { L"8.11" }, L"",
+        L"A service is a program Windows starts on its own, usually with full SYSTEM rights. Event 7045 in the System log "
+        L"records every new service and driver. Installers add services all the time, so most entries are expected. A new "
+        L"service whose program sits in a user folder (Temp, Downloads), in a folder normal users can change, is not validly "
+        L"signed, is already gone, or is a command shell running an encoded or downloading command is a common sign of "
+        L"malware, or of a remote administration tool someone ran on this PC. This check lists the services installed in the "
+        L"last 14 days with program and start type, and flags those. A service removed again together with its program from "
+        L"Program Files (an uninstall, or a Store app update) is listed but not flagged. Command line arguments are never "
+        L"shown, because they can hold passwords. It reports events, not a setting, so it does not change the hardening score.",
+        LR"~(For each service marked worth a look, find out what installed it (elevated PowerShell):
+  Get-CimInstance Win32_Service -Filter "Name='ServiceName'" | Format-List Name, PathName, StartMode, State, StartName
+  Get-AuthenticodeSignature 'C:\path\to\program.exe'
+If you do not recognise it, back up its key, stop and disable it, and scan its program:
+  reg export "HKLM\SYSTEM\CurrentControlSet\Services\ServiceName" service-backup.reg
+  Stop-Service -Name 'ServiceName'
+  Set-Service -Name 'ServiceName' -StartupType Disabled
+  Start-MpScan -ScanType CustomScan -ScanPath 'C:\path\to\program.exe'
+Delete it once you are sure nothing needs it:
+  sc.exe delete ServiceName)~",
+        LR"~(A disabled service (elevated PowerShell; use the start type the evidence showed):
+  Set-Service -Name 'ServiceName' -StartupType Automatic
+  Start-Service -Name 'ServiceName'
+A deleted service: reg import service-backup.reg, then restart the PC.)~",
+        false });
+
+    add({ L"events.newaccounts", L"Accounts created or made administrator", CAT_EVENTS, Severity::High,
+        { L"T1136.001", L"T1098" }, { L"8.11", L"5.1" }, L"",
+        L"Event 4720 in the Security log records a new local account, and event 4732 a member added to a local group; this "
+        L"check reports the additions to the Administrators group. Someone who gets into a PC often creates an account, or "
+        L"makes an existing one an administrator, so they can come back. Setting up the PC or a new user also does this, so "
+        L"compare each entry with what you did in the last 30 days. Reading the Security log needs administrator rights. It "
+        L"reports events, not a setting, so it does not change the hardening score.",
+        LR"~(Check each account listed (elevated PowerShell):
+  Get-LocalUser | Format-Table Name, Enabled, LastLogon, PasswordLastSet
+  Get-LocalGroupMember -SID S-1-5-32-544
+If you did not create the account or make it an administrator, disable it and take the rights away:
+  Disable-LocalUser -Name 'name'
+  Remove-LocalGroupMember -SID S-1-5-32-544 -Member 'name'
+Then change the passwords of the other administrator accounts and run a full scan (Start-MpScan -ScanType FullScan).)~",
+        LR"~(Enable-LocalUser -Name 'name'
+Add-LocalGroupMember -SID S-1-5-32-544 -Member 'name')~",
+        false });
+
+    add({ L"events.failedlogons", L"Failed sign-ins and lockouts", CAT_EVENTS, Severity::Medium,
+        { L"T1110" }, { L"8.11" }, L"",
+        L"Event 4625 in the Security log records every failed sign-in, and event 4740 an account locked out after too many. "
+        L"A few failures are typing mistakes. Many failures in a short time, failures over the network or through Remote "
+        L"Desktop, or failures for account names nobody uses mean someone is guessing passwords. This check counts the "
+        L"failures of the last 7 days and warns at 20 or more, or at any lockout, with the account names tried most and the "
+        L"sign-in types. Reading the Security log needs administrator rights. It reports events, not a setting, so it does "
+        L"not change the hardening score.",
+        LR"~(See when and from where the attempts came (elevated PowerShell):
+  Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4625; StartTime=(Get-Date).AddDays(-7)} | ForEach-Object { $e = $_; $d = @{}; ([xml]$e.ToXml()).Event.EventData.Data | ForEach-Object { $d[$_.Name] = $_.'#text' }; [pscustomobject]@{ Time = $e.TimeCreated; Account = $d['TargetUserName']; Type = $d['LogonType']; From = $d['IpAddress'] } } | Format-Table
+Attempts over the network (type 3) or Remote Desktop (type 10) from addresses you do not know: turn off Remote Desktop if you do not use it (see Remote Desktop) and make sure it is not reachable from the internet.
+Use long passwords, and set a lockout policy (see Password and lockout policy) so a guesser is stopped after a few tries.)~",
+        LR"~(Nothing to undo: this check only reads the event logs. Each change suggested above has its undo in its own check.)~",
+        false });
+
+    add({ L"events.defender", L"Microsoft Defender detections", CAT_EVENTS, Severity::High,
+        { L"T1562.001" }, { L"8.11", L"10.1" }, L"",
+        L"Microsoft Defender writes to its own log: event 1116 when it finds a threat, 1117 when it acts on it (quarantine, "
+        L"remove), and 5001 when real-time protection is turned off, by a person, a policy, another antivirus product or "
+        L"malware. A threat that was cleaned is good news, but it shows something harmful reached this PC, and it is worth "
+        L"knowing how. Only file and program names are shown: command lines are cut to the program, because they can hold "
+        L"passwords. When another antivirus product is in charge the log may not exist, and the check is N/A. It reports "
+        L"events, not a setting, so it does not change the hardening score.",
+        LR"~(Review each detection in Windows Security > Virus and threat protection > Protection history. Or PowerShell:
+  Get-MpThreatDetection | Format-List InitialDetectionTime, ThreatID, ActionSuccess, Resources
+Then run a full scan:
+  Start-MpScan -ScanType FullScan
+If real-time protection was turned off and you did not do it, turn it back on (elevated PowerShell) and find out what turned it off:
+  Set-MpPreference -DisableRealtimeMonitoring $false
+Think about where each detected file came from (a download, a USB stick, an email attachment) so it does not come back.)~",
+        LR"~(Nothing to undo: this check only reads the event logs. A file quarantined by mistake can be restored in Windows Security > Protection history > the entry > Actions > Restore.)~",
+        false });
+
     return c;
 }
 
@@ -708,7 +805,9 @@ std::wstring BuildFindingsMarkdown()
        << L". Do not edit by hand; run `PhantomReconCli.exe --findings-md docs/FINDINGS.md` instead.\n\n";
     md << L"Each check below says what it looks at, why it matters, how to fix it and how to undo the fix. "
        << L"Commands marked elevated need a PowerShell or Command Prompt opened with Run as administrator.\n\n";
-    md << L"Severity drives the hardening score: Critical counts 10, High 6, Medium 3, Low 1.\n\n";
+    md << L"Severity drives the hardening score: Critical counts 10, High 6, Medium 3, Low 1. "
+       << L"Checks marked not scored (Recent activity) report events from this PC's logs rather than a setting, "
+       << L"and never change the score.\n\n";
 
     for (const std::wstring& category : GetCheckCategories()) {
         md << L"## " << category << L"\n\n";
@@ -717,6 +816,7 @@ std::wstring BuildFindingsMarkdown()
             md << L"### " << info.title << L"\n\n";
             md << L"- Check id: `" << info.id << L"`\n";
             md << L"- Severity: " << SeverityName(info.severity) << L"\n";
+            if (!info.scored) md << L"- Hardening score: not scored (it reports events, not a setting)\n";
             if (!info.attack.empty()) {
                 md << L"- MITRE ATT&CK: ";
                 for (size_t i = 0; i < info.attack.size(); ++i) {
