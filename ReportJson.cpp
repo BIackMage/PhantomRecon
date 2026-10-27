@@ -2,6 +2,7 @@
 #include "Reports.h"
 
 #include "AppPaths.h"
+#include "BiggestWins.h"
 #include "CheckCatalog.h"
 #include "FileIO.h"
 #include "JsonWriter.h"
@@ -182,6 +183,18 @@ std::wstring BuildJsonReport(const ReportData& input)
         w.Key(L"info"); w.Number(data.score.info + data.score.notApplicable);
         w.Key(L"error"); w.Number(data.score.error);
         w.EndObject();
+
+        // The fixes that raise the score the most, best first (BiggestWins.h). The
+        // points add up to the score once all of them pass.
+        w.Key(L"biggestWins");
+        w.BeginArray();
+        for (const ScoreWin& win : ComputeBiggestWins(data.audit).wins) {
+            w.BeginObject();
+            w.Key(L"id"); w.String(win.id);
+            w.Key(L"points"); w.Number(win.points);
+            w.EndObject();
+        }
+        w.EndArray();
 
         // Only when audit history is on: what changed since the previous audit.
         if (data.hasHistory) {

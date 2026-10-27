@@ -25,6 +25,11 @@ struct CheckScript {
     bool           needsRestart;
     const wchar_t* fixNote;       // may be empty
     const wchar_t* undoNote;      // may be empty
+    // Every registry value the fixScript lines set or remove (key as the lines write it).
+    // The fix plan backs these up before the step runs and the undo plan restores them
+    // exactly. Empty for steps that change no registry value directly (cmdlets such as
+    // Set-MpPreference, net accounts, wevtutil). A test matches these against the lines.
+    std::vector<RegistryValueRef> registry;
 };
 
 // Every entry, in no particular order. Tests check each id is in the catalog.

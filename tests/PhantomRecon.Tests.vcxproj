@@ -69,6 +69,9 @@
     <ClCompile Include="TestFixFileAnalysis.cpp" />
     <ClCompile Include="TestFixScript.cpp" />
     <ClCompile Include="TestFixNightReview.cpp" />
+    <ClCompile Include="TestFixUndoBackup.cpp" />
+    <ClCompile Include="TestBiggestWins.cpp" />
+    <ClCompile Include="PowerShellRun.cpp" />
     <ClCompile Include="TestFixAuditChecksA.cpp" />
     <ClCompile Include="TestFixAuditChecksB.cpp" />
     <ClCompile Include="TestFixReportsCli.cpp" />

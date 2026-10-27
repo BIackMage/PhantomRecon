@@ -471,8 +471,15 @@ TEST(FixScript_StepOrderGatesAndUndo)
     // Turning real-time protection off is shown as the catalog's undo text, never run.
     CHECK(Contains(undoText, L"Write-Host '    Set-MpPreference -DisableRealtimeMonitoring $true"));
     CHECK(!Contains(undoText, L"            Set-MpPreference -DisableRealtimeMonitoring $true"));
-    // cfa and llmnr; uac, secureboot, svc.writable and realtime have no undo command.
-    CHECK_EQ(CountOf(undoText, L"Read-Host 'Apply this step? [y/N]'"), static_cast<size_t>(2));
+    // cfa and llmnr, and uac: it has no undo command, but its registry values come back
+    // from the backup (and without a backup it is done by hand). secureboot, svc.writable
+    // and realtime have no undo command.
+    CHECK_EQ(CountOf(undoText, L"Read-Host 'Apply this step? [y/N]'"), static_cast<size_t>(3));
+    CHECK(Contains(undoText, L"$restore = Restore-PRBackup 'hard.uac' $registryValues"));
+    CHECK(Contains(undoText, L"$restore = Restore-PRBackup 'net.llmnr' $registryValues"));
+    CHECK(!Contains(undoText, L"Restore-PRBackup 'def.cfa'"));
+    CHECK(Contains(fix, L"            Save-PRBackup 'hard.uac' $registryValues\r\n"));
+    CHECK(!Contains(fix, L"Save-PRBackup 'def.realtime'"));
     CHECK(Contains(undoText, L"-ExecutionPolicy Bypass -File \".\\plan-undo.ps1\" -ListOnly"));
 
     std::wstring fixPath = WriteScript(L"order.ps1", fix);
@@ -654,10 +661,19 @@ TEST(FixScript_UnscoredChecksAreNotSteps)
     CHECK(BuildFixSteps(results, true, false).size() == 1);
     CHECK(BuildFixSteps({ Result(L"events.defender", CHECK_WARNING) }, false, false).empty());
 
-    // The undo plan says plainly that it restores Windows defaults, not earlier values.
+    // The undo plan says plainly where it restores exact earlier values (registry steps
+    // with a backup) and where Windows defaults.
     FixScriptOptions options;
-    CHECK(Contains(BuildUndoScript(results, options), L"not to the value it had"));
+    std::wstring undoText = BuildUndoScript(results, options);
+    CHECK(Contains(undoText, L"not to the value it had"));
+    CHECK(Contains(undoText, L"put back exactly what was there before the fix"));
+    CHECK(Contains(undoText, L"phantom-recon-fix-backup.json"));
     CHECK(!Contains(BuildFixScript(results, options), L"not to the value it had"));
+    // A plan without registry steps keeps the plain wording and has no backup code.
+    std::wstring cmdOnly = BuildUndoScript({ Result(L"def.cfa", CHECK_FAIL) }, options);
+    CHECK(Contains(cmdOnly, L"Each step puts the setting back to the Windows default"));
+    CHECK(!Contains(cmdOnly, L"Restore-PRBackup"));
+    CHECK(!Contains(BuildFixScript({ Result(L"def.cfa", CHECK_FAIL) }, options), L"Save-PRBackup"));
 }
 
 // ---------------------------------------------------------------------------

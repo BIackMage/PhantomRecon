@@ -7,6 +7,7 @@
 #include "CheckCatalog.h"
 #include "FileIO.h"
 #include "FixScript.h"
+#include "FixScriptBackup.h"
 #include "HardeningScore.h"
 #include "KnownGood.h"
 #include "Redactor.h"
@@ -324,6 +325,8 @@ int RunCli(const CliOptions& o, const CliEnvironment& env)
             std::wstring undoPath, error;
             if (SaveFixScripts(fixPath, o.redact ? RedactAuditResults(report.audit) : report.audit, fixOptions, undoPath, error)) {
                 Say(env, o, L"Fix script: " + fixPath + L"\nUndo script: " + undoPath +
+                            L"\nBackup file (the fix script writes it before a registry step it applies): " +
+                            BackupPathFor(fixPath) +
                             L"\nRead every step before you run it. Phantom Recon does not run either script.\n");
             }
             else {

@@ -2,6 +2,7 @@
 #include "FindingsWindow.h"
 
 #include "AuditHistory.h"
+#include "BiggestWins.h"
 #include "CheckCatalog.h"
 #include "DetailText.h"
 #include "GuiComponents.h"
@@ -48,6 +49,7 @@ struct FindingsWindowState {
     AppState*                                   app = nullptr;
     std::map<std::wstring, SecurityCheckResult> resultsById;
     bool                                        hasResults = false;
+    BiggestWinsResult                           wins;      // the top 5 fixes by score points
     std::vector<size_t>                         rows;      // catalog index per list row
     HWND filter = NULL, summary = NULL, list = NULL, text = NULL;
     HWND buttons[kButtonCount] = {};
@@ -78,9 +80,20 @@ static int StatusRank(const SecurityCheckResult* r)
 static void LoadResults(FindingsWindowState& st)
 {
     st.resultsById.clear();
+    st.wins = BiggestWinsResult();
     st.hasResults = st.app && st.app->audit.hasResults;
     if (!st.hasResults) return;
     for (const SecurityCheckResult& r : st.app->audit.results) st.resultsById[r.id] = r;
+    st.wins = ComputeBiggestWins(st.app->audit.results);
+    DebugLog(L"Top fixes marked: " + std::to_wstring(st.wins.wins.size()));
+}
+
+// "#1 +7" for a top fix, "" otherwise.
+static std::wstring TopFixMarker(const FindingsWindowState& st, const std::wstring& id)
+{
+    int rank = BiggestWinRank(st.wins, id);
+    if (rank == 0) return L"";
+    return L"#" + std::to_wstring(rank) + L" +" + std::to_wstring(st.wins.wins[static_cast<size_t>(rank - 1)].points);
 }
 
 static void Layout(HWND hWnd, FindingsWindowState& st)
@@ -127,6 +140,12 @@ static void ShowSelected(FindingsWindowState& st)
         std::wstring note = HistoryNoteForCheck(st.app->audit.history, info.id);
         if (!note.empty()) text = note + L"\n\n" + text;
     }
+    int rank = BiggestWinRank(st.wins, info.id);
+    if (rank > 0) {
+        const ScoreWin& w = st.wins.wins[static_cast<size_t>(rank - 1)];
+        text = L"Top fix #" + std::to_wstring(rank) + L" of " + std::to_wstring(st.wins.wins.size()) + L": fixing this adds " +
+               std::to_wstring(w.points) + L" point(s) to the hardening score. " + BiggestWinsHeadline(st.wins) + L"\n\n" + text;
+    }
     SetWindowTextW(st.text, ToWindowsLineEnds(text).c_str());
 }
 
@@ -142,7 +161,12 @@ static void FillList(FindingsWindowState& st)
         st.rows.push_back(i);
     }
     if (problemsOnly) {
+        // The top fixes first, in their order, then failures before warnings.
         std::stable_sort(st.rows.begin(), st.rows.end(), [&](size_t a, size_t b) {
+            int wa = BiggestWinRank(st.wins, catalog[a].id);
+            int wb = BiggestWinRank(st.wins, catalog[b].id);
+            if ((wa > 0) != (wb > 0)) return wa > 0;
+            if (wa != wb) return wa < wb;
             int ra = StatusRank(ResultFor(st, catalog[a].id));
             int rb = StatusRank(ResultFor(st, catalog[b].id));
             if (ra != rb) return ra < rb;
@@ -157,16 +181,18 @@ static void FillList(FindingsWindowState& st)
         const SecurityCheckResult* r = ResultFor(st, info.id);
         std::wstring status = r ? r->status : L"not run";
         std::wstring severity = SeverityName(info.severity);
+        std::wstring top = TopFixMarker(st, info.id);
 
         LVITEMW item = {};
         item.mask = LVIF_TEXT | LVIF_PARAM;
         item.iItem = static_cast<int>(row);
-        item.pszText = const_cast<LPWSTR>(status.c_str());
+        item.pszText = const_cast<LPWSTR>(top.c_str());
         item.lParam = static_cast<LPARAM>(st.rows[row]);
         int idx = ListView_InsertItem(st.list, &item);
-        ListView_SetItemText(st.list, idx, 1, const_cast<LPWSTR>(severity.c_str()));
-        ListView_SetItemText(st.list, idx, 2, const_cast<LPWSTR>(info.title.c_str()));
-        ListView_SetItemText(st.list, idx, 3, const_cast<LPWSTR>(info.category.c_str()));
+        ListView_SetItemText(st.list, idx, 1, const_cast<LPWSTR>(status.c_str()));
+        ListView_SetItemText(st.list, idx, 2, const_cast<LPWSTR>(severity.c_str()));
+        ListView_SetItemText(st.list, idx, 3, const_cast<LPWSTR>(info.title.c_str()));
+        ListView_SetItemText(st.list, idx, 4, const_cast<LPWSTR>(info.category.c_str()));
     }
     SendMessageW(st.list, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(st.list, NULL, TRUE);
@@ -178,8 +204,12 @@ static void FillList(FindingsWindowState& st)
     else {
         const HardeningScore& s = st.app->audit.score;
         summary = L"Score " + std::to_wstring(s.score) + L"/100 (" + s.label + L"): " + std::to_wstring(s.fail) +
-                  L" fail, " + std::to_wstring(s.warn) + L" warning, " + std::to_wstring(s.pass) + L" pass. Audit finished " +
-                  st.app->audit.finishedAt + L".";
+                  L" fail, " + std::to_wstring(s.warn) + L" warning, " + std::to_wstring(s.pass) + L" pass.";
+        if (!st.wins.wins.empty()) {
+            summary += L" Top fixes (#1 to #" + std::to_wstring(st.wins.wins.size()) + L") take it to " +
+                       std::to_wstring(st.wins.scoreAfter) + L".";
+        }
+        summary += L" Audit finished " + st.app->audit.finishedAt + L".";
     }
     SetWindowTextW(st.summary, summary.c_str());
 
@@ -223,9 +253,10 @@ static void OnCreate(HWND hWnd, FindingsWindowState& st, HINSTANCE hInst)
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
         0, 0, 10, 10, hWnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_FIND_LIST)), hInst, NULL);
     ListView_SetExtendedListViewStyle(st.list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
-    const wchar_t* columns[4] = { L"Status", L"Severity", L"Check", L"Category" };
-    const int widths[4] = { 75, 70, 240, 150 };
-    for (int i = 0; i < 4; ++i) {
+    // "Top fix" first: the five fixes that raise the score most show "#1 +7" there.
+    const wchar_t* columns[5] = { L"Top fix", L"Status", L"Severity", L"Check", L"Category" };
+    const int widths[5] = { 58, 70, 64, 220, 150 };
+    for (int i = 0; i < 5; ++i) {
         LVCOLUMNW col = {};
         col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
         col.pszText = const_cast<LPWSTR>(columns[i]);

@@ -98,7 +98,15 @@ anything. When you run it from PowerShell opened as administrator, each step say
 changes and why, then asks `Apply this step? [y/N]`. Any answer but y skips the step.
 Fixes that need a settings page, a firmware switch or your own judgement are printed for
 you to do by hand, and nothing restarts the PC. The undo script asks the same way and
-reverses the steps in the opposite order.
+reverses the steps in the opposite order. Before a step that changes registry values
+runs, the fix script saves those values to `plan-backup.json` next to it, and the undo
+script puts back exactly what was there (the same value and type, or no value at all).
+Steps without a backup, and steps that run a command such as `Set-MpPreference`, go back
+to the Windows default instead; each undo step says which one it used.
+
+Every report also lists the **biggest wins**: the five fixes that raise the hardening
+score the most, with the points each one adds ("Fix these 5 and the score goes from 60
+to 73"). The findings window (F6) marks them in its Top fix column.
 
 ### Optional AI panel
 

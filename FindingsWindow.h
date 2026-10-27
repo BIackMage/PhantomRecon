@@ -5,7 +5,9 @@
 // ---------------------------------------------------------------------------
 // FindingsWindow: every security check with its status, what it means, the
 // exact fix and how to undo it. Shows problems first; a filter shows all
-// checks. Before the first audit finishes it lists the whole catalog as
+// checks. The five fixes that raise the score most (BiggestWins.h) are marked
+// "#1 +7" in the Top fix column and come first among the problems. Before the
+// first audit finishes it lists the whole catalog as
 // "not run yet". Modeless and single. UI thread only.
 // ---------------------------------------------------------------------------
 

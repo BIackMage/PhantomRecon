@@ -48,20 +48,26 @@ const std::vector<CheckScript>& GetCheckScripts()
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name ConsentPromptBehaviorAdmin -Value 5
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name PromptOnSecureDesktop -Value 1)~",
           L"",
-          false, true, true, L"", L"" },
+          false, true, true, L"", L"",
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System)~", L"EnableLUA" },
+            { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System)~", L"ConsentPromptBehaviorAdmin" },
+            { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System)~", L"PromptOnSecureDesktop" } } },
         { L"hard.autoplay",
           LR"~(if (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer')) { New-Item 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Force | Out-Null }
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Name NoDriveTypeAutoRun -Value 255 -Type DWord
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Name NoAutorun -Value 1 -Type DWord)~",
           LR"~(Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' -Name NoDriveTypeAutoRun,NoAutorun)~",
-          false, true, false, L"", L"" },
+          false, true, false, L"", L"",
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer)~", L"NoDriveTypeAutoRun" },
+            { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer)~", L"NoAutorun" } } },
         { L"hard.wsh",
           LR"~(if (-not (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings')) { New-Item 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings' -Force | Out-Null }
 Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings' -Name Enabled -Value 0 -Type DWord)~",
           LR"~(Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings' -Name Enabled -Value 1 -Type DWord)~",
           false, true, false,
           L"Skip this step if anything on this PC uses .vbs or .js scripts (some company login scripts do).",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows Script Host\Settings)~", L"Enabled" } } },
         { L"hard.psv2",
           L"Disable-WindowsOptionalFeature -Online -FeatureName MicrosoftWindowsPowerShellV2Root -NoRestart",
           L"Enable-WindowsOptionalFeature -Online -FeatureName MicrosoftWindowsPowerShellV2Root -NoRestart",
@@ -72,14 +78,16 @@ Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\H
           LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name Enabled -Value 0 -Type DWord)~",
           false, true, true,
           L"If Windows Security > Device security > Core isolation details lists incompatible drivers, update or remove them first: memory integrity stays off while one is installed.",
-          L"If Group Policy turned memory integrity on, set that policy back instead." },
+          L"If Group Policy turned memory integrity on, set that policy back instead.",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity)~", L"Enabled" } } },
         { L"hard.driverblocklist",
           LR"~(if (-not (Test-Path 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config')) { New-Item 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Force | Out-Null }
 Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name VulnerableDriverBlocklistEnable -Value 1 -Type DWord)~",
           LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name VulnerableDriverBlocklistEnable -Value 0 -Type DWord)~",
           false, true, true,
           L"If a device stops working after the restart, its driver is on the list: get a current driver from the vendor.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config)~", L"VulnerableDriverBlocklistEnable" } } },
         { L"backup.restore",
           L"Enable-ComputerRestore -Drive ($env:SystemDrive + '\\')",
           L"Disable-ComputerRestore -Drive ($env:SystemDrive + '\\')",
@@ -93,7 +101,8 @@ Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name Vulner
           LR"~(Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name RunAsPPL)~",
           false, true, true,
           L"Some old smart card drivers and plug-ins fail to load with it. Events 3065 and 3066 in Microsoft-Windows-CodeIntegrity/Operational show anything blocked.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Lsa)~", L"RunAsPPL" } } },
         { L"acct.guest",
           L"Get-LocalUser | Where-Object { $_.SID -like '*-501' } | Disable-LocalUser",
           L"Get-LocalUser | Where-Object { $_.SID -like '*-501' } | Enable-LocalUser",
@@ -115,14 +124,20 @@ Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name Vulner
           LR"~(Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name InactivityTimeoutSecs)~",
           false, true, true,
           L"This sets the 15-minute limit for every user of this PC.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System)~", L"InactivityTimeoutSecs" } } },
         { L"acct.autologon",
           LR"~(Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name AutoAdminLogon -Value '0'
 Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name DefaultPassword -ErrorAction SilentlyContinue)~",
           L"",
           false, true, false,
           L"Windows asks for a password at the next start. A password netplwiz keeps encrypted stays stored until you tick Users must enter a user name and password in netplwiz. If a plain-text password was stored, change it as well.",
-          L"" },
+          L"",
+          // DefaultPassword holds a password in plain text: the backup never copies it. And
+          // putting AutoAdminLogon back would sign in without a password again, so the
+          // undo stays the catalog's steps by hand (netplwiz).
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon)~", L"AutoAdminLogon", false, true },
+            { LR"~(HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon)~", L"DefaultPassword", false, true } } },
         { L"cred.ntlm",
           LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name LmCompatibilityLevel -Value 5 -Type DWord
 Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name NoLMHash -Value 1 -Type DWord
@@ -131,7 +146,11 @@ Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0' -Name NtlmM
           L"",
           false, true, true,
           L"Very old devices (NAS boxes, printers, scanners) that only speak LM or NTLMv1 may stop working after the restart.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Lsa)~", L"LmCompatibilityLevel" },
+            { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Lsa)~", L"NoLMHash" },
+            { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0)~", L"NtlmMinClientSec" },
+            { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0)~", L"NtlmMinServerSec" } } },
 
         // ------------------------------------------------------------------ Services and privileges
         { L"msi.alwayselevated",
@@ -140,7 +159,9 @@ Remove-ItemProperty 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer' -Name 
           L"",
           false, true, false,
           L"If Group Policy sets it, change the policy too: Windows Installer > Always install with elevated privileges = Disabled.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer)~", L"AlwaysInstallElevated" },
+            { LR"~(HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer)~", L"AlwaysInstallElevated" } } },
 
         // ------------------------------------------------------------------ Network exposure
         { L"fw.profiles",
@@ -151,19 +172,22 @@ Remove-ItemProperty 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer' -Name 
           LR"~(if (-not (Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient')) { New-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Force | Out-Null }
 Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Name EnableMulticast -Value 0 -Type DWord)~",
           LR"~(Remove-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Name EnableMulticast)~",
-          false, true, false, L"", L"" },
+          false, true, false, L"", L"",
+          { { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient)~", L"EnableMulticast" } } },
         { L"net.nbtns",
           LR"~(Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters\Interfaces' | ForEach-Object { Set-ItemProperty $_.PSPath -Name NetbiosOptions -Value 2 })~",
           LR"~(Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters\Interfaces' | ForEach-Object { Set-ItemProperty $_.PSPath -Name NetbiosOptions -Value 0 })~",
           false, true, false,
           L"Very old shares that only resolve by NetBIOS name will stop resolving.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters\Interfaces)~", L"NetbiosOptions", true } } },
         { L"net.mdns",
           LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' -Name EnableMDNS -Value 0 -Type DWord)~",
           LR"~(Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' -Name EnableMDNS)~",
           false, true, true,
           L"Some casting and printer discovery features use mDNS. Test them after the restart.",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters)~", L"EnableMDNS" } } },
         { L"net.smbsigning",
           L"Set-SmbClientConfiguration -RequireSecuritySignature $true -Force",
           L"Set-SmbClientConfiguration -RequireSecuritySignature $false -Force",
@@ -215,7 +239,8 @@ Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameter
           L"",
           false, true, true,
           L"A NAS box that only offers guest access stops working: give it an account. If Group Policy allows guest logons, change that policy too (Lanman Workstation > Enable insecure guest logons = Disabled).",
-          L"" },
+          L"",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters)~", L"RestrictNullSessAccess" } } },
         { L"fw.rules",
           L"Disable-NetFirewallRule -Name $target",
           L"Enable-NetFirewallRule -Name $target",
@@ -239,7 +264,10 @@ if (-not (Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Module
 Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging' -Name EnableModuleLogging -Value 1 -Type DWord
 Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames' -Name '*' -Value '*')~",
           LR"~(Remove-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging','HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging' -Recurse)~",
-          false, true, false, L"", L"" },
+          false, true, false, L"", L"",
+          { { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging)~", L"EnableScriptBlockLogging" },
+            { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging)~", L"EnableModuleLogging" },
+            { LR"~(HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames)~", L"*" } } },
 
         // ------------------------------------------------------------------ Third pack (SecurityChecksHygiene.cpp)
         // wu.paused (a Settings button or a Group Policy), net.doh (a Settings page,
@@ -249,7 +277,9 @@ Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLog
           L"",
           false, true, true,
           L"Passwords already kept in memory stay there until each account signs out: sign out and back in, or restart. If you did not turn this on yourself, run a full scan and change the passwords of the accounts used on this PC.",
-          L"" },
+          L"",
+          // Putting it back would keep passwords in memory again: the undo stays by hand.
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest)~", L"UseLogonCredential", false, true } } },
         { L"net.remoteassist",
           LR"~(Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowToGetHelp -Value 0 -Type DWord
 Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowFullControl -Value 0 -Type DWord)~",
@@ -257,13 +287,16 @@ Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Nam
 Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Name fAllowFullControl -Value 1 -Type DWord)~",
           false, true, false,
           L"This turns Remote Assistance invitations off. If Group Policy turns them on (System > Remote Assistance), change that policy too.",
-          L"This allows invitations with control again, the Windows default." },
+          L"This allows invitations with control again, the Windows default.",
+          { { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance)~", L"fAllowToGetHelp" },
+            { LR"~(HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance)~", L"fAllowFullControl" } } },
         { L"cred.cachedlogons",
           LR"~(Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name CachedLogonsCount -Value '4' -Type String)~",
           LR"~(Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name CachedLogonsCount -Value '10' -Type String)~",
           false, true, false,
           L"Windows then keeps at most 4 domain sign-ins. Laptops used away from the office need at least 1 or 2. On a domain, Group Policy may set this value again.",
-          L"This sets the Windows default of 10." },
+          L"This sets the Windows default of 10.",
+          { { LR"~(HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon)~", L"CachedLogonsCount" } } },
         { L"hard.sudo",
           L"sudo config --enable forceNewWindow",
           L"sudo config --enable normal",
@@ -277,7 +310,9 @@ Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance' -Nam
 void AttachCheckScripts(std::vector<CheckInfo>& catalog)
 {
     int attached = 0;
+    size_t registryValues = 0;
     for (const CheckScript& s : GetCheckScripts()) {
+        registryValues += s.registry.size();
         bool found = false;
         for (CheckInfo& info : catalog) {
             if (info.id != s.id) continue;
@@ -288,11 +323,13 @@ void AttachCheckScripts(std::vector<CheckInfo>& catalog)
             info.scriptNeedsRestart = s.needsRestart;
             info.fixScriptNote = s.fixNote;
             info.undoScriptNote = s.undoNote;
+            info.scriptRegistry = s.registry;
             found = true;
             ++attached;
             break;
         }
         if (!found) DebugLog(std::wstring(L"No catalog row for script entry ") + s.id);
     }
-    DebugLog(L"Scripts attached to " + std::to_wstring(attached) + L" of " + std::to_wstring(catalog.size()) + L" checks");
+    DebugLog(L"Scripts attached to " + std::to_wstring(attached) + L" of " + std::to_wstring(catalog.size()) + L" checks, " +
+             std::to_wstring(registryValues) + L" registry value(s) declared for exact undo");
 }
