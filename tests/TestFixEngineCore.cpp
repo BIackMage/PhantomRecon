@@ -648,12 +648,16 @@ TEST(FixEngine_PathKeysAliases)
         CHECK_EQ(Baseline::NormalizePath(shortDir + L"\\gone.exe"), Baseline::NormalizePath(longDir + L"\\gone.exe"));
         CHECK_EQ(Baseline::NormalizePath(NormalizeScanRoot(shortDir)), Baseline::NormalizePath(longDir));
         // An exclusion typed with the short name matches the long paths the walker builds.
+        // The walker's paths start from NormalizeScanRoot, which expands every short part
+        // (the test folder itself can be under a short name such as C:\Users\RUNNER~1).
+        std::wstring walkedDir = NormalizeScanRoot(longDir);
         ScanOptions excl;
         ParseExclusions(shortDir + L"\\tool.exe", excl);
-        CHECK(IsExcluded(file, false, excl));
+        CHECK(IsExcluded(walkedDir + L"\\tool.exe", false, excl));
+        CHECK(!IsExcluded(walkedDir + L"\\other.exe", false, excl));
         ScanOptions exclFolder;
         ParseExclusions(shortDir, exclFolder);
-        CHECK(IsExcluded(longDir + L"\\sub\\x.exe", false, exclFolder));
+        CHECK(IsExcluded(walkedDir + L"\\sub\\x.exe", false, exclFolder));
     }
     else {
         std::printf("    note: no 8.3 names on this volume, short-name checks not run\n");
