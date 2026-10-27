@@ -74,22 +74,29 @@ static bool FillConfig(SC_HANDLE hService, ServiceInfo& info)
     if (config->lpDisplayName && info.displayName.empty()) info.displayName = config->lpDisplayName;
     info.startType = config->dwStartType;
     info.serviceType = config->dwServiceType;
+    info.configRead = true;
     return true;
 }
 
 std::vector<ServiceInfo> EnumerateServices(std::wstring* error)
 {
+    return EnumerateServicesOfType(SERVICE_WIN32, error);
+}
+
+std::vector<ServiceInfo> EnumerateServicesOfType(DWORD serviceType, std::wstring* error)
+{
     std::vector<ServiceInfo> out;
     SC_HANDLE hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_ENUMERATE_SERVICE | SC_MANAGER_CONNECT);
     if (!hSCM) {
         if (error) *error = L"Could not open the Service Control Manager (error " + std::to_wstring(GetLastError()) + L")";
+        OutputDebugStringW((L"[ServiceUtil] OpenSCManager failed for service type " + std::to_wstring(serviceType) + L"\n").c_str());
         return out;
     }
 
     DWORD bytesNeeded = 0;
     DWORD count = 0;
     DWORD resume = 0;
-    EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL,
+    EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO, serviceType, SERVICE_STATE_ALL,
         NULL, 0, &bytesNeeded, &count, &resume, NULL);
 
     std::vector<BYTE> buffer;
@@ -99,7 +106,7 @@ std::vector<ServiceInfo> EnumerateServices(std::wstring* error)
         buffer.assign(static_cast<size_t>(bytesNeeded) + 4096, 0);
         DWORD needed = 0;
         count = 0;
-        BOOL ok = EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL,
+        BOOL ok = EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO, serviceType, SERVICE_STATE_ALL,
             buffer.data(), static_cast<DWORD>(buffer.size()), &needed, &count, &resume, NULL);
         more = !ok && GetLastError() == ERROR_MORE_DATA;
         if (!ok && !more) {

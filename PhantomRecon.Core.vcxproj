@@ -85,6 +85,7 @@
     <ClInclude Include="PeFile.h" />
     <ClInclude Include="PeOrdinals.h" />
     <ClInclude Include="PlatformRules.h" />
+    <ClInclude Include="HostRules.h" />
     <ClInclude Include="RegistryEnumerator.h" />
     <ClInclude Include="RegUtil.h" />
     <ClInclude Include="ScanCore.h" />
@@ -96,6 +97,9 @@
     <ClInclude Include="SecurityChecks.h" />
     <ClInclude Include="SecurityChecksPlatform.h" />
     <ClInclude Include="SecurityChecksWireless.h" />
+    <ClInclude Include="SecurityChecksSharing.h" />
+    <ClInclude Include="SecurityChecksSignin.h" />
+    <ClInclude Include="SecurityChecksDrivers.h" />
     <ClInclude Include="SecurityChecksEvents.h" />
     <ClInclude Include="ServiceUtil.h" />
     <ClInclude Include="StringConv.h" />
@@ -147,6 +151,7 @@
     <ClCompile Include="PeFile.cpp" />
     <ClCompile Include="PeOrdinals.cpp" />
     <ClCompile Include="PlatformRules.cpp" />
+    <ClCompile Include="HostRules.cpp" />
     <ClCompile Include="RegistryEnumerator.cpp" />
     <ClCompile Include="RegUtil.cpp" />
     <ClCompile Include="ScanCore.cpp" />
@@ -168,6 +173,9 @@
     <ClCompile Include="SecurityChecksSoftware.cpp" />
     <ClCompile Include="SecurityChecksTasks.cpp" />
     <ClCompile Include="SecurityChecksWireless.cpp" />
+    <ClCompile Include="SecurityChecksSharing.cpp" />
+    <ClCompile Include="SecurityChecksSignin.cpp" />
+    <ClCompile Include="SecurityChecksDrivers.cpp" />
     <ClCompile Include="ServiceUtil.cpp" />
     <ClCompile Include="SystemInfo.cpp" />
     <ClCompile Include="CliRunner.cpp" />

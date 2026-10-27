@@ -20,10 +20,16 @@ struct ServiceInfo {
     DWORD        state = 0;       // SERVICE_RUNNING, SERVICE_STOPPED, ...
     DWORD        serviceType = 0;
     DWORD        processId = 0;
+    bool         configRead = false;   // QueryServiceConfig answered (this account may read the configuration)
 };
 
 // All Win32 services. Empty (and error set) if the SCM cannot be opened.
 std::vector<ServiceInfo> EnumerateServices(std::wstring* error = nullptr);
+
+// All services of one kind: SERVICE_WIN32, SERVICE_DRIVER, ... Only reads the
+// configuration; nothing is started, stopped or changed. Empty (and error set) if the
+// SCM cannot be opened or the enumeration fails.
+std::vector<ServiceInfo> EnumerateServicesOfType(DWORD serviceType, std::wstring* error = nullptr);
 
 // One service by name. False if missing.
 bool QueryServiceByName(const std::wstring& name, ServiceInfo& out);

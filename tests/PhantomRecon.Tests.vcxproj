@@ -75,6 +75,7 @@
     <ClCompile Include="TestFixWindowApp.cpp" />
     <ClCompile Include="TestFixToolsCi.cpp" />
     <ClCompile Include="TestPlatformChecks.cpp" />
+    <ClCompile Include="TestHostChecks.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\PhantomRecon.Core.vcxproj">

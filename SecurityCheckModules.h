@@ -3,6 +3,9 @@
 #include "SecurityChecks.h"
 #include "SecurityChecksPlatform.h"   // memory integrity, driver block list, Smart App Control, exploit protection, screen lock, System Restore
 #include "SecurityChecksWireless.h"   // open Wi-Fi networks
+#include "SecurityChecksSharing.h"    // shared folders, SMB guest and anonymous access, inbound firewall rules
+#include "SecurityChecksSignin.h"     // automatic sign-in, NTLM and LAN Manager
+#include "SecurityChecksDrivers.h"    // driver services
 #include "SecurityChecksEvents.h"   // the "Recent activity" checks, declared in their own header
 
 // ---------------------------------------------------------------------------
