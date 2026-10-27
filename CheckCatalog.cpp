@@ -2,6 +2,7 @@
 #include "CheckCatalog.h"
 
 #include "AttackMapping.h"
+#include "CheckScripts.h"
 #include "Version.h"
 
 #include <sstream>
@@ -753,7 +754,11 @@ Think about where each detected file came from (a download, a USB stick, an emai
 
 const std::vector<CheckInfo>& GetCheckCatalog()
 {
-    static const std::vector<CheckInfo> catalog = BuildCatalog();
+    static const std::vector<CheckInfo> catalog = [] {
+        std::vector<CheckInfo> rows = BuildCatalog();
+        AttachCheckScripts(rows);   // fixScript, undoScript and their traits (CheckScripts.cpp)
+        return rows;
+    }();
     return catalog;
 }
 

@@ -73,7 +73,17 @@ finding means.
 - **JSON**: a versioned schema (`phantomrecon.report/1`) for other tools
 - **MITRE ATT&CK Navigator layer**: the techniques your findings relate to
 - **CSV**: every scan row, UTF-8, opens in Excel
+- **Fix plan**: a PowerShell script with one step per problem the audit found, and an
+  undo script next to it (Reports > Save Fix Script, or `--fix-script plan.ps1`)
 - Optional: hide your user, computer and domain names before saving or sending
+
+The fix plan still leaves every change to you: Phantom Recon never runs it. Open it in a
+text editor and read it first. Run it with `-ListOnly` to see the steps without changing
+anything. When you run it from PowerShell opened as administrator, each step says what it
+changes and why, then asks `Apply this step? [y/N]`. Any answer but y skips the step.
+Fixes that need a settings page, a firmware switch or your own judgement are printed for
+you to do by hand, and nothing restarts the PC. The undo script asks the same way and
+reverses the steps in the opposite order.
 
 ### Optional AI panel
 

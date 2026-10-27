@@ -473,6 +473,7 @@ void UpdateMenuState(AppState& app, HMENU menu)
     enable(ID_REPORT_HTML, hasReport);
     enable(ID_REPORT_JSON, hasReport);
     enable(ID_REPORT_NAVIGATOR, hasReport);
+    enable(ID_REPORT_FIX_SCRIPT, hasAudit);
     check(ID_REPORT_REDACT, app.settings.redactReports);
 
     enable(ID_RESULTS_DETAILS, hasSelection);

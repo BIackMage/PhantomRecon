@@ -27,6 +27,11 @@ void CreateSamplePackAndScan(AppState& app, HWND hWnd);
 // active baseline does not change. askBeforeScan shows a Yes/No first.
 void CreateSamplePackInFolder(AppState& app, HWND hWnd, const std::wstring& folder, bool askBeforeScan);
 
+// Reports > Save Fix Script (also the findings window's button): asks for a .ps1 path and
+// writes the fix plan and its undo script from the last audit. Never runs either.
+// owner is the window the file dialog and messages belong to.
+void SaveFixScriptFiles(AppState& app, HWND owner);
+
 // File > Open Scan Results and File > Open Baseline, for a path already chosen
 // (the command line, or a file dropped on the program). False when it failed;
 // the user has been told why.

@@ -45,6 +45,7 @@ std::vector<SecurityCheckResult> RedactAuditResults(const std::vector<SecurityCh
     for (SecurityCheckResult& r : out) {
         r.name = RedactText(r.name);
         r.detail = RedactText(r.detail);
+        for (std::wstring& target : r.targets) target = RedactText(target);
     }
     return out;
 }

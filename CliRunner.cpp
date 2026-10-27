@@ -5,6 +5,7 @@
 #include "Baseline.h"
 #include "CheckCatalog.h"
 #include "FileIO.h"
+#include "FixScript.h"
 #include "HardeningScore.h"
 #include "KnownGood.h"
 #include "Redactor.h"
@@ -50,6 +51,9 @@ std::wstring CliUsageText()
         L"  --navigator <file.json>     MITRE ATT&CK Navigator layer (needs --audit or a scan)\n"
         L"  --csv <file.csv>            Scan rows as CSV (needs a scan)\n"
         L"  --text <file.txt>           Plain-text audit report (needs --audit)\n"
+        L"  --fix-script <file.ps1>     Fix plan: a PowerShell script you read and run yourself, one\n"
+        L"                              confirmed step at a time, plus <file>-undo.ps1 to reverse it\n"
+        L"                              (needs --audit; nothing is run, both files are replaced)\n"
         L"\n"
         L"Options:\n"
         L"  --exclude \"a;b;*.log\"       Skip folders, paths or extensions\n"
@@ -112,6 +116,7 @@ CliOptions ParseCliArguments(const std::vector<std::wstring>& args)
         else if (a == L"--json") need(i, o.jsonPath, L"--json");
         else if (a == L"--navigator") need(i, o.navigatorPath, L"--navigator");
         else if (a == L"--text") need(i, o.textReportPath, L"--text");
+        else if (a == L"--fix-script") need(i, o.fixScriptPath, L"--fix-script");
         else if (a == L"--findings-md") need(i, o.findingsMdPath, L"--findings-md");
         else if (a == L"--make-samples") need(i, o.samplesDir, L"--make-samples");
         else if (a == L"--exclude") need(i, o.exclusions, L"--exclude");
@@ -146,6 +151,9 @@ CliOptions ParseCliArguments(const std::vector<std::wstring>& args)
     }
     bool reports = !o.htmlPath.empty() || !o.jsonPath.empty() || !o.navigatorPath.empty();
     if (!o.textReportPath.empty() && !o.audit) o.error = L"--text writes the audit report; add --audit";
+    else if (!o.fixScriptPath.empty() && !o.audit) o.error = L"--fix-script writes a fix plan from the audit; add --audit";
+    else if (!o.fixScriptPath.empty() && !HasPs1Extension(o.fixScriptPath))
+        o.error = L"--fix-script needs a file name ending in .ps1 (PowerShell runs no other)";
     else if (!o.csvPath.empty() && scans == 0) o.error = L"--csv writes scan rows; add --baseline-scan, --full, --fast or --diff";
     else if (reports && !o.audit && scans == 0) o.error = L"--report, --json and --navigator need --audit or a scan";
     return o;
@@ -254,6 +262,21 @@ int RunCli(const CliOptions& o, const CliEnvironment& env)
         if (!o.textReportPath.empty() &&
             !WriteSecurityReport(o.textReportPath, o.redact ? RedactAuditResults(report.audit) : report.audit)) {
             fail(L"could not write " + o.textReportPath);
+        }
+        if (!o.fixScriptPath.empty()) {
+            // Written, never run. With --redact the evidence-dependent steps are manual.
+            FixScriptOptions fixOptions;
+            fixOptions.generatedAt = report.generatedAt;
+            fixOptions.redacted = o.redact;
+            std::wstring fixPath = AbsolutePath(o.fixScriptPath);
+            std::wstring undoPath, error;
+            if (SaveFixScripts(fixPath, o.redact ? RedactAuditResults(report.audit) : report.audit, fixOptions, undoPath, error)) {
+                Say(env, o, L"Fix script: " + fixPath + L"\nUndo script: " + undoPath +
+                            L"\nRead every step before you run it. Phantom Recon does not run either script.\n");
+            }
+            else {
+                fail(error);
+            }
         }
     }
 

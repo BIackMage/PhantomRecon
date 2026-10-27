@@ -4,6 +4,7 @@
 #include "CheckCatalog.h"
 #include "DetailText.h"
 #include "GuiComponents.h"
+#include "MainCommands.h"
 #include "Theme.h"
 #include "resource.h"
 
@@ -28,7 +29,15 @@ enum FindingsControlId {
     IDC_FIND_COPY_UNDO,
     IDC_FIND_COPY_ALL,
     IDC_FIND_CLOSE,
+    IDC_FIND_SAVE_SCRIPT,
 };
+
+// Buttons: the three copy buttons under the text, Close at the right, and the fix
+// script button under the list on the left.
+static const int kCopyButtons = 3;
+static const int kCloseButton = 3;
+static const int kSaveScriptButton = 4;
+static const int kButtonCount = 5;
 
 enum FindingsFilter { FilterProblems = 0, FilterAll = 1 };
 
@@ -40,7 +49,7 @@ struct FindingsWindowState {
     bool                                        hasResults = false;
     std::vector<size_t>                         rows;      // catalog index per list row
     HWND filter = NULL, summary = NULL, list = NULL, text = NULL;
-    HWND buttons[4] = {};
+    HWND buttons[kButtonCount] = {};
 };
 
 static FindingsWindowState* GetState(HWND hWnd)
@@ -90,18 +99,20 @@ static void Layout(HWND hWnd, FindingsWindowState& st)
 
     int y = rc.bottom - m - btnH;
     int x = 2 * m + listW;
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < kCopyButtons; ++i) {
         MoveWindow(st.buttons[i], x, y, 130, btnH, TRUE);
         x += 138;
     }
-    MoveWindow(st.buttons[3], rc.right - m - 100, y, 100, btnH, TRUE);
+    MoveWindow(st.buttons[kCloseButton], rc.right - m - 100, y, 100, btnH, TRUE);
+    MoveWindow(st.buttons[kSaveScriptButton], m, y, (std::min)(listW, 160), btnH, TRUE);
 }
 
 static void ShowSelected(FindingsWindowState& st)
 {
     int sel = ListView_GetNextItem(st.list, -1, LVNI_SELECTED);
     bool has = sel >= 0 && static_cast<size_t>(sel) < st.rows.size();
-    for (int i = 0; i < 3; ++i) EnableWindow(st.buttons[i], has);
+    for (int i = 0; i < kCopyButtons; ++i) EnableWindow(st.buttons[i], has);
+    EnableWindow(st.buttons[kSaveScriptButton], st.hasResults);
     if (!has) {
         SetWindowTextW(st.text, st.rows.empty()
             ? L"Nothing to show with this filter. Choose \"All checks\" to see every check."
@@ -220,16 +231,15 @@ static void OnCreate(HWND hWnd, FindingsWindowState& st, HINSTANCE hInst)
         WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
         0, 0, 10, 10, hWnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_FIND_TEXT)), hInst, NULL);
 
-    const wchar_t* labels[4] = { L"Copy the Fix", L"Copy the Undo", L"Copy All", L"Close" };
-    const int ids[4] = { IDC_FIND_COPY_FIX, IDC_FIND_COPY_UNDO, IDC_FIND_COPY_ALL, IDC_FIND_CLOSE };
-    for (int i = 0; i < 4; ++i) {
+    const wchar_t* labels[kButtonCount] = { L"Copy the Fix", L"Copy the Undo", L"Copy All", L"Close", L"Save Fix Script..." };
+    const int ids[kButtonCount] = { IDC_FIND_COPY_FIX, IDC_FIND_COPY_UNDO, IDC_FIND_COPY_ALL, IDC_FIND_CLOSE, IDC_FIND_SAVE_SCRIPT };
+    for (int i = 0; i < kButtonCount; ++i) {
         st.buttons[i] = CreateWindowW(L"BUTTON", labels[i], WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
             0, 0, 10, 10, hWnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(ids[i])), hInst, NULL);
     }
 
-    for (HWND h : { st.filter, st.summary, st.list, st.text, st.buttons[0], st.buttons[1], st.buttons[2], st.buttons[3] }) {
-        SetControlFont(h, font);
-    }
+    for (HWND h : { st.filter, st.summary, st.list, st.text }) SetControlFont(h, font);
+    for (HWND h : st.buttons) SetControlFont(h, font);
     Layout(hWnd, st);
     FillList(st);
     ApplyThemeToWindowTree(hWnd);
@@ -258,6 +268,10 @@ static void OnCommand(HWND hWnd, FindingsWindowState& st, int id, int code)
     case IDC_FIND_COPY_UNDO:
     case IDC_FIND_COPY_ALL:
         CopySelected(hWnd, st, id);
+        break;
+    case IDC_FIND_SAVE_SCRIPT:
+        if (st.app) SaveFixScriptFiles(*st.app, hWnd);
+        DebugLog(L"Save Fix Script pressed");
         break;
     case IDC_FIND_CLOSE:
     case IDCANCEL:
