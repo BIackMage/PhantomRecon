@@ -6,6 +6,7 @@
 #include "FileIO.h"
 #include "JsonWriter.h"
 #include "Redactor.h"
+#include "ReportHistory.h"
 #include "SystemInfo.h"
 #include "TextUtils.h"
 #include "Version.h"
@@ -180,6 +181,12 @@ std::wstring BuildJsonReport(const ReportData& input)
         w.Key(L"info"); w.Number(data.score.info + data.score.notApplicable);
         w.Key(L"error"); w.Number(data.score.error);
         w.EndObject();
+
+        // Only when audit history is on: what changed since the previous audit.
+        if (data.hasHistory) {
+            w.Key(L"history");
+            WriteHistoryJson(w, data.history);
+        }
 
         w.Key(L"findings");
         w.BeginArray();

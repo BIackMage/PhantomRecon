@@ -2,6 +2,7 @@
 #include "CliRunner.h"
 
 #include "AppPaths.h"
+#include "AuditHistory.h"
 #include "Baseline.h"
 #include "CheckCatalog.h"
 #include "FileIO.h"
@@ -42,6 +43,7 @@ std::wstring CliUsageText()
         L"  --schedule-weekly           Run --fast every Sunday as you (creates one scheduled task;\n"
         L"                              needs a baseline, so take one first)\n"
         L"  --unschedule-weekly         Remove that scheduled task\n"
+        L"  --history                   Show the last 20 audits on this PC: date, score, pass, warn, fail\n"
         L"\n"
         L"Where to write:\n"
         L"  --baseline <file>           Baseline to write or compare against (default: next to the program)\n"
@@ -60,6 +62,9 @@ std::wstring CliUsageText()
         L"                              (HTML, JSON, Navigator, CSV and text)\n"
         L"  --notify                    Show a desktop notification when done, also when the run fails\n"
         L"  --quiet                     Print only errors\n"
+        L"  --no-history                Do not read or write the audit history (phantom_recon_history.jsonl);\n"
+        L"                              without it, --audit records its result and says what changed\n"
+        L"                              since the last audit\n"
         L"  --portable                  Keep everything next to the program; never schedule tasks\n"
         L"  --version, --help\n"
         L"\n"
@@ -128,20 +133,23 @@ CliOptions ParseCliArguments(const std::vector<std::wstring>& args)
         else if (a == L"--portable") { /* read by IsPortableMode() */ }
         else if (a == L"--schedule-weekly") o.scheduleWeekly = true;
         else if (a == L"--unschedule-weekly") o.unscheduleWeekly = true;
+        else if (a == L"--history") o.showHistory = true;
+        else if (a == L"--no-history") o.noHistory = true;
         else o.error = L"Unknown option: " + args[i];
     }
+    if (o.error.empty() && o.showHistory && o.noHistory) o.error = L"--history shows the audit history; it cannot be used with --no-history";
     int scans = (!o.baselineScanRoot.empty() ? 1 : 0) + (!o.fullScanRoot.empty() ? 1 : 0) + (o.fastScan ? 1 : 0) + (!o.diffOlder.empty() ? 1 : 0);
     if (o.error.empty() && scans > 1) o.error = L"Pick one of --baseline-scan, --full, --fast or --diff per run";
     if (!o.error.empty() || o.help || o.version) return o;
 
     bool action = o.audit || scans > 0 || !o.samplesDir.empty() || !o.findingsMdPath.empty() ||
-                  o.scheduleWeekly || o.unscheduleWeekly;
+                  o.scheduleWeekly || o.unscheduleWeekly || o.showHistory;
     if (!action) {
         // Only a bare run shows the help. Options with nothing to do are a mistake the
         // caller (often a script or a scheduled task) must hear about.
         if (args.empty()) o.help = true;
         else o.error = L"Nothing to do. Add --audit, --baseline-scan, --full, --fast, --diff, --make-samples, "
-                       L"--findings-md or --schedule-weekly.";
+                       L"--findings-md, --history or --schedule-weekly.";
         return o;
     }
     bool reports = !o.htmlPath.empty() || !o.jsonPath.empty() || !o.navigatorPath.empty();
@@ -159,6 +167,48 @@ static void Say(const CliEnvironment& env, const CliOptions& o, const std::wstri
 static void Error(const CliEnvironment& env, const std::wstring& text)
 {
     if (env.out) env.out(L"Error: " + text + L"\n");
+}
+
+// After --audit: record the result in the history and fill the report's history
+// part. Returns the paragraph for the console and the text report, "" when history
+// is off (--no-history or no file location) or the file could not be read.
+static std::wstring RecordCliAuditHistory(const CliOptions& o, const CliEnvironment& env, ReportData& report)
+{
+    if (o.noHistory || env.historyPath.empty()) {
+        DebugLog(L"Audit history off: nothing read or written");
+        return L"";
+    }
+    AuditHistoryUpdate update = RecordAuditInHistory(env.historyPath, MakeAuditRecord(report.audit, report.score, NowUtcIso()));
+    if (!update.error.empty()) Say(env, o, L"Note: " + update.error + L"\n");
+    if (update.skippedLines > 0) {
+        Say(env, o, L"Note: " + std::to_wstring(update.skippedLines) + L" damaged line(s) in the audit history were skipped.\n");
+    }
+    if (!update.loaded) return L"";
+    report.hasHistory = true;
+    report.history = update.comparison;
+    report.historyRecords = update.recent;
+    DebugLog(L"Audit history: " + HistoryScoreLine(update.comparison));
+    return BuildHistoryParagraph(update.comparison);
+}
+
+// --history: the last records as a table. Printed even with --quiet (it is what was
+// asked for). False when the file exists but cannot be read.
+static bool PrintCliHistory(const CliEnvironment& env)
+{
+    if (env.historyPath.empty()) {
+        if (env.out) env.out(L"No audit history is kept for this run.\n");
+        return true;
+    }
+    std::vector<AuditRecord> records;
+    int skipped = 0;
+    if (!LoadAuditHistory(env.historyPath, records, &skipped)) return false;
+    if (env.out) {
+        env.out(BuildHistoryTable(records));
+        if (skipped > 0) env.out(std::to_wstring(skipped) + L" damaged line(s) in the file were skipped.\n");
+        env.out(L"File: " + env.historyPath + L"\n");
+    }
+    DebugLog(L"--history printed " + std::to_wstring(records.size()) + L" records");
+    return true;
 }
 
 int RunCli(const CliOptions& o, const CliEnvironment& env)
@@ -251,10 +301,16 @@ int RunCli(const CliOptions& o, const CliEnvironment& env)
         report.hasAudit = true;
         Say(env, o, L"\n" + GetSecuritySummary(report.audit) + L"\n\n");
         if (report.score.fail > 0) exitCode = 1;
+        std::wstring historyParagraph = RecordCliAuditHistory(o, env, report);
+        if (!historyParagraph.empty()) Say(env, o, historyParagraph + L"\n\n");
         if (!o.textReportPath.empty() &&
-            !WriteSecurityReport(o.textReportPath, o.redact ? RedactAuditResults(report.audit) : report.audit)) {
+            !WriteSecurityReport(o.textReportPath, o.redact ? RedactAuditResults(report.audit) : report.audit, historyParagraph)) {
             fail(L"could not write " + o.textReportPath);
         }
+    }
+
+    if (o.showHistory && !PrintCliHistory(env)) {
+        fail(L"could not read the audit history at " + env.historyPath);
     }
 
     ScanOptions scanOptions;

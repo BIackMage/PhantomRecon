@@ -37,6 +37,21 @@ comes with what it means, the exact fix, and how to undo the fix.
 Each check is mapped to MITRE ATT&CK techniques and CIS Controls v8 where the mapping is
 honest. [docs/FINDINGS.md](docs/FINDINGS.md) lists every check with its fix.
 
+### What changed since last time
+
+Every audit is remembered, so you can see progress. Next to the score the window shows
+the change since the last audit ("+6 since 20 Oct", "no change since 20 Oct"). The
+findings window marks a check that is fixed or new since then. The HTML report has a
+"Since your last audit" section with what was fixed, what is new, and a chart of the
+last 20 scores; the JSON report has the same in a `history` object (ids of the checks
+in `fixed`, `newProblems`, `worse`, `better`, `newChecks` and `activity`, plus the
+previous date and score). `PhantomReconCli.exe --history` prints the last 20 audits.
+
+Only the scores and each check's result are kept, with the date: no evidence, no paths,
+no names. Turn it off in **File > Settings > Appearance**, or with `--no-history` on the
+command line; then the file is neither read nor written. Delete the file to forget the
+history.
+
 ### File watch: baseline, then compare
 
 - **Take Baseline** records every program and script in one or more folders: hashes,
@@ -158,6 +173,7 @@ All next to the program unless you choose another folder in **File > Settings**:
 | `phantom_recon_settings.ini` | Your settings |
 | `phantom_recon_scoring.ini` | Every scoring weight, written with defaults on first run; edit to tune |
 | `security_audit_report.txt` | Plain text of the last audit |
+| `phantom_recon_history.jsonl` | Past audits: date, score and each check's result, one line per change (at most 500) |
 | `phantom_recon_persistence.snapshot` | Autostart entries seen last time, so new ones stand out |
 | `phantom_recon_revocation_cache.txt` | Certificate revocation answers, kept for a day |
 | `known_good_sha256.txt` | Optional: SHA-256 hashes you trust, one per line |

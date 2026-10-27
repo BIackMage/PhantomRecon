@@ -112,8 +112,9 @@ AppSettings LoadAppSettings()
     s.showGettingStarted = ReadIniBool(L"Appearance", L"ShowGettingStarted", s.showGettingStarted, ini);
     s.auditOnStartup = ReadIniBool(L"Appearance", L"AuditOnStartup", s.auditOnStartup, ini);
     s.redactReports = ReadIniBool(L"Reports", L"Redact", s.redactReports, ini);
+    s.auditHistory = ReadIniBool(L"Audit", L"History", s.auditHistory, ini);
 
-    DebugLog(L"Settings loaded from: " + ini);
+    DebugLog(L"Settings loaded from: " + ini + (s.auditHistory ? L" (audit history on)" : L" (audit history off)"));
     return s;
 }
 
@@ -143,6 +144,7 @@ bool SaveAppSettings(const AppSettings& s)
     ok &= WriteIni(L"Appearance", L"ShowGettingStarted", s.showGettingStarted ? L"1" : L"0", ini);
     ok &= WriteIni(L"Appearance", L"AuditOnStartup", s.auditOnStartup ? L"1" : L"0", ini);
     ok &= WriteIni(L"Reports", L"Redact", s.redactReports ? L"1" : L"0", ini);
+    ok &= WriteIni(L"Audit", L"History", s.auditHistory ? L"1" : L"0", ini);
 
     DebugLog((ok ? L"Settings saved to: " : L"Settings could NOT be fully saved to: ") + ini);
     return ok;
@@ -200,6 +202,8 @@ enum SettingsControlId {
     IDC_THEME, IDC_GETTING_STARTED, IDC_AUDIT_STARTUP, IDC_REDACT_REPORTS,
     // Buttons
     IDC_SAVE, IDC_CANCEL,
+    // Appearance, added after the buttons so the earlier ids stay as they were
+    IDC_AUDIT_HISTORY,
 };
 
 static const int DLG_W = 600;
@@ -332,7 +336,12 @@ static void BuildAppearanceTab(Builder b, const AppSettings& s, int left, int to
     b.Check(L"Run the security audit when the program starts", s.auditOnStartup, left, y, width, IDC_AUDIT_STARTUP);
     y += 30;
     b.Check(L"Hide user, computer and domain names in saved reports", s.redactReports, left, y, width, IDC_REDACT_REPORTS);
-    y += 40;
+    y += 30;
+    b.Check(L"Remember audit results to show what changed", s.auditHistory, left, y, width, IDC_AUDIT_HISTORY);
+    y += 22;
+    b.Label(L"Kept in phantom_recon_history.jsonl next to the program: scores and each check's result, no names or paths.",
+        left + 20, y, width - 20, 34);
+    y += 44;
     b.Label(L"Portable mode is on when the program runs from a USB drive, with --portable, or next to a file named "
             L"portable.flag. It keeps everything next to the program and never creates scheduled tasks.",
         left, y, width, 52);
@@ -511,6 +520,7 @@ static void OnSave(HWND hDlg, SettingsDialogState& st)
     s.showGettingStarted = IsChecked(hDlg, IDC_GETTING_STARTED);
     s.auditOnStartup = IsChecked(hDlg, IDC_AUDIT_STARTUP);
     s.redactReports = IsChecked(hDlg, IDC_REDACT_REPORTS);
+    s.auditHistory = IsChecked(hDlg, IDC_AUDIT_HISTORY);
 
     if (!SaveAppSettings(s)) {
         MessageBoxW(hDlg, (L"The settings could not be written to:\n" + GetSettingsPath() +

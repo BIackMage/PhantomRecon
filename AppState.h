@@ -8,6 +8,7 @@
 
 #include "AiSidebar.h"
 #include "AppMessages.h"
+#include "AuditHistory.h"
 #include "BackgroundWorker.h"
 #include "Baseline.h"
 #include "HardeningScore.h"
@@ -93,6 +94,13 @@ struct AuditState {
     std::vector<SecurityCheckResult> results;
     HardeningScore                   score;
     std::wstring                     finishedAt;
+
+    // What changed since the previous audit (AuditHistory.h), for the score line, the
+    // findings window and the reports. hasHistory false: history off or not available.
+    bool                     hasHistory = false;
+    AuditComparison          history;
+    std::vector<AuditRecord> historyRecords;
+    std::wstring             historyError;
 };
 
 // The last finished scan, for reports. UI thread only.

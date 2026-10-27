@@ -204,6 +204,12 @@ std::wstring GetSecuritySummary(const std::vector<SecurityCheckResult>& results)
 
 bool WriteSecurityReport(const std::wstring& outputPath, const std::vector<SecurityCheckResult>& results)
 {
+    return WriteSecurityReport(outputPath, results, L"");
+}
+
+bool WriteSecurityReport(const std::wstring& outputPath, const std::vector<SecurityCheckResult>& results,
+                         const std::wstring& historyParagraph)
+{
     HardeningScore score = ComputeHardeningScore(results);
     std::wstringstream out;
     out << L"=== " << PHANTOMRECON_NAME_W << L" Security Audit Report ===\r\n";
@@ -211,6 +217,10 @@ bool WriteSecurityReport(const std::wstring& outputPath, const std::vector<Secur
     out << GetWindowsVersionText() << L"\r\n";
     out << L"Hardening score: " << score.score << L"/100 (" << score.label << L"), "
         << score.pass << L" pass, " << score.warn << L" warn, " << score.fail << L" fail\r\n";
+    if (!historyParagraph.empty()) {
+        out << L"\r\n" << ReplaceAllW(AsciiPunctuation(historyParagraph), L"\n", L"\r\n") << L"\r\n";
+        DebugLog(L"Text report includes the audit history paragraph");
+    }
     out << L"=========================================\r\n\r\n";
 
     for (const SecurityCheckResult& r : results) {

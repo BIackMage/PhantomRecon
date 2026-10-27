@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "FindingsWindow.h"
 
+#include "AuditHistory.h"
 #include "CheckCatalog.h"
 #include "DetailText.h"
 #include "GuiComponents.h"
@@ -109,7 +110,13 @@ static void ShowSelected(FindingsWindowState& st)
         return;
     }
     const CheckInfo& info = GetCheckCatalog()[st.rows[static_cast<size_t>(sel)]];
-    SetWindowTextW(st.text, ToWindowsLineEnds(BuildFindingDetailText(info, ResultFor(st, info.id))).c_str());
+    std::wstring text = BuildFindingDetailText(info, ResultFor(st, info.id));
+    // "Fixed since the last audit (...)" first, when the check moved (audit history).
+    if (st.app && st.app->audit.hasHistory) {
+        std::wstring note = HistoryNoteForCheck(st.app->audit.history, info.id);
+        if (!note.empty()) text = note + L"\n\n" + text;
+    }
+    SetWindowTextW(st.text, ToWindowsLineEnds(text).c_str());
 }
 
 static void FillList(FindingsWindowState& st)

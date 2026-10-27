@@ -98,6 +98,7 @@ Engine (`PhantomRecon.Core.vcxproj`, static library):
 | `PeOrdinals.cpp` | Function names for imports by ordinal (ws2_32, wsock32, oleaut32) for the imphash and import scoring |
 | `HardeningScore.cpp`, `AttackMapping.cpp` | Score; ATT&CK names, finding codes, Navigator |
 | `ReportHtml.cpp`, `ReportJson.cpp`, `DetailText.cpp` | Reports; plain-text explanations for windows and AI |
+| `AuditHistory.cpp`, `AuditHistoryText.cpp`, `ReportHistory.cpp` | Past audits (`phantom_recon_history.jsonl`), the comparison with the previous audit, its text, and its HTML and JSON report parts |
 | `Redactor.cpp`, `LLMClient.cpp` | Name hiding; the optional AI client |
 | `JsonWriter.cpp`, `JsonReader.cpp` | JSON out (reports, AI requests); strict JSON in (AI answers, treated as hostile) |
 | `SampleData.cpp`, `ScheduledScan.cpp`, `CliRunner.cpp` | Sample pack, weekly task, the console program's logic |

@@ -48,6 +48,7 @@ std::wstring JsonWriter::Escape(const std::wstring& value)
 
 void JsonWriter::Newline()
 {
+    if (m_compact) return;
     m_out += L"\n";
     m_out.append(m_stack.size() * 2, L' ');
 }
@@ -102,7 +103,7 @@ void JsonWriter::Key(const std::wstring& name)
     if (level.count > 0) m_out += L",";
     Newline();
     level.count++;
-    m_out += L"\"" + Escape(name) + L"\": ";
+    m_out += L"\"" + Escape(name) + (m_compact ? L"\":" : L"\": ");
     m_afterKey = true;
 }
 

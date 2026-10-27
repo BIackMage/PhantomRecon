@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <string>
+#include "AuditHistory.h"
 #include "BackgroundWorker.h"
 #include "LLMClient.h"
 #include "ScanCore.h"
@@ -12,7 +13,7 @@ class PayloadTracker;   // AppMessages.h
 // SettingsDialog: modal window with three tabs.
 //   Scanning    exclusions, default folder, baseline file, reports folder,
 //               certificate revocation, Fast Scan depth, fuzzy hashing
-//   Appearance  theme, getting-started window, audit at startup
+//   Appearance  theme, getting-started window, audit at startup, audit history
 //   AI          endpoint, model, tokens, temperature, redaction, prompt size,
 //               Test Connection
 // Settings persist to phantom_recon_settings.ini next to the exe.
@@ -44,6 +45,7 @@ struct AppSettings {
     bool         showGettingStarted = true;
     bool         auditOnStartup = true;
     bool         redactReports = false;          // hide user, computer and domain names in saved reports
+    bool         auditHistory = kAuditHistoryDefaultOn;   // remember audit results to show what changed (AuditHistory.h)
 };
 
 // Show the settings dialog (modal). Returns true if the user saved changes;

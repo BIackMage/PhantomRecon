@@ -3,6 +3,7 @@
 
 #include "AppPaths.h"
 #include "CheckCatalog.h"
+#include "ReportHistory.h"
 #include "TextUtils.h"
 #include "Version.h"
 
@@ -43,6 +44,7 @@ table{width:100%;border-collapse:collapse;background:var(--card);border:1px soli
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{cursor:pointer;user-select:none;background:var(--code)}
 td.path{word-break:break-all;max-width:420px}tr.hi td:first-child{border-left:4px solid var(--fail)}tr.mid td:first-child{border-left:4px solid var(--warn)}
 footer{margin-top:40px;color:var(--muted);font-size:13px}
+.hist ul{margin:4px 0 12px;padding-left:22px}.trend{display:block;width:100%;max-width:680px;height:auto;margin:14px 0 6px}.trend .grid{stroke:var(--line);stroke-width:1}.trend .line{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-linejoin:round}.trend .dot{fill:var(--accent)}.trend text{font:12px "Segoe UI",sans-serif;fill:var(--muted)}
 @media print{.bar,.copy{display:none}.finding{break-inside:avoid}body{background:#fff}}
 )CSS";
 
@@ -90,6 +92,7 @@ static void WriteFindings(std::wstringstream& html, const ReportData& d)
          << L"<div class=\"tile\"><b class=\"warn\">" << d.score.warn << L"</b><span>Warning</span></div>"
          << L"<div class=\"tile\"><b class=\"pass\">" << d.score.pass << L"</b><span>Pass</span></div>"
          << L"<div class=\"tile\"><b class=\"info\">" << d.score.info + d.score.notApplicable + d.score.error << L"</b><span>Info</span></div></div>\n";
+    if (d.hasHistory) html << BuildHistoryHtmlSection(d.history, d.historyRecords);
     html << L"<div class=\"bar f\"><button class=\"on\" onclick=\"filterFindings('attention',this)\">Needs attention</button>"
          << L"<button onclick=\"filterFindings('all',this)\">All checks</button><button onclick=\"filterFindings('pass',this)\">Passed</button></div>\n";
 
