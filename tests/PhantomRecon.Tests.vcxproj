@@ -69,6 +69,7 @@
     <ClCompile Include="TestFixFileAnalysis.cpp" />
     <ClCompile Include="TestFixScript.cpp" />
     <ClCompile Include="TestFixNightReview.cpp" />
+    <ClCompile Include="TestFixPackReview.cpp" />
     <ClCompile Include="TestFixAuditChecksA.cpp" />
     <ClCompile Include="TestFixAuditChecksB.cpp" />
     <ClCompile Include="TestFixReportsCli.cpp" />
