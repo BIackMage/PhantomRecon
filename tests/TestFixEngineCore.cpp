@@ -602,6 +602,31 @@ TEST(FixEngine_PathKeysAliases)
     // Trailing dots stay: "a.exe." and "a.exe" can be two files on NTFS.
     CHECK(Baseline::NormalizePath(L"C:\\Tools\\a.exe.") != Baseline::NormalizePath(L"C:\\Tools\\a.exe"));
 
+    // Path exclusions: forward slashes and a drive root still work after normalising.
+    ScanOptions slashes;
+    ParseExclusions(L"C:/Tools/Old", slashes);
+    CHECK(IsExcluded(L"C:\\Tools\\Old\\a.exe", false, slashes));
+    CHECK(!IsExcluded(L"C:\\Tools\\Older\\a.exe", false, slashes));
+    ScanOptions driveRoot;
+    ParseExclusions(L"D:\\", driveRoot);
+    CHECK(IsExcluded(L"D:\\any\\a.exe", false, driveRoot));
+    CHECK(!IsExcluded(L"C:\\any\\a.exe", false, driveRoot));
+
+    // A short-name exclusion of a file that does not exist yet, under a folder that has a
+    // short name on most system drives (Program Files is created with one).
+    wchar_t pfShort[MAX_PATH] = {};
+    DWORD pfLen = GetShortPathNameW(L"C:\\Program Files", pfShort, MAX_PATH);
+    std::wstring pf(pfShort, pfLen < MAX_PATH ? pfLen : 0);
+    if (!pf.empty() && pf.find(L'~') != std::wstring::npos) {
+        ScanOptions pfExcl;
+        ParseExclusions(pf + L"\\Not There Yet\\tool.exe", pfExcl);
+        CHECK(IsExcluded(L"C:\\Program Files\\Not There Yet\\tool.exe", false, pfExcl));
+        CHECK(!IsExcluded(L"C:\\Program Files\\Not There Yet\\other.exe", false, pfExcl));
+    }
+    else {
+        std::printf("    note: C:\\Program Files has no short name, short-name exclusion check not run\n");
+    }
+
     Baseline b;
     b.AddEntry(FixEntry(L"\\\\?\\C:\\Tools\\Prefixed.exe"));
     CHECK(b.FindEntry(L"C:\\Tools\\prefixed.exe") != nullptr);
@@ -622,6 +647,13 @@ TEST(FixEngine_PathKeysAliases)
         // A file that no longer exists under a short folder name maps to the same key.
         CHECK_EQ(Baseline::NormalizePath(shortDir + L"\\gone.exe"), Baseline::NormalizePath(longDir + L"\\gone.exe"));
         CHECK_EQ(Baseline::NormalizePath(NormalizeScanRoot(shortDir)), Baseline::NormalizePath(longDir));
+        // An exclusion typed with the short name matches the long paths the walker builds.
+        ScanOptions excl;
+        ParseExclusions(shortDir + L"\\tool.exe", excl);
+        CHECK(IsExcluded(file, false, excl));
+        ScanOptions exclFolder;
+        ParseExclusions(shortDir, exclFolder);
+        CHECK(IsExcluded(longDir + L"\\sub\\x.exe", false, exclFolder));
     }
     else {
         std::printf("    note: no 8.3 names on this volume, short-name checks not run\n");

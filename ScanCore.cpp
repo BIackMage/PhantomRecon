@@ -67,8 +67,14 @@ void ParseExclusions(const std::wstring& text, ScanOptions& options)
         else if (item[0] == L'.') {
             options.excludeExtensions.push_back(item);
         }
-        else if ((item.size() >= 3 && item[1] == L':' && item[2] == L'\\') || item.rfind(L"\\\\", 0) == 0) {
-            std::wstring prefix = item;
+        else if ((item.size() >= 3 && item[1] == L':' && (item[2] == L'\\' || item[2] == L'/')) ||
+                 item.rfind(L"\\\\", 0) == 0) {
+            // Same spelling as the walked paths: the roots go through NormalizeScanRoot,
+            // which expands 8.3 short names ("C:\Users\RUNNER~1"), so an exclusion typed
+            // with a short name would otherwise never match. NormalizePath expands the
+            // part that exists, so a file that is not there yet is still covered.
+            std::wstring prefix = Baseline::NormalizePath(TrimW(raw));
+            if (prefix != item) DebugLog(L"ParseExclusions: " + item + L" -> " + prefix);
             if (prefix.back() != L'\\') prefix += L'\\';
             options.excludePathPrefixes.push_back(prefix);
         }
