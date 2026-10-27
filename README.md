@@ -17,7 +17,7 @@ Version 1.0.0. Windows 10 and 11, 64-bit.
 
 ## What it does
 
-### Security audit: 63 checks, one score
+### Security audit: 69 checks, one score
 
 The audit runs when the program starts and scores the PC from 0 to 100. Each problem
 comes with what it means, the exact fix, and how to undo the fix. The Recent activity
@@ -28,9 +28,9 @@ checks report what happened in this PC's own event logs and never change the sco
 | Malware protection | Real-time protection, Tamper Protection, cloud protection, definition age, exclusions, Attack Surface Reduction rules, SmartScreen, Controlled folder access |
 | Updates and software | Windows Update health, known-vulnerable or end-of-life programs (7-Zip, WinRAR, PuTTY, VLC and more) |
 | Platform hardening | BitLocker, TPM, Secure Boot, UAC, AutoPlay, Windows Script Host, PowerShell 2.0, Office macros, memory integrity, the vulnerable driver block list, Smart App Control, system exploit protection, System Restore |
-| Credential protection | LSA protection, Credential Guard, Guest and Administrator accounts, local accounts, password and lockout policy, screen lock when nobody is at the PC |
-| Services and privileges | Unquoted service paths, service programs normal users can change, AlwaysInstallElevated, folders where a planted DLL would load, leftover setup files with passwords, Group Policy Preference passwords, Print Spooler |
-| Network exposure | Firewall, listening programs, LLMNR, NetBIOS, mDNS, SMB signing, SMBv1, Remote Desktop, WinRM, Remote Registry, WPAD, hosts file, DNS servers, trusted root certificates, saved Wi-Fi networks without a password that connect on their own |
+| Credential protection | LSA protection, Credential Guard, old LM and NTLM sign-in protocols, Guest and Administrator accounts, local accounts, password and lockout policy, automatic sign-in with a stored password, screen lock when nobody is at the PC |
+| Services and privileges | Unquoted service paths, service programs normal users can change, driver services with a missing, unsigned or changeable file, AlwaysInstallElevated, folders where a planted DLL would load, leftover setup files with passwords, Group Policy Preference passwords, Print Spooler |
+| Network exposure | Firewall, inbound firewall rules open to any address on public networks, listening programs, LLMNR, NetBIOS, mDNS, SMB signing, SMBv1, shared folders others can change, guest and anonymous file sharing access, Remote Desktop, WinRM, Remote Registry, WPAD, hosts file, DNS servers, trusted root certificates, saved Wi-Fi networks without a password that connect on their own |
 | Persistence | 13 kinds of autostart location (Run keys to WMI subscriptions and COM), scheduled tasks |
 | Running programs | Programs pretending to be Windows, started from Downloads or Temp, or changed since your baseline |
 | Logging and audit | Audit policy per subcategory, event log sizes, PowerShell logging |

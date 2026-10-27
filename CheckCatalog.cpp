@@ -298,6 +298,33 @@ If RunAsPPL was 1 on a PC with Secure Boot, the UEFI variable keeps protection o
 Group Policy: Computer Configuration > Administrative Templates > System > Device Guard > Turn On Virtualization Based Security = Enabled, Credential Guard Configuration = Enabled without lock. Reboot.)~",
         LR"~(Set the same policy to Disabled and reboot.)~" });
 
+    add({ L"cred.ntlm", L"Old sign-in protocols (LM and NTLM)", CAT_CREDS, Severity::High,
+        { L"T1557.001", L"T1110.002", L"T1003.002" }, { L"4.1", L"3.10" },
+        L"Network security: LAN Manager authentication level: Send NTLMv2 response only. Refuse LM & NTLM; Network security: Do not store LAN Manager hash value on next password change: Enabled; Network security: Minimum session security for NTLM SSP based (including secure RPC) clients and servers: Require NTLMv2 session security, Require 128-bit encryption",
+        L"When this PC signs in to another computer without Kerberos (in a workgroup, with a local account, or whenever Kerberos "
+        L"is not available), Windows proves the password with a challenge and an answer instead of sending it. The oldest "
+        L"answers, LAN Manager (LM) and NTLMv1, are weak: anyone who captures one on the network, or tricks the PC into sending "
+        L"one, can crack it or turn it back into the password hash. NTLMv2 answers are much harder to attack. "
+        L"LmCompatibilityLevel decides which answers this PC sends (0 to 2 still send LM or NTLMv1, 3 and higher only NTLMv2) "
+        L"and, at 4 and 5, which ones it refuses when other computers sign in to it; 5 refuses both, as the CIS benchmark "
+        L"asks, so 3 and 4 are a warning here. Not set means 3. NoLMHash = 1 keeps Windows from storing an LM hash of new "
+        L"passwords, which can be cracked in minutes; not set means 1. NtlmMinClientSec and NtlmMinServerSec set the least "
+        L"protection the connection gets after sign-in: 128-bit encryption and NTLMv2 session security (537395200 sets both). "
+        L"Not set means 128-bit only. Very old devices, such as NAS boxes, printers and scanners from before about 2008, may "
+        L"only speak LM or NTLMv1 and stop working after the change.",
+        LR"~(Elevated PowerShell, then restart:
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name LmCompatibilityLevel -Value 5 -Type DWord
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name NoLMHash -Value 1 -Type DWord
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0' -Name NtlmMinClientSec -Value 537395200 -Type DWord
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0' -Name NtlmMinServerSec -Value 537395200 -Type DWord
+Or Group Policy: Computer Configuration > Windows Settings > Security Settings > Local Policies > Security Options > Network security: LAN Manager authentication level = Send NTLMv2 response only. Refuse LM & NTLM, and both Minimum session security for NTLM SSP settings = Require NTLMv2 session security, Require 128-bit encryption.
+Very old devices (NAS boxes, printers, scanners) that only speak LM or NTLMv1 may stop working: update their firmware, or use level 3 until they are replaced. An LM hash that is already stored goes away the next time that password is changed.)~",
+        LR"~(Set each value back to what the evidence showed before the fix (elevated PowerShell, then restart), for example:
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name LmCompatibilityLevel -Value 3 -Type DWord
+A value the evidence showed as not set: remove it to get the Windows default back:
+  Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name LmCompatibilityLevel
+  Remove-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0' -Name NtlmMinClientSec,NtlmMinServerSec)~" });
+
     add({ L"acct.guest", L"Guest account", CAT_CREDS, Severity::Medium,
         { L"T1078.001" }, { L"4.7" }, L"Accounts: Guest account status: Disabled",
         L"The built-in Guest account allows local logons without a password of your choosing. It should be off on every PC.",
@@ -339,6 +366,23 @@ Add-LocalGroupMember -SID S-1-5-32-544 -Member 'name')~" });
 Domain-joined PCs take these from the domain policy instead.)~",
         LR"~(net accounts /minpwlen:<old> /lockoutthreshold:<old>   (the old values are in this report's evidence))~" });
 
+    add({ L"acct.autologon", L"Automatic sign-in", CAT_CREDS, Severity::High,
+        { L"T1552.002" }, { L"4.1" }, L"MSS: (AutoAdminLogon) Enable Automatic Logon (not recommended): Disabled",
+        L"With automatic sign-in, Windows opens an account's desktop at start-up without asking for a password, so anyone who "
+        L"switches the PC on, or takes it, is signed in. The password it uses is stored either in the registry value "
+        L"DefaultPassword, in plain text that every user and program on this PC can read, or encrypted as an LSA secret (what "
+        L"netplwiz and the Sysinternals Autologon tool use). Plain text fails this check; the encrypted form still means the "
+        L"PC asks nobody to sign in, so it is a warning. Kiosk and lab PCs sometimes need automatic sign-in: use an account "
+        L"without administrator rights or personal data for that. This check only looks at whether DefaultPassword exists; "
+        L"it never reads, keeps or shows the password. The account name is shown in the evidence and hidden with the other "
+        L"names when you hide names in a report.",
+        LR"~(Win+R, netplwiz, tick Users must enter a user name and password to use this computer, OK. That also removes the encrypted password. If the box is missing, first turn off Settings > Accounts > Sign-in options > For improved security, only allow Windows Hello sign-in.
+Or elevated PowerShell:
+  Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name AutoAdminLogon -Value '0'
+  Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name DefaultPassword -ErrorAction SilentlyContinue
+If a plain-text DefaultPassword was stored, change that account's password as well: anyone on this PC could have read it.)~",
+        LR"~(By hand: Win+R, netplwiz, untick Users must enter a user name and password to use this computer, OK, and type the account's password when asked. Windows then stores it encrypted, not in plain text.)~" });
+
     add({ L"acct.screenlock", L"Screen lock when away", CAT_CREDS, Severity::Medium,
         {}, { L"4.3" }, L"Interactive logon: Machine inactivity limit: 900 or fewer second(s), but not 0",
         L"If the PC stays unlocked when you walk away, anyone who sits down can use your account, read your mail and approve "
@@ -379,6 +423,35 @@ Tell the vendor too. This is their bug.)~",
 Then update or reinstall the program so the vendor sets correct permissions.)~",
         LR"~(Restore the saved permissions (elevated PowerShell; the backup holds the file name, so name its folder):
   icacls "C:\path\to" /restore acl-backup.txt)~" });
+
+    add({ L"svc.drivers", L"Driver services with a missing, unsigned or changeable file", CAT_SERVICES, Severity::High,
+        { L"T1543.003", L"T1574.010" }, { L"4.1", L"2.5" }, L"",
+        L"Drivers run inside the Windows kernel, with more power than any program. Each one is registered as a driver service "
+        L"that names its file. A file that is not validly signed may have been changed, or built to slip past checks. If "
+        L"normal users can change the file or its folder, a program running as a normal user can swap in its own code, which "
+        L"Windows then loads into the kernel. A missing file means the entry is a leftover, and a file someone puts at that "
+        L"path later would load. Boot and system start drivers load before almost anything else, so they are listed first. "
+        L"This check reads each driver service's settings from the Service Control Manager and checks its file. It never "
+        L"starts, stops or changes a driver, and it does not list the drivers loaded in memory. Disabled driver services are "
+        L"not judged, because they cannot load until an administrator changes them.",
+        LR"~(For each driver listed, find out what installed it: the file's Properties > Digital Signatures and Details tabs, or elevated PowerShell:
+  Get-CimInstance Win32_SystemDriver -Filter "Name='DriverName'" | Format-List Name, PathName, StartMode, State
+  Get-AuthenticodeSignature 'C:\path\to\driver.sys'
+A device or program you still use: update or reinstall it from the vendor, which puts back a signed driver with the right permissions.
+A leftover you do not need: back up its key, then disable the driver service (elevated PowerShell) and restart:
+  reg export "HKLM\SYSTEM\CurrentControlSet\Services\DriverName" driver-backup.reg
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\DriverName' -Name Start -Value 4 -Type DWord
+Do not disable a boot or system start driver you cannot identify: Windows may not start without it. Ask the PC maker or the vendor first.
+A file or folder normal users can change: save the permissions, then cut the group the evidence names down to read and run (elevated PowerShell):
+  icacls "C:\the\folder" /save acl-backup.txt
+  icacls "C:\the\folder" /inheritance:d
+  icacls "C:\the\folder" /grant:r "*S-1-5-11:(OI)(CI)(RX)"
+Use the SID of the group the evidence names: *S-1-5-11 Authenticated Users, *S-1-5-32-545 Users, *S-1-1-0 Everyone, *S-1-5-4 INTERACTIVE.)~",
+        LR"~(Put the start type back (elevated PowerShell; 0 Boot, 1 System, 2 Automatic, 3 Manual, as the evidence showed), then restart:
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\DriverName' -Name Start -Value 3 -Type DWord
+Or restore the whole key: reg import driver-backup.reg
+Permissions (elevated PowerShell; the backup holds the folder name, so name its parent):
+  icacls "C:\the" /restore acl-backup.txt)~" });
 
     add({ L"msi.alwayselevated", L"AlwaysInstallElevated", CAT_SERVICES, Severity::Critical,
         { L"T1218.007", L"T1548" }, { L"4.1" }, L"Always install with elevated privileges: Disabled",
@@ -447,6 +520,25 @@ Start-Service Spooler)~" });
   Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True -DefaultInboundAction Block)~",
         LR"~(Set-NetFirewallProfile -Profile <name> -Enabled False   (not recommended))~" });
 
+    add({ L"fw.rules", L"Inbound firewall rules open on public networks", CAT_NETWORK, Severity::Medium,
+        { L"T1210" }, { L"4.4", L"4.5" }, L"",
+        L"A firewall rule that allows inbound connections lets other computers reach a program on this PC. A rule for the "
+        L"Public profile that accepts any remote address applies in cafes, hotels, airports and every other network Windows "
+        L"treats as public, where anyone nearby can connect. Programs add such rules when they are installed, or when someone "
+        L"ticks Public networks in the firewall prompt, and many are never needed again. A rule for a program in a folder "
+        L"normal users can change, or where downloads and temporary files land, is listed first: whatever replaced that "
+        L"program would get the same open door. Windows' own rule groups (their group name is a Windows resource such as "
+        L"@FirewallAPI.dll,-25000) and Store app rules are managed by Windows and limited to one program, service or port, so "
+        L"they are skipped unless they allow everything. Rules limited to certain remote addresses, or to Private and Domain "
+        L"networks only, are not listed. The rules are read through the Windows Firewall API; nothing is changed.",
+        LR"~(For each rule you do not need on public networks, turn it off: Windows Defender Firewall with Advanced Security (wf.msc) > Inbound Rules > the rule > Disable Rule. Or keep it for home networks only: the rule's Properties > Advanced > untick Public.
+Or elevated PowerShell, by the rule's unique name (the first command shows it):
+  Get-NetFirewallRule -DisplayName 'Rule name' | Format-Table Name, DisplayName, Profile, Enabled
+  Disable-NetFirewallRule -Name 'unique name'
+A rule for a program in Downloads, Temp or another folder normal users can change: reinstall the program into C:\Program Files, then allow it again for Private networks only if it needs that.)~",
+        LR"~(wf.msc > Inbound Rules > the rule > Enable Rule. Or elevated PowerShell:
+  Enable-NetFirewallRule -Name 'unique name')~" });
+
     add({ L"net.listening", L"Programs listening on the network", CAT_NETWORK, Severity::Medium,
         { L"T1210" }, { L"4.4", L"4.8" }, L"",
         L"A listening program waits for other computers to connect to it. Each one is a door. Doors opened by unsigned programs, "
@@ -499,6 +591,51 @@ Some casting and printer discovery features use mDNS. Test them after the change
   Disable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -NoRestart
 Very old NAS boxes and scanners that only speak SMB1 will stop working. Update or replace them.)~",
         LR"~(Enable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -All)~" });
+
+    add({ L"net.shares", L"Shared folders others can change", CAT_NETWORK, Severity::High,
+        { L"T1080" }, { L"3.3" }, L"",
+        L"A shared folder can be opened from other computers on the network. Windows checks two lists before it lets anyone "
+        L"change a file there: the share's own permissions and the folder's NTFS permissions, and the stricter one wins. When "
+        L"both let Everyone, Authenticated Users, Users or Guest change files, any account on the network, and with guest "
+        L"access anyone at all, can add, change or delete files in it. Ransomware on another PC then encrypts the share too, "
+        L"and a program or document kept there can be swapped for a harmful one that others open. Windows' own administrative "
+        L"shares (C$, ADMIN$, IPC$, print$) are skipped: only administrators can use them. Only each share's top folder is "
+        L"checked, not every folder inside it. A share with no stored permissions counts as open to Everyone. As a normal user "
+        L"the share list is read from the registry, and a share whose permissions cannot be read is reported as not judged.",
+        LR"~(If nobody needs to change files there over the network, make the share read-only for that group: right-click the folder > Properties > Sharing > Advanced Sharing > Permissions, select the group the evidence names and untick Full Control and Change. Or elevated PowerShell (the share name and group from the evidence):
+  Revoke-SmbShareAccess -Name 'ShareName' -AccountName 'Everyone' -Force
+  Grant-SmbShareAccess -Name 'ShareName' -AccountName 'Everyone' -AccessRight Read -Force
+If some people do need to change files, give Change to their own accounts instead of a broad group:
+  Grant-SmbShareAccess -Name 'ShareName' -AccountName 'PC\name' -AccessRight Change -Force
+If the folder does not need to be shared at all:
+  Remove-SmbShare -Name 'ShareName' -Force)~",
+        LR"~(Give the group back the right the evidence showed, Full or Change (elevated PowerShell):
+  Revoke-SmbShareAccess -Name 'ShareName' -AccountName 'Everyone' -Force
+  Grant-SmbShareAccess -Name 'ShareName' -AccountName 'Everyone' -AccessRight Full -Force
+A removed share:
+  New-SmbShare -Name 'ShareName' -Path 'C:\the\folder' -FullAccess 'Everyone')~" });
+
+    add({ L"net.smbguest", L"Guest and anonymous file sharing access", CAT_NETWORK, Severity::Medium,
+        { L"T1557", L"T1135" }, { L"4.1", L"3.3" },
+        L"Enable insecure guest logons: Disabled; Network access: Restrict anonymous access to Named Pipes and Shares: Enabled",
+        L"Insecure guest logons let this PC open another computer's shared folders without an account, as a guest. Guest "
+        L"connections cannot be signed, so a device on the network that pretends to be that file server can hand this PC "
+        L"harmful files or read what it sends, and Windows does not warn. Windows turns guest logons off by default on Server "
+        L"2019 and later and on Enterprise and Education since Windows 10 1709, and on Pro since Windows 11 24H2; Home still "
+        L"allows them. This check reads the Group Policy and the local AllowInsecureGuestAuth values and, when neither is set, "
+        L"decides from the Windows edition and build. It also looks at this PC as a file server: RestrictNullSessAccess = 0 "
+        L"lets anyone on the network connect without signing in and list shares and named pipes, and NullSessionShares names "
+        L"shares anyone may open without signing in. A NAS box that only offers guest access stops working once guest logons "
+        L"are off: give it an account instead.",
+        LR"~(Elevated PowerShell (the second line takes effect after a restart):
+  Set-SmbClientConfiguration -EnableInsecureGuestLogons $false -Force
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' -Name RestrictNullSessAccess -Value 1 -Type DWord
+If Group Policy allows guest logons, change the policy as well: Computer Configuration > Administrative Templates > Network > Lanman Workstation > Enable insecure guest logons = Disabled.
+Shares listed under NullSessionShares: remove them from that value (regedit, HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters > NullSessionShares) unless a device truly needs anonymous access.
+A NAS that only offers guest access: create an account on it and connect with that account.)~",
+        LR"~(Only what the evidence showed before the fix (elevated PowerShell):
+  Set-SmbClientConfiguration -EnableInsecureGuestLogons $true -Force
+  Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters' -Name RestrictNullSessAccess -Value 0 -Type DWord)~" });
 
     add({ L"net.rdp", L"Remote Desktop", CAT_NETWORK, Severity::Medium,
         { L"T1021.001" }, { L"4.8" }, L"Require user authentication for remote connections by using Network Level Authentication: Enabled",

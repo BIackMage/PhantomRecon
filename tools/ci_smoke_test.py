@@ -128,8 +128,11 @@ def smoke_fix_script(cli: pathlib.Path, work: pathlib.Path) -> None:
         log("output:\n" + result.stdout + result.stderr)
     expect(result.returncode in (0, 1), f"--audit --fix-script exits 0 or 1 (got {result.returncode})")
     report = load_report(audit_json)
-    problems = [f for f in report.get("findings", []) if f.get("status") in ("FAIL", "WARNING")]
-    log(f"audit: {len(problems)} FAIL or WARNING finding(s)")
+    # Unscored checks (Recent activity) report events, not a setting, so the fix plan has
+    # no step for them (BuildFixSteps in FixScript.cpp).
+    problems = [f for f in report.get("findings", [])
+                if f.get("status") in ("FAIL", "WARNING") and f.get("scored", True)]
+    log(f"audit: {len(problems)} scored FAIL or WARNING finding(s)")
 
     fix_text = check_script_file(fix, work)
     undo_text = check_script_file(undo, work)
